@@ -1,0 +1,10 @@
+# ngrok agent config — single tunnel onto the Vite dev server.
+# Vite then proxies /api (incl. /api/v1/ws/...) to the backend container,
+# so one ngrok URL covers the whole app (free-tier compatible: 1 domain).
+# Started by docker-compose's `ngrok` service via `ngrok start --all`.
+version: "2"
+
+tunnels:
+  app:
+    proto: http
+    addr: frontend:5173

@@ -1,0 +1,97 @@
+from functools import lru_cache
+from typing import Annotated, Literal
+
+from pydantic import Field, field_validator, model_validator
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
+
+
+# Default placeholder values. Production deploys must override these via env
+# vars; otherwise the app refuses to start (see `_reject_insecure_production`).
+_DEFAULT_JWT_ACCESS = "change-me-access-secret"
+_DEFAULT_JWT_REFRESH = "change-me-refresh-secret"
+
+
+class Settings(BaseSettings):
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        case_sensitive=False,
+        extra="ignore",
+    )
+
+    project_name: str = "FlexCRM API"
+    environment: Literal["local", "test", "staging", "production"] = "local"
+    api_v1_prefix: str = "/api/v1"
+    database_url: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/crm"
+    sync_database_url: str = "postgresql://postgres:postgres@localhost:5432/crm"
+    sqlalchemy_echo: bool = False
+
+    jwt_secret_key: str = Field(default=_DEFAULT_JWT_ACCESS, min_length=16)
+    jwt_refresh_secret_key: str = Field(default=_DEFAULT_JWT_REFRESH, min_length=16)
+    jwt_algorithm: str = "HS256"
+    access_token_expires_minutes: int = 15
+    refresh_token_expires_days: int = 7
+
+    redis_url: str = "redis://localhost:6379/0"
+    cache_ttl_seconds: int = 300
+    rate_limit_per_minute: int = 120
+
+    # `NoDecode` disables pydantic-settings' built-in JSON decoder for this
+    # field so the `parse_cors_origins` validator below can accept a plain
+    # comma-separated string from the environment.
+    cors_origins: Annotated[list[str], NoDecode] = [
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+    ]
+    docs_enabled: bool = True
+
+    smtp_host: str | None = None
+    smtp_port: int = 587
+    smtp_username: str | None = None
+    smtp_password: str | None = None
+    smtp_sender: str = "noreply@flexcrm.local"
+    smtp_use_tls: bool = True
+
+    websocket_ping_interval_seconds: int = 20
+    websocket_event_buffer_size: int = 200
+
+    archival_retention_days: int = 90
+
+    @field_validator("cors_origins", mode="before")
+    @classmethod
+    def parse_cors_origins(cls, value: str | list[str]) -> list[str]:
+        if isinstance(value, str):
+            return [item.strip() for item in value.split(",") if item.strip()]
+        return value
+
+    @model_validator(mode="after")
+    def _reject_insecure_production(self) -> "Settings":
+        """Fail fast if a deployed environment is missing critical config.
+
+        `staging` and `production` MUST set real JWT secrets and a non-wildcard
+        CORS list. We catch the misconfig here instead of letting the app boot
+        with placeholder values and silently issue tokens an attacker can mint.
+        `local` and `test` skip the check so dev / pytest stay frictionless.
+        """
+        if self.environment not in {"staging", "production"}:
+            return self
+
+        problems: list[str] = []
+        if self.jwt_secret_key == _DEFAULT_JWT_ACCESS:
+            problems.append("JWT_SECRET_KEY is the placeholder; set a real 32+ byte secret")
+        if self.jwt_refresh_secret_key == _DEFAULT_JWT_REFRESH:
+            problems.append("JWT_REFRESH_SECRET_KEY is the placeholder; set a real 32+ byte secret")
+        if not self.cors_origins or "*" in self.cors_origins:
+            problems.append("CORS_ORIGINS must list explicit origins (no wildcard)")
+
+        if problems:
+            raise ValueError(
+                f"Refusing to start in {self.environment} with insecure config:\n  - "
+                + "\n  - ".join(problems)
+            )
+        return self
+
+
+@lru_cache
+def get_settings() -> Settings:
+    return Settings()

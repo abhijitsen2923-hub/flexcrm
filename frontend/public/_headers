@@ -1,0 +1,24 @@
+# Cloudflare Pages headers. Each rule block matches a path glob; rules apply
+# at the edge to every response. Long cache for hashed assets, no-cache for
+# the HTML shell, and baseline security headers everywhere.
+
+# Long-cache hashed assets — Vite stamps content hashes into filenames
+# (index-abc123.js), so these are safe to cache forever. The hash changes on
+# every build, busting the cache automatically.
+/assets/*
+  Cache-Control: public, max-age=31536000, immutable
+
+# Never cache the HTML shell — it references the latest hashed asset
+# filenames, so a stale shell would point at deleted assets after a deploy.
+/index.html
+  Cache-Control: no-store
+
+/
+  Cache-Control: no-store
+
+# Security headers for every response.
+/*
+  X-Content-Type-Options: nosniff
+  X-Frame-Options: DENY
+  Referrer-Policy: strict-origin-when-cross-origin
+  Permissions-Policy: camera=(), microphone=(), geolocation=()

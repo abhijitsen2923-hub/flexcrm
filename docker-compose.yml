@@ -1,0 +1,103 @@
+# FlexCRM local stack — backend + Postgres + Redis + frontend (Vite dev server).
+
+# Project name is pinned so all derived resource names (containers, images,
+# network, volumes) use a `flexcrm-` / `flexcrm_` prefix instead of inheriting
+# the folder name. Override with `-p <name>` or `COMPOSE_PROJECT_NAME` if needed.
+name: flexcrm
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: crm
+    # Host port is configurable so a locally-installed Postgres on 5432 doesn't
+    # collide. Container-internal port stays 5432 so the backend's DATABASE_URL
+    # (`postgres:5432`) is unaffected.
+    ports:
+      - "${POSTGRES_HOST_PORT:-5433}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d crm"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "${REDIS_HOST_PORT:-6380}:6379"
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  backend:
+    build:
+      context: ./backend
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/crm
+      SYNC_DATABASE_URL: postgresql://postgres:postgres@postgres:5432/crm
+      REDIS_URL: redis://redis:6379/0
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-dev-access-secret-change-me}
+      JWT_REFRESH_SECRET_KEY: ${JWT_REFRESH_SECRET_KEY:-dev-refresh-secret-change-me}
+      ENVIRONMENT: ${ENVIRONMENT:-local}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173,http://127.0.0.1:5173}
+      DOCS_ENABLED: ${DOCS_ENABLED:-true}
+      RATE_LIMIT_PER_MINUTE: ${RATE_LIMIT_PER_MINUTE:-120}
+      CACHE_TTL_SECONDS: ${CACHE_TTL_SECONDS:-300}
+    ports:
+      - "8000:8000"
+
+  frontend:
+    build:
+      context: ./frontend
+    depends_on:
+      - backend
+    environment:
+      # The browser (on the host) reaches the backend at localhost:8000, NOT at
+      # `backend:8000` — these URLs are baked into the Vite bundle at startup
+      # and resolved from the user's browser, which is outside the Docker network.
+      VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:8000/api/v1}
+      VITE_WS_BASE_URL: ${VITE_WS_BASE_URL:-ws://localhost:8000/api/v1}
+    ports:
+      - "${FRONTEND_HOST_PORT:-5173}:5173"
+    volumes:
+      # Mount source for HMR but preserve the image's node_modules.
+      - ./frontend:/app
+      - frontend_node_modules:/app/node_modules
+
+  # Opt-in HTTPS tunnel to the backend. Not started by default — bring it up
+  # explicitly with: `docker compose --profile tunnel up -d ngrok`
+  # Use the printed `https://...ngrok-free.app` URL as `VITE_API_BASE_URL` for
+  # a deployed frontend, and add it to the backend's CORS_ORIGINS.
+  # Inspector UI: http://localhost:4040
+  ngrok:
+    image: ngrok/ngrok:latest
+    profiles: ["tunnel"]
+    depends_on:
+      backend:
+        condition: service_healthy
+    environment:
+      NGROK_AUTHTOKEN: ${NGROK_AUTHTOKEN}
+    command: ["start", "--all", "--config", "/etc/ngrok.yml", "--log=stdout"]
+    volumes:
+      - ./ngrok.yml:/etc/ngrok.yml:ro
+    ports:
+      - "4040:4040"
+
+volumes:
+  pgdata:
+  redisdata:
+  frontend_node_modules:

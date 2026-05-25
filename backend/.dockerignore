@@ -1,0 +1,45 @@
+# Python caches (regenerated; bloat the image and slow up the build context).
+**/__pycache__
+**/*.pyc
+**/*.pyo
+**/.pytest_cache
+**/.mypy_cache
+**/.ruff_cache
+
+# Virtualenvs — installed inside the image, never copied from host.
+.venv
+venv
+env
+
+# Secrets — NEVER bake real values into the image. Cloud Run reads env vars
+# from the service config; the example file is kept for documentation.
+.env
+.env.*
+!.env.example
+
+# Local databases (tests use SQLite; never ship them).
+*.sqlite
+*.db
+*.sqlite-journal
+*.db-journal
+
+# Coverage outputs.
+.coverage
+htmlcov/
+
+# Logs.
+*.log
+
+# Git metadata (irrelevant to runtime; also security — commit history shouldn't
+# leak into a deployed image).
+.git
+.gitignore
+
+# Docker meta files don't need to be copied INTO the image.
+Dockerfile
+.dockerignore
+
+# IDE / OS.
+.DS_Store
+.idea
+.vscode
