@@ -1,0 +1,12 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "flexcrm",
+  "compatibility_date": "2024-12-01",
+  // Workers with Static Assets — serves the Vite build output from ./dist.
+  // The SPA fallback replaces the Pages-only `public/_redirects` behavior:
+  // any unmatched route serves index.html so React Router can take over.
+  "assets": {
+    "directory": "./dist",
+    "not_found_handling": "single-page-application"
+  }
+}
