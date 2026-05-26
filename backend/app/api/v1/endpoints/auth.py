@@ -57,5 +57,12 @@ async def logout(
 
 
 @router.get("/profile", response_model=UserRead)
-async def profile(current_user=Depends(get_current_user)):
-    return current_user
+async def profile(
+    current_user=Depends(get_current_user),
+    session: AsyncSession = Depends(get_db_session),
+):
+    # Must compute effective permissions here too, not just on login/refresh —
+    # the SPA's session-restore on page reload calls this endpoint. Returning
+    # the bare User would leave `permissions: []` and strip every sidebar item
+    # via the `usePermissions().any(...)` filter on the frontend.
+    return await AuthService(session).load_user_with_permissions(current_user)

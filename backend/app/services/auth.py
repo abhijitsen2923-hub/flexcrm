@@ -174,16 +174,20 @@ class AuthService(ServiceBase):
             await self.refresh_token_repository.revoke(stored_token)
         await self.commit()
 
-    async def _build_token_response_async(
-        self,
-        token_response: dict,
-        user: User,
-    ) -> TokenResponse:
-        """Materialise a TokenResponse with the user's current effective permissions.
+    async def load_user_with_permissions(self, user: User) -> UserRead:
+        """Return a UserRead with the user's effective permissions populated.
+
+        Used by login/register/refresh (via `_build_token_response_async`) AND by
+        the `/auth/profile` endpoint, so the SPA's session-restore on page reload
+        sees the same permission set as the original login. Without this on the
+        profile path, `permissions` would default to `[]` and the frontend
+        sidebar / button gates lose their inputs (every nav item gets filtered out).
 
         Grants are loaded under `bypass(session)` because login/register run with
-        the org scope freshly set (or about to be) — relying on the global filter
-        is fine but bypassing avoids any ordering surprises on first login.
+        the org scope freshly set (or about to be) — bypassing avoids any
+        ordering surprises on first login. For `/profile` the tenancy filter is
+        already in place via `get_current_user`, so the bypass is a no-op there
+        but harmless.
         """
         with bypass(self.session):
             grant_codes = (
@@ -194,10 +198,17 @@ class AuthService(ServiceBase):
                 )
             ).scalars().all()
         effective = effective_permissions_for_user(user.role, grant_codes)
-
-        user_read = UserRead.model_validate(user).model_copy(
+        return UserRead.model_validate(user).model_copy(
             update={"permissions": sorted(code.value for code in effective)}
         )
+
+    async def _build_token_response_async(
+        self,
+        token_response: dict,
+        user: User,
+    ) -> TokenResponse:
+        """Materialise a TokenResponse with the user's current effective permissions."""
+        user_read = await self.load_user_with_permissions(user)
         return TokenResponse(
             access_token=token_response["access_token"],
             refresh_token=token_response["refresh_token"],
