@@ -58,7 +58,7 @@ export default function AnalyticsPage() {
         <Kpi label="Avg. probability" value={`${conversionAnalytics.average_probability}%`} />
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 2fr) minmax(0, 1fr)", gap: "1.5rem" }}>
+      <div className="chart-grid chart-grid--2-1">
         <Card title="Monthly revenue">
           {revenueAnalytics.monthly_revenue.length === 0 ? (
             <EmptyState title="No revenue data yet" />

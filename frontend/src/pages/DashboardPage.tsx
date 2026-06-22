@@ -104,15 +104,7 @@ export default function DashboardPage() {
         )}
       </div>
 
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: FEATURES.deals || FEATURES.finance
-            ? "minmax(0, 2fr) minmax(0, 1fr)"
-            : "minmax(0, 1fr)",
-          gap: "1.5rem"
-        }}
-      >
+      <div className={FEATURES.deals || FEATURES.finance ? "chart-grid chart-grid--2-1" : "chart-grid"}>
         {(FEATURES.deals || FEATURES.finance) && (
           <Card title="Revenue trend" subtitle="Closed-won monthly totals">
             {charts.revenue_trend.length === 0 ? (
@@ -160,15 +152,7 @@ export default function DashboardPage() {
       </div>
 
       {(FEATURES.tasks || FEATURES.activities) && (
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: FEATURES.tasks && FEATURES.activities
-              ? "minmax(0, 1fr) minmax(0, 1fr)"
-              : "minmax(0, 1fr)",
-            gap: "1.5rem"
-          }}
-        >
+        <div className={FEATURES.tasks && FEATURES.activities ? "chart-grid chart-grid--1-1" : "chart-grid"}>
           {FEATURES.tasks && (
             <Card title="Task status">
               {charts.task_status_breakdown.length === 0 ? (

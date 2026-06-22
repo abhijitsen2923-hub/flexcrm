@@ -40,7 +40,7 @@ export function DataTable<T>({ columns, rows, rowKey, empty }: DataTableProps<T>
         {rows.map((row) => (
           <tr key={rowKey(row)}>
             {columns.map((column) => (
-              <td key={column.key} style={{ textAlign: column.align ?? "left" }}>
+              <td key={column.key} data-label={column.key} style={{ textAlign: column.align ?? "left" }}>
                 {column.render(row)}
               </td>
             ))}

@@ -1,4 +1,4 @@
-import { LogOut } from "lucide-react";
+import { LogOut, Menu } from "lucide-react";
 import { useLocation } from "react-router-dom";
 
 import { useAuth } from "../../hooks/useAuth";
@@ -44,7 +44,12 @@ function ConnectionPill() {
 }
 
 
-export function Topbar() {
+interface TopbarProps {
+  onMenuClick: () => void;
+}
+
+
+export function Topbar({ onMenuClick }: TopbarProps) {
   const { user, logout } = useAuth();
   const location = useLocation();
   const title = PAGE_TITLES[location.pathname] ?? "FlexCRM";
@@ -55,6 +60,9 @@ export function Topbar() {
 
   return (
     <header className="topbar">
+      <button className="topbar__menu" onClick={onMenuClick} aria-label="Open menu">
+        <Menu size={20} />
+      </button>
       <div className="topbar__title">{title}</div>
       <div className="topbar__actions">
         <ConnectionPill />

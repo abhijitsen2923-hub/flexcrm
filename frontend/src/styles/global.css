@@ -139,11 +139,6 @@ p {
   gap: var(--space-6);
 }
 
-@media (max-width: 768px) {
-  .app-content {
-    padding: var(--space-4);
-  }
-}
 
 .page-header {
   display: flex;
@@ -1006,3 +1001,144 @@ p {
 .stage-select--danger   { background-color: var(--color-danger-soft);  color: var(--color-danger);  border-color: var(--color-danger-soft);  }
 .stage-select--info     { background-color: var(--color-info-soft);    color: var(--color-info);    border-color: var(--color-info-soft);    }
 .stage-select--neutral  { background-color: #f3f4f6; color: var(--color-text-muted); border-color: #e5e7eb; }
+
+/* ============================================================ Responsive */
+
+/* --- Helper classes (always on, media-query-controlled visibility) ------- */
+
+.topbar__menu {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--color-text-muted);
+  padding: 0.4rem;
+  border-radius: var(--radius-sm);
+  flex-shrink: 0;
+}
+.topbar__menu:hover { color: var(--color-text); background: var(--color-surface-hover, #f3f4f6); }
+
+.sidebar__close {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: #94a3b8;
+  padding: 0.25rem;
+  border-radius: var(--radius-sm);
+  margin-left: auto;
+}
+.sidebar__close:hover { color: #ffffff; }
+
+.sidebar-backdrop {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  z-index: 39;
+}
+.sidebar-backdrop.is-visible { display: block; }
+
+/* Chart grid — replaces inline grid styles in Dashboard / Analytics */
+.chart-grid        { display: grid; gap: 1.5rem; }
+.chart-grid--2-1   { grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); }
+.chart-grid--1-1   { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+
+/* --- Tablet + phone: ≤1023px -------------------------------------------- */
+@media (max-width: 1023px) {
+  /* Show hamburger and sidebar close button */
+  .topbar__menu  { display: flex; }
+  .sidebar__close { display: flex; }
+
+  /* Off-canvas drawer */
+  .sidebar {
+    position: fixed;
+    left: 0;
+    top: 0;
+    height: 100%;
+    z-index: 40;
+    transform: translateX(-100%);
+    transition: transform 200ms ease;
+  }
+  .sidebar.is-open { transform: translateX(0); }
+
+  /* Chart rows stack to single column */
+  .chart-grid--2-1,
+  .chart-grid--1-1 { grid-template-columns: 1fr; }
+
+  /* Restore padding (was only in the removed 768px block) */
+  .app-content { padding: var(--space-4) var(--space-5); }
+}
+
+/* --- Phone only: <640px -------------------------------------------------- */
+@media (max-width: 639px) {
+  .app-content { padding: var(--space-4); }
+
+  /* Page header stacks vertically */
+  .page-header {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .page-header__actions { flex-wrap: wrap; }
+
+  /* KPI grid: 2-up on narrow screens (auto-fill 200px would overflow 375px) */
+  .kpi-grid { grid-template-columns: 1fr 1fr; }
+
+  /* Topbar: hide user name/role, keep avatar */
+  .user-meta { display: none; }
+
+  /* Detail rows (lead drawer): stack label over value */
+  .detail-row { grid-template-columns: 1fr; gap: 0.2rem; }
+
+  /* Lead drawer: full-screen */
+  .drawer { width: 100%; }
+
+  /* Modals slide up from bottom */
+  .modal-backdrop {
+    align-items: flex-end;
+    padding: 0;
+  }
+  .modal {
+    border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+    max-height: 92vh;
+    max-width: 100%;
+  }
+
+  /* Data tables → stacked cards */
+  .table thead { display: none; }
+  .table,
+  .table tbody,
+  .table tr,
+  .table td { display: block; width: 100%; box-sizing: border-box; }
+  .table tr {
+    background: var(--color-surface);
+    border-radius: var(--radius-md);
+    border: 1px solid var(--color-border);
+    margin-bottom: var(--space-3);
+    padding: var(--space-3);
+    box-shadow: var(--shadow-sm);
+  }
+  .table td {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: var(--space-2);
+    padding: var(--space-1) 0;
+    border: none;
+    text-align: left !important;
+  }
+  .table td::before {
+    content: attr(data-label);
+    font-weight: 600;
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--color-text-muted);
+    flex-shrink: 0;
+    margin-right: var(--space-2);
+  }
+}

@@ -9,6 +9,7 @@ import {
   Sparkles,
   UserRound,
   Users,
+  X,
   type LucideIcon
 } from "lucide-react";
 import { NavLink } from "react-router-dom";
@@ -46,16 +47,25 @@ const NAV: ReadonlyArray<NavItem> = [
 ];
 
 
-export function Sidebar() {
+interface SidebarProps {
+  open: boolean;
+  onClose: () => void;
+}
+
+
+export function Sidebar({ open, onClose }: SidebarProps) {
   const { any } = usePermissions();
   const visible = NAV.filter(
     (item) => (item.feature === undefined || FEATURES[item.feature]) && any(item.requires),
   );
   return (
-    <aside className="sidebar">
+    <aside className={["sidebar", open ? "is-open" : null].filter(Boolean).join(" ")}>
       <div className="sidebar__brand">
         <Sparkles size={20} />
         FlexCRM
+        <button className="sidebar__close" onClick={onClose} aria-label="Close menu">
+          <X size={18} />
+        </button>
       </div>
       <nav className="sidebar__nav">
         {visible.map((item) => (
@@ -66,6 +76,7 @@ export function Sidebar() {
             className={({ isActive }) =>
               ["sidebar__link", isActive ? "is-active" : null].filter(Boolean).join(" ")
             }
+            onClick={onClose}
           >
             <item.icon size={16} />
             {item.label}
