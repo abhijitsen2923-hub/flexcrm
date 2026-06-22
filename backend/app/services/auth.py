@@ -87,6 +87,7 @@ class AuthService(ServiceBase):
                 user.id,
                 user.role.value,
                 organization_id=organization.id,
+                is_platform_admin=False,
                 user_agent=user_agent,
                 ip_address=ip_address,
             )
@@ -121,6 +122,7 @@ class AuthService(ServiceBase):
                 user.id,
                 user.role.value,
                 organization_id=user.organization_id,
+                is_platform_admin=user.is_platform_admin,
                 user_agent=user_agent,
                 ip_address=ip_address,
             )
@@ -154,6 +156,7 @@ class AuthService(ServiceBase):
                 user.id,
                 user.role.value,
                 organization_id=user.organization_id,
+                is_platform_admin=user.is_platform_admin,
                 user_agent=user_agent,
                 ip_address=ip_address,
             )
@@ -223,11 +226,15 @@ class AuthService(ServiceBase):
         role: str,
         *,
         organization_id: UUID | None = None,
+        is_platform_admin: bool = False,
         user_agent: str | None = None,
         ip_address: str | None = None,
     ) -> dict[str, str | datetime]:
         access_token, access_expires_at = create_access_token(
-            str(user_id), role=role, organization_id=str(organization_id) if organization_id else None
+            str(user_id),
+            role=role,
+            organization_id=str(organization_id) if organization_id else None,
+            is_platform_admin=is_platform_admin,
         )
         refresh_token, refresh_expires_at = create_refresh_token(str(user_id))
         refresh_payload = decode_token(refresh_token, refresh=True)

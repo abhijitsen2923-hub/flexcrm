@@ -24,7 +24,8 @@ import {
   LoadingBlock,
   useToast
 } from "../components";
-import { FEATURES } from "../config/features";
+import { mergeModules } from "../config/features";
+import { useOrgModules } from "../context/OrgContext";
 import { useDashboard } from "../hooks/useDashboard";
 import { useRealtimeEvent } from "../realtime";
 import { formatCurrency, formatNumber, formatRelative } from "../utils/format";
@@ -34,6 +35,7 @@ const PIE_COLORS = ["#2563eb", "#0ea5e9", "#16a34a", "#d97706", "#dc2626", "#7c3
 
 
 export default function DashboardPage() {
+  const FEATURES = mergeModules(useOrgModules());
   const dashboard = useDashboard();
   const toast = useToast();
 

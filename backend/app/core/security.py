@@ -49,7 +49,13 @@ def _build_token(
     return jwt.encode(payload, secret, algorithm=settings.jwt_algorithm)
 
 
-def create_access_token(subject: str, *, role: str, organization_id: str | None = None) -> tuple[str, datetime]:
+def create_access_token(
+    subject: str,
+    *,
+    role: str,
+    organization_id: str | None = None,
+    is_platform_admin: bool = False,
+) -> tuple[str, datetime]:
     settings = get_settings()
     expires_delta = timedelta(minutes=settings.access_token_expires_minutes)
     expires_at = datetime.now(UTC) + expires_delta
@@ -58,6 +64,8 @@ def create_access_token(subject: str, *, role: str, organization_id: str | None 
     # DB lookup (the User row already carries it, but the JWT path is hot).
     if organization_id is not None:
         extra["org"] = organization_id
+    if is_platform_admin:
+        extra["is_platform_admin"] = True
     token = _build_token(
         subject=subject,
         token_type="access",

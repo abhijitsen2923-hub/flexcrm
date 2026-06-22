@@ -45,6 +45,12 @@ class Settings(BaseSettings):
     ]
     docs_enabled: bool = True
 
+    # --- Platform admin bootstrap (optional) ---
+    # Set these once to have the app create/promote a platform admin on startup.
+    # Idempotent — safe to leave set after the first run.
+    platform_admin_email: str | None = None
+    platform_admin_password: str | None = None
+
     smtp_host: str | None = None
     smtp_port: int = 587
     smtp_username: str | None = None

@@ -1,0 +1,71 @@
+"""Bootstrap a platform admin user from environment variables.
+
+Called once in the FastAPI lifespan. Idempotent:
+- If PLATFORM_ADMIN_EMAIL / PLATFORM_ADMIN_PASSWORD are not set → no-op.
+- If the email already belongs to a platform admin → no-op (silent).
+- If the email belongs to a normal user → promote them (set is_platform_admin=True).
+- If the email doesn't exist → create a dedicated "FlexCRM Platform" org + owner user.
+"""
+import logging
+
+from app.core.config import get_settings
+from app.core.security import hash_password
+from app.core.tenancy import bypass
+from app.database.enums import LeadIndustry, UserRole, UserStatus
+from app.database.session import db_manager
+from app.models.organization import Organization
+from app.models.user import User
+from app.repositories.users import UserRepository
+
+
+logger = logging.getLogger(__name__)
+
+
+async def ensure_platform_admin() -> None:
+    settings = get_settings()
+    email = settings.platform_admin_email
+    password = settings.platform_admin_password
+
+    if not email or not password:
+        return
+
+    async with db_manager.session_factory() as session:
+        with bypass(session):
+            user = await UserRepository(session).get_by_email(email)
+
+            if user is not None:
+                if user.is_platform_admin:
+                    return   # already configured — silent no-op
+                user.is_platform_admin = True
+                await session.commit()
+                logger.info("platform_admin: promoted existing user <%s>", email)
+                return
+
+            # No user found — create a dedicated org + admin user.
+            org = Organization(
+                name="FlexCRM Platform",
+                business_type=LeadIndustry.education,
+                plan="platform",
+            )
+            session.add(org)
+            await session.flush()   # populate org.id
+
+            admin = User(
+                first_name="Platform",
+                last_name="Admin",
+                email=email,
+                password_hash=hash_password(password),
+                role=UserRole.owner,
+                status=UserStatus.active,
+                organization_id=org.id,
+                is_platform_admin=True,
+            )
+            session.add(admin)
+            await session.flush()   # populate admin.id
+
+            # Mirror audit FK now that we have both IDs.
+            org.created_by_id = admin.id
+            org.updated_by_id = admin.id
+
+            await session.commit()
+            logger.info("platform_admin: created new platform admin user <%s>", email)

@@ -1,4 +1,4 @@
-from sqlalchemy import Enum, Index, String, text
+from sqlalchemy import Boolean, Enum, Index, String, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.tenancy import OrgScopedMixin
@@ -29,6 +29,10 @@ class User(Base, UUIDPrimaryKeyMixin, TimestampMixin, AuditMixin, SoftDeleteMixi
         nullable=False,
         default=UserStatus.active,
     )
+    is_platform_admin: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
+
     # DEPRECATED in Phase 7 — business_type now lives on the Organization.
     # Kept here for backward compat with existing rows; new code should read
     # `user.organization.business_type` instead.

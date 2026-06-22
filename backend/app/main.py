@@ -8,6 +8,7 @@ from app.core.cache import cache_client
 from app.core.config import get_settings
 from app.core.exceptions import register_exception_handlers
 from app.core.logging import configure_logging
+from app.core.platform_admin import ensure_platform_admin
 from app.core.tenancy import register_listeners as register_tenancy_listeners
 from app.database.session import db_manager
 from app.middleware import RateLimitMiddleware, RequestContextMiddleware
@@ -28,6 +29,7 @@ register_tenancy_listeners()
 async def lifespan(_: FastAPI):
     db_manager.configure()
     await cache_client.connect()
+    await ensure_platform_admin()
     try:
         yield
     finally:

@@ -40,6 +40,13 @@ async def get_current_user(
     # case an older token was issued before this field existed.
     org_id_str = payload.get("org") or (str(user.organization_id) if user.organization_id else None)
     set_scope(session, UUID(org_id_str) if org_id_str else None)
+
+    # Stamp the is_platform_admin flag from the JWT onto the transient User
+    # object so endpoint code can check it without a second DB hit. The model
+    # column is the source of truth; the JWT merely caches it for the request.
+    if payload.get("is_platform_admin"):
+        user.is_platform_admin = True
+
     return user
 
 
@@ -75,6 +82,20 @@ def require_permissions(*codes: PermissionCode):
                 f"Missing permission(s): {', '.join(missing)}.",
                 extra={"missing_permissions": missing},
             )
+        return current_user
+
+    return dependency
+
+
+def require_platform_admin():
+    """Require the caller to be a platform admin (FlexCRM operator).
+
+    Platform admins bypass org tenancy entirely — their endpoints are protected
+    by this dependency, NOT by org-level permissions.
+    """
+    async def dependency(current_user=Depends(get_current_user)):
+        if not current_user.is_platform_admin:
+            raise AuthorizationError("Platform admin access required.")
         return current_user
 
     return dependency

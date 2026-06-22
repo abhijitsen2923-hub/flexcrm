@@ -16,6 +16,7 @@ class UserSummary(ORMModel):
     status: UserStatus
     business_type: LeadIndustry | None = None
     organization_id: UUID | None = None
+    is_platform_admin: bool = False
     # Effective permissions for this user (role defaults ∪ explicit grants,
     # alias-expanded). Empty on list endpoints — populated only on `/me`,
     # login, and refresh where the caller is identifying themselves.

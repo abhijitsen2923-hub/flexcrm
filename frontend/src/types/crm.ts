@@ -60,6 +60,9 @@ export type TaskPriority = "low" | "medium" | "high" | "urgent";
 export type TaskStatus = "pending" | "in_progress" | "completed" | "cancelled";
 export type ActivityType = "note" | "call" | "email" | "meeting" | "task" | "status_change";
 
+export type ModuleKey = "deals" | "tasks" | "activities" | "finance" | "hr";
+export const MODULE_KEYS: ModuleKey[] = ["deals", "tasks", "activities", "finance", "hr"];
+
 export interface UserSummary {
   id: string;
   first_name: string;
@@ -69,6 +72,7 @@ export interface UserSummary {
   status: UserStatus;
   business_type: LeadIndustry | null;
   organization_id: string | null;
+  is_platform_admin: boolean;
   // Phase 8 — effective permissions (role defaults ∪ explicit grants).
   // Populated on /me, login, refresh. Empty array on list-endpoint payloads.
   permissions: string[];
@@ -96,6 +100,7 @@ export interface Organization {
   plan: string;
   features: Record<string, unknown> | null;
   allowed_currencies: string[];
+  modules: Record<ModuleKey, boolean>;
   created_at: string;
   updated_at: string;
 }

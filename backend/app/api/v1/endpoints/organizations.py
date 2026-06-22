@@ -8,14 +8,14 @@ from app.core.exceptions import NotFoundError
 from app.core.permissions import PermissionCode
 from app.database.session import get_db_session
 from app.models.organization import Organization
-from app.schemas.organization import OrganizationRead, OrganizationUpdate
+from app.schemas.organization import OrganizationRead, OrganizationUpdate, get_modules
 
 
 router = APIRouter()
 
 
 def _to_read(org: Organization) -> OrganizationRead:
-    """Build the read schema with `allowed_currencies` computed at response time."""
+    """Build the read schema with computed fields."""
     return OrganizationRead(
         id=org.id,
         name=org.name,
@@ -23,6 +23,7 @@ def _to_read(org: Organization) -> OrganizationRead:
         plan=org.plan,
         features=org.features,
         allowed_currencies=allowed_currencies_for_org(org),
+        modules=get_modules(org.features),
         created_at=org.created_at,
         updated_at=org.updated_at,
     )
