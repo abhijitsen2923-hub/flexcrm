@@ -11,7 +11,7 @@ export const pipelinesService = {
 
 
 export function groupStagesByIndustry(stages: PipelineStage[]): Record<LeadIndustry, PipelineStage[]> {
-  const result: Record<LeadIndustry, PipelineStage[]> = { education: [], travel: [] };
+  const result: Record<LeadIndustry, PipelineStage[]> = { education: [], travel: [], real_estate: [] };
   for (const stage of stages) {
     result[stage.industry].push(stage);
   }

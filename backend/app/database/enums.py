@@ -21,6 +21,15 @@ class UserRole(StrEnum):
     ops_manager = "ops_manager"
     travel_agent = "travel_agent"
     visa_coordinator = "visa_coordinator"
+    # Real-estate-only
+    sales_manager = "sales_manager"
+    sales_executive = "sales_executive"
+    telecaller = "telecaller"
+    accounts = "accounts"
+    crm_team = "crm_team"
+    # External-portal roles (real estate)
+    broker = "broker"      # channel partner
+    customer = "customer"  # buyer portal
     # Legacy — retained for migration backfill; not assignable post-0010.
     admin = "admin"
     manager = "manager"
@@ -92,6 +101,26 @@ class ReferralStatus(StrEnum):
 class LeadIndustry(StrEnum):
     education = "education"
     travel = "travel"
+    real_estate = "real_estate"
+
+
+class UnitStatus(StrEnum):
+    available = "available"
+    reserved = "reserved"
+    booked = "booked"
+    sold = "sold"
+
+
+class BookingStatus(StrEnum):
+    draft = "draft"
+    confirmed = "confirmed"
+    cancelled = "cancelled"
+
+
+class SiteVisitFeedback(StrEnum):
+    hot = "hot"
+    warm = "warm"
+    cold = "cold"
 
 
 class PipelineStageCategory(StrEnum):

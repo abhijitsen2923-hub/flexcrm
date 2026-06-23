@@ -66,7 +66,6 @@ class SalesOrder(TenantBase, UUIDPrimaryKeyMixin, TimestampMixin, TenantAuditMix
 
     customer = relationship("Customer")
     lead = relationship("Lead")
-    primary_owner = relationship("User", foreign_keys=[primary_owner_id])
     assists = relationship(
         "SalesOrderAssist",
         back_populates="sales_order",
@@ -103,7 +102,6 @@ class SalesOrderAssist(TenantBase, UUIDPrimaryKeyMixin):
     reason: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     sales_order = relationship("SalesOrder", back_populates="assists")
-    user = relationship("User")
 
 
 class Invoice(TenantBase, UUIDPrimaryKeyMixin, TimestampMixin, TenantAuditMixin, TenantSoftDeleteMixin):
@@ -195,7 +193,6 @@ class CommissionLedger(TenantBase, UUIDPrimaryKeyMixin):
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
 
-    user = relationship("User")
     sales_order = relationship("SalesOrder")
 
 

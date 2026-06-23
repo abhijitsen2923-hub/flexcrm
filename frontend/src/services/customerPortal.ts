@@ -36,7 +36,7 @@ export interface CreateServiceRequestPayload {
 
 export interface SubmitReferralPayload {
   contact_name: string;
-  contact_phone: string;
+  contact_phone?: string;
   contact_email?: string;
   preferred_location?: string;
   notes?: string;

@@ -25,6 +25,8 @@ from app.database.base import TenantBase
 import app.models  # noqa: F401
 import app.finance.models  # noqa: F401
 import app.hr.models  # noqa: F401
+import app.real_estate.models  # noqa: F401
+import app.customer_portal.models  # noqa: F401
 
 
 config = context.config

@@ -52,7 +52,23 @@ TRAVEL_STAGES: list[PipelineStageSeed] = [
 ]
 
 
-ALL_STAGES: list[PipelineStageSeed] = [*EDUCATION_STAGES, *TRAVEL_STAGES]
+REAL_ESTATE_STAGES: list[PipelineStageSeed] = [
+    ("real_estate", 1,  "new_enquiry",        "New Enquiry",          "active",      False),
+    ("real_estate", 2,  "prospect",            "Prospect",             "active",      True),
+    ("real_estate", 3,  "site_visit_scheduled","Site Visit Scheduled", "active",      True),
+    ("real_estate", 4,  "site_visit_done",     "Site Visit Done",      "active",      True),
+    ("real_estate", 5,  "negotiation",         "Negotiation",          "active",      True),
+    ("real_estate", 6,  "booking_initiated",   "Booking Initiated",    "active",      True),
+    ("real_estate", 7,  "token_collected",     "Token Collected",      "active",      True),
+    ("real_estate", 8,  "agreement_signed",    "Agreement Signed",     "active",      True),
+    ("real_estate", 9,  "loan_processing",     "Loan Processing",      "active",      True),
+    ("real_estate", 10, "registration",        "Registration",         "active",      True),
+    ("real_estate", 11, "sold",                "Sold",                 "closed_won",  True),
+    ("real_estate", 12, "lost",                "Lost",                 "closed_lost", True),
+]
+
+
+ALL_STAGES: list[PipelineStageSeed] = [*EDUCATION_STAGES, *TRAVEL_STAGES, *REAL_ESTATE_STAGES]
 
 
 def as_dicts() -> list[dict]:

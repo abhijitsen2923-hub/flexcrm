@@ -37,5 +37,3 @@ class UserPermissionGrant(TenantBase, UUIDPrimaryKeyMixin, TimestampMixin):
         nullable=True,
     )
 
-    user = relationship("User", foreign_keys=[user_id], back_populates="permission_grants")
-    granted_by = relationship("User", foreign_keys=[granted_by_id])

@@ -188,9 +188,7 @@ export function SiteVisitCalendar({ visits, onSchedule, onUpdateFeedback }: Prop
                   </span>
                   <span className="sv-event__lead">Lead {v.leadId.slice(0, 6)}</span>
                   {v.feedback && (
-                    <Badge tone={FEEDBACK_TONE[v.feedback]} style={{ fontSize: "0.65rem" }}>
-                      {FEEDBACK_LABELS[v.feedback]}
-                    </Badge>
+                    <Badge tone={FEEDBACK_TONE[v.feedback]}>{FEEDBACK_LABELS[v.feedback]}</Badge>
                   )}
                 </button>
               ))}

@@ -37,4 +37,3 @@ class Task(TenantBase, UUIDPrimaryKeyMixin, TimestampMixin, TenantAuditMixin, Te
         default=TaskStatus.pending,
     )
 
-    assigned_to = relationship("User", back_populates="assigned_tasks", foreign_keys=[assigned_to_id])

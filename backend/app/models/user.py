@@ -58,13 +58,4 @@ class User(Base, UUIDPrimaryKeyMixin, TimestampMixin, AuditMixin, SoftDeleteMixi
         foreign_keys=[organization_id],
     )
 
-    assigned_leads = relationship("Lead", back_populates="assigned_to", foreign_keys="Lead.assigned_to_id")
-    assigned_tasks = relationship("Task", back_populates="assigned_to", foreign_keys="Task.assigned_to_id")
-    notifications = relationship("Notification", back_populates="user", foreign_keys="Notification.user_id")
     refresh_tokens = relationship("RefreshToken", back_populates="user", cascade="all, delete-orphan")
-    permission_grants = relationship(
-        "UserPermissionGrant",
-        back_populates="user",
-        foreign_keys="UserPermissionGrant.user_id",
-        cascade="all, delete-orphan",
-    )

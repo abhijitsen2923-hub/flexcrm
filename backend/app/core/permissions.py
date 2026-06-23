@@ -83,6 +83,14 @@ ROLE_INDUSTRIES: dict[UserRole, frozenset[LeadIndustry | None]] = {
     UserRole.ops_manager: frozenset({LeadIndustry.travel}),
     UserRole.travel_agent: frozenset({LeadIndustry.travel}),
     UserRole.visa_coordinator: frozenset({LeadIndustry.travel}),
+    # Real estate
+    UserRole.sales_manager: frozenset({LeadIndustry.real_estate}),
+    UserRole.sales_executive: frozenset({LeadIndustry.real_estate}),
+    UserRole.telecaller: frozenset({LeadIndustry.real_estate}),
+    UserRole.accounts: frozenset({LeadIndustry.real_estate}),
+    UserRole.crm_team: frozenset({LeadIndustry.real_estate}),
+    UserRole.broker: frozenset({LeadIndustry.real_estate}),
+    UserRole.customer: frozenset({LeadIndustry.real_estate}),
 }
 
 
@@ -192,6 +200,48 @@ ROLE_PERMISSION_DEFAULTS: dict[UserRole, tuple[PermissionCode, ...]] = {
         PermissionCode.EXPORT_DATA,
     ),
 
+    # Real estate roles
+    UserRole.sales_manager: tuple(
+        code for code in _ALL_PERMISSIONS
+        if code not in {PermissionCode.USER_MANAGE, PermissionCode.ORG_MANAGE}
+    ),
+    UserRole.sales_executive: (
+        PermissionCode.DASHBOARD_VIEW,
+        PermissionCode.LEAD_VIEW, PermissionCode.LEAD_MANAGE, PermissionCode.LEAD_IMPORT,
+        PermissionCode.CUSTOMER_VIEW, PermissionCode.CUSTOMER_MANAGE,
+        PermissionCode.TASK_VIEW, PermissionCode.TASK_MANAGE,
+        PermissionCode.ACTIVITY_VIEW, PermissionCode.ACTIVITY_MANAGE,
+        PermissionCode.FINANCE_VIEW,
+    ),
+    UserRole.telecaller: (
+        PermissionCode.DASHBOARD_VIEW,
+        PermissionCode.LEAD_VIEW, PermissionCode.LEAD_MANAGE,
+        PermissionCode.CUSTOMER_VIEW,
+        PermissionCode.TASK_VIEW, PermissionCode.TASK_MANAGE,
+        PermissionCode.ACTIVITY_VIEW, PermissionCode.ACTIVITY_MANAGE,
+    ),
+    UserRole.accounts: (
+        PermissionCode.DASHBOARD_VIEW,
+        PermissionCode.CUSTOMER_VIEW,
+        PermissionCode.FINANCE_VIEW, PermissionCode.FINANCE_RECORD_PAYMENT, PermissionCode.FINANCE_REFUND,
+        PermissionCode.REPORTS_VIEW,
+        PermissionCode.EXPORT_DATA,
+    ),
+    UserRole.crm_team: (
+        PermissionCode.DASHBOARD_VIEW,
+        PermissionCode.LEAD_VIEW, PermissionCode.LEAD_MANAGE,
+        PermissionCode.CUSTOMER_VIEW, PermissionCode.CUSTOMER_MANAGE,
+        PermissionCode.TASK_VIEW, PermissionCode.TASK_MANAGE,
+        PermissionCode.ACTIVITY_VIEW, PermissionCode.ACTIVITY_MANAGE,
+    ),
+    UserRole.broker: (
+        PermissionCode.DASHBOARD_VIEW,
+        PermissionCode.LEAD_VIEW, PermissionCode.LEAD_MANAGE,
+        PermissionCode.CUSTOMER_VIEW,
+    ),
+    UserRole.customer: (
+        PermissionCode.DASHBOARD_VIEW,
+    ),
     # Legacy — defaults to empty so a legacy row only retains permissions the
     # backfill should have already remapped away from.
     UserRole.admin: _ALL_PERMISSIONS,  # treat unmigrated rows as owners

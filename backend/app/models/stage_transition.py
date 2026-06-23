@@ -38,4 +38,3 @@ class StageTransition(TenantBase, UUIDPrimaryKeyMixin):
     mentions: Mapped[list | None] = mapped_column(JSON, nullable=True)
 
     lead = relationship("Lead", back_populates="stage_transitions")
-    performed_by = relationship("User", foreign_keys=[performed_by_id])

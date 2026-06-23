@@ -1,0 +1,181 @@
+"""Real estate domain models — per-tenant schema."""
+from datetime import date, datetime
+from decimal import Decimal
+from uuid import UUID
+
+from sqlalchemy import (
+    Boolean,
+    Date,
+    DateTime,
+    Enum,
+    ForeignKey,
+    Index,
+    Integer,
+    JSON,
+    Numeric,
+    String,
+    Text,
+    Uuid,
+    func,
+)
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+from app.database.base import TenantBase
+from app.database.enums import BookingStatus, SiteVisitFeedback, UnitStatus
+from app.models.base import TenantAuditMixin, TenantSoftDeleteMixin, TimestampMixin, UUIDPrimaryKeyMixin
+
+
+class Project(TenantBase, UUIDPrimaryKeyMixin, TimestampMixin, TenantAuditMixin):
+    __tablename__ = "projects"
+    __table_args__ = ({"schema": "tenant"},)
+
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    builder_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    location: Mapped[str] = mapped_column(String(255), nullable=False)
+    city: Mapped[str] = mapped_column(String(100), nullable=False)
+    rera_number: Mapped[str | None] = mapped_column(String(64), nullable=True)
+
+    towers: Mapped[list["Tower"]] = relationship(
+        "Tower", back_populates="project", cascade="all, delete-orphan"
+    )
+
+
+class Tower(TenantBase, UUIDPrimaryKeyMixin, TimestampMixin):
+    __tablename__ = "towers"
+    __table_args__ = ({"schema": "tenant"},)
+
+    project_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    name: Mapped[str] = mapped_column(String(100), nullable=False)
+    total_floors: Mapped[int] = mapped_column(Integer, nullable=False)
+
+    project: Mapped["Project"] = relationship("Project", back_populates="towers")
+    units: Mapped[list["Unit"]] = relationship(
+        "Unit", back_populates="tower", cascade="all, delete-orphan"
+    )
+
+
+class Unit(TenantBase, UUIDPrimaryKeyMixin, TimestampMixin):
+    __tablename__ = "units"
+    __table_args__ = (
+        Index("ix_units_project_status", "project_id", "status"),
+        Index("ix_units_tower_floor", "tower_id", "floor"),
+        {"schema": "tenant"},
+    )
+
+    project_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    tower_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("towers.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    floor: Mapped[int] = mapped_column(Integer, nullable=False)
+    unit_number: Mapped[str] = mapped_column(String(20), nullable=False)
+    area: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False)
+    area_unit: Mapped[str] = mapped_column(String(20), nullable=False, default="sqft")
+    facing: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    view: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    base_price: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    status: Mapped[UnitStatus] = mapped_column(
+        Enum(UnitStatus, name="unit_status_enum"),
+        nullable=False,
+        default=UnitStatus.available,
+    )
+
+    tower: Mapped["Tower"] = relationship("Tower", back_populates="units")
+    bookings: Mapped[list["Booking"]] = relationship("Booking", back_populates="unit")
+
+
+class SiteVisit(TenantBase, UUIDPrimaryKeyMixin, TimestampMixin, TenantAuditMixin):
+    __tablename__ = "site_visits"
+    __table_args__ = (
+        Index("ix_site_visits_project_scheduled", "project_id", "scheduled_at"),
+        {"schema": "tenant"},
+    )
+
+    lead_id: Mapped[UUID | None] = mapped_column(
+        Uuid, ForeignKey("leads.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    project_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    scheduled_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    assigned_to_id: Mapped[UUID | None] = mapped_column(
+        Uuid, ForeignKey("public.users.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    feedback: Mapped[SiteVisitFeedback | None] = mapped_column(
+        Enum(SiteVisitFeedback, name="site_visit_feedback_enum"), nullable=True
+    )
+    attended: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    project: Mapped["Project"] = relationship("Project")
+
+
+class Booking(TenantBase, UUIDPrimaryKeyMixin, TimestampMixin, TenantAuditMixin, TenantSoftDeleteMixin):
+    __tablename__ = "bookings"
+    __table_args__ = (
+        Index("ix_bookings_unit", "unit_id"),
+        Index("ix_bookings_customer", "customer_id"),
+        {"schema": "tenant"},
+    )
+
+    unit_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("units.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    lead_id: Mapped[UUID | None] = mapped_column(
+        Uuid, ForeignKey("leads.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    customer_id: Mapped[UUID | None] = mapped_column(
+        Uuid, ForeignKey("customers.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    step: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    status: Mapped[BookingStatus] = mapped_column(
+        Enum(BookingStatus, name="booking_status_enum"),
+        nullable=False,
+        default=BookingStatus.draft,
+    )
+    pricing_snapshot: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    scheduled_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+
+    unit: Mapped["Unit"] = relationship("Unit", back_populates="bookings")
+    kyc_documents: Mapped[list["BookingKycDoc"]] = relationship(
+        "BookingKycDoc", back_populates="booking", cascade="all, delete-orphan"
+    )
+    payment_schedules: Mapped[list["PaymentSchedule"]] = relationship(
+        "PaymentSchedule", back_populates="booking", cascade="all, delete-orphan"
+    )
+
+
+class BookingKycDoc(TenantBase, UUIDPrimaryKeyMixin, TimestampMixin):
+    __tablename__ = "booking_kyc_docs"
+    __table_args__ = ({"schema": "tenant"},)
+
+    booking_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("bookings.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    doc_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    file_path: Mapped[str | None] = mapped_column(String(512), nullable=True)
+
+    booking: Mapped["Booking"] = relationship("Booking", back_populates="kyc_documents")
+
+
+class PaymentSchedule(TenantBase, UUIDPrimaryKeyMixin, TimestampMixin):
+    __tablename__ = "payment_schedules"
+    __table_args__ = (
+        Index("ix_payment_schedules_booking_due_date", "booking_id", "due_date"),
+        {"schema": "tenant"},
+    )
+
+    booking_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("bookings.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    installment_name: Mapped[str] = mapped_column(String(120), nullable=False)
+    due_date: Mapped[date] = mapped_column(Date, nullable=False)
+    demand_amount: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    paid_amount: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False, default=0)
+    outstanding: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False, default=0)
+    is_overdue: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+    booking: Mapped["Booking"] = relationship("Booking", back_populates="payment_schedules")

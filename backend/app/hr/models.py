@@ -55,8 +55,6 @@ class EmployeeProfile(TenantBase, UUIDPrimaryKeyMixin, TimestampMixin):
     )
     score_weights: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
-    user = relationship("User", foreign_keys=[user_id])
-    manager = relationship("User", foreign_keys=[manager_id])
 
 
 class PerformanceSnapshot(TenantBase, UUIDPrimaryKeyMixin):
@@ -88,4 +86,3 @@ class PerformanceSnapshot(TenantBase, UUIDPrimaryKeyMixin):
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
 
-    user = relationship("User")

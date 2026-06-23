@@ -19,6 +19,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database.base import TenantBase
 from app.database.enums import LeadIndustry
+from app.models.user import User  # direct ref to avoid cross-registry string lookup
 from app.models.base import TenantAuditMixin, TenantSoftDeleteMixin, TimestampMixin, UUIDPrimaryKeyMixin
 
 
@@ -77,6 +78,12 @@ class Lead(TenantBase, UUIDPrimaryKeyMixin, TimestampMixin, TenantAuditMixin, Te
         index=True,
     )
     batch_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    property_type: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    budget_min: Mapped[float | None] = mapped_column(Numeric(14, 2), nullable=True)
+    budget_max: Mapped[float | None] = mapped_column(Numeric(14, 2), nullable=True)
+    preferred_location: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    possession_preference: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     customer = relationship(
         "Customer",
@@ -84,7 +91,7 @@ class Lead(TenantBase, UUIDPrimaryKeyMixin, TimestampMixin, TenantAuditMixin, Te
         foreign_keys=[customer_id],
         post_update=True,
     )
-    assigned_to = relationship("User", back_populates="assigned_leads", foreign_keys=[assigned_to_id])
+    assigned_to = relationship(User, foreign_keys=[assigned_to_id])
     stage_transitions = relationship(
         "StageTransition",
         back_populates="lead",

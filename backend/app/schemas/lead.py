@@ -37,6 +37,12 @@ class LeadCreate(ORMModel):
     source: str | None = Field(default=None, max_length=120)
     interest: str | None = Field(default=None, max_length=255)
     assigned_to_id: UUID | None = None
+    property_type: str | None = Field(default=None, max_length=64)
+    budget_min: Decimal | None = Field(default=None, ge=0)
+    budget_max: Decimal | None = Field(default=None, ge=0)
+    preferred_location: str | None = Field(default=None, max_length=255)
+    possession_preference: str | None = Field(default=None, max_length=64)
+    notes: str | None = None
 
 
 class LeadUpdate(ORMModel):
@@ -59,6 +65,12 @@ class LeadUpdate(ORMModel):
     source: str | None = Field(default=None, max_length=120)
     interest: str | None = Field(default=None, max_length=255)
     assigned_to_id: UUID | None = None
+    property_type: str | None = Field(default=None, max_length=64)
+    budget_min: Decimal | None = Field(default=None, ge=0)
+    budget_max: Decimal | None = Field(default=None, ge=0)
+    preferred_location: str | None = Field(default=None, max_length=255)
+    possession_preference: str | None = Field(default=None, max_length=64)
+    notes: str | None = None
 
 
 class LeadRead(ORMModel):
@@ -81,6 +93,12 @@ class LeadRead(ORMModel):
     last_comment_preview: str | None = None
     last_comment_at: datetime | None = None
     assigned_to_id: UUID | None = None
+    property_type: str | None = None
+    budget_min: Decimal | None = None
+    budget_max: Decimal | None = None
+    preferred_location: str | None = None
+    possession_preference: str | None = None
+    notes: str | None = None
     created_by_id: UUID | None = None
     updated_by_id: UUID | None = None
     created_at: datetime
