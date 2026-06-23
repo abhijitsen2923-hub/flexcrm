@@ -14,8 +14,9 @@ from app.core.permissions import (
 )
 from app.core.security import bearer_scheme, decode_token, get_bearer_token
 from app.core.tenancy import bypass, set_scope, set_tenant_schema
-from app.database.enums import UserStatus
+from app.database.enums import UserRole, UserStatus
 from app.database.session import get_db_session
+from app.models.custom_role import UserCustomRoleAssignment
 from app.models.organization import Organization
 from app.models.user_permission_grant import UserPermissionGrant
 from app.repositories.users import UserRepository
@@ -82,8 +83,8 @@ async def load_effective_permissions(
 ) -> frozenset[PermissionCode]:
     """Compute the user's effective permissions: role defaults ∪ explicit grants.
 
-    Grants are in the tenant schema and are automatically scoped by the
-    schema_translate_map set in get_current_user.
+    For UserRole.custom, sources base permissions from the linked CustomRole
+    template instead of ROLE_PERMISSION_DEFAULTS. Grants are tenant-scoped.
     """
     rows = (
         await session.execute(
@@ -92,6 +93,18 @@ async def load_effective_permissions(
             )
         )
     ).scalars().all()
+
+    if user.role == UserRole.custom:
+        assignment = (
+            await session.execute(
+                select(UserCustomRoleAssignment).where(
+                    UserCustomRoleAssignment.user_id == user.id
+                )
+            )
+        ).scalar_one_or_none()
+        base = assignment.custom_role.permissions if (assignment and assignment.custom_role) else []
+        return effective_permissions_for_user(UserRole.custom, rows, base_override=base)
+
     return effective_permissions_for_user(user.role, rows)
 
 

@@ -11,7 +11,7 @@ type ViewMode = "board" | "heatmap";
 
 export default function InventoryPage() {
   const { projects, loading, refresh, updateUnitStatus } = useInventory();
-  const { push } = useToast();
+  const toast = useToast();
   const navigate = useNavigate();
   const [view, setView] = useState<ViewMode>("board");
   const [filterFloor, setFilterFloor] = useState<number | null>(null);
@@ -19,9 +19,9 @@ export default function InventoryPage() {
   const handleStatusChange = async (unitId: string, status: UnitStatus) => {
     try {
       await updateUnitStatus(unitId, status);
-      push({ message: "Unit status updated", tone: "success" });
+      toast.success("Unit status updated");
     } catch {
-      push({ message: "Failed to update unit status", tone: "danger" });
+      toast.error("Failed to update unit status");
       throw new Error("status update failed");
     }
   };

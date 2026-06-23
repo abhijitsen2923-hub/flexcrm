@@ -15,10 +15,11 @@ interface DataTableProps<T> {
   rows: ReadonlyArray<T>;
   rowKey: (row: T) => string;
   empty?: ReactNode;
+  onRowClick?: (row: T) => void;
 }
 
 
-export function DataTable<T>({ columns, rows, rowKey, empty }: DataTableProps<T>) {
+export function DataTable<T>({ columns, rows, rowKey, empty, onRowClick }: DataTableProps<T>) {
   if (rows.length === 0) {
     return <>{empty}</>;
   }
@@ -38,7 +39,11 @@ export function DataTable<T>({ columns, rows, rowKey, empty }: DataTableProps<T>
       </thead>
       <tbody>
         {rows.map((row) => (
-          <tr key={rowKey(row)}>
+          <tr
+            key={rowKey(row)}
+            onClick={onRowClick ? () => onRowClick(row) : undefined}
+            style={onRowClick ? { cursor: "pointer" } : undefined}
+          >
             {columns.map((column) => (
               <td key={column.key} data-label={column.key} style={{ textAlign: column.align ?? "left" }}>
                 {column.render(row)}

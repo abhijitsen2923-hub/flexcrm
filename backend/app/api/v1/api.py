@@ -22,6 +22,7 @@ from app.finance.router import router as finance_router
 from app.hr.router import router as hr_router
 from app.real_estate.router import router as real_estate_router
 from app.customer_portal.router import router as customer_portal_router
+from app.api.v1.endpoints.custom_roles import router as custom_roles_router
 
 
 api_router = APIRouter()
@@ -46,6 +47,7 @@ api_router.include_router(hr_router, prefix="/hr", tags=["HR"])
 api_router.include_router(exports.router, prefix="/exports", tags=["Exports"])
 api_router.include_router(real_estate_router, tags=["Real Estate"])
 api_router.include_router(customer_portal_router, prefix="/customer", tags=["Customer Portal"])
+api_router.include_router(custom_roles_router, tags=["Custom Roles"])
 # Permissions routes mount at the root so `/me/permissions` and
 # `/users/{id}/permissions` live alongside their conceptual siblings without
 # duplicating prefixes.

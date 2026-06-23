@@ -23,6 +23,8 @@ export type UserRole =
   | "broker"
   // Customer portal — end-buyer accounts, no staff access.
   | "customer"
+  // Custom — org-defined role template; permissions sourced from CustomRole table.
+  | "custom"
   // Legacy — kept so old user records still type-check; not assignable from UI.
   | "admin"
   | "manager"
@@ -91,6 +93,9 @@ export interface UserSummary {
   // Phase 8 — effective permissions (role defaults ∪ explicit grants).
   // Populated on /me, login, refresh. Empty array on list-endpoint payloads.
   permissions: string[];
+  // Populated when role === "custom" so the UI can display the template name.
+  custom_role_id?: string | null;
+  custom_role_name?: string | null;
 }
 
 export interface GrantedPermission {

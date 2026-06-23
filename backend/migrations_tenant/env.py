@@ -27,6 +27,7 @@ import app.finance.models  # noqa: F401
 import app.hr.models  # noqa: F401
 import app.real_estate.models  # noqa: F401
 import app.customer_portal.models  # noqa: F401
+import app.models.custom_role  # noqa: F401
 
 
 config = context.config

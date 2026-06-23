@@ -19,11 +19,14 @@ import { usePermissions } from "../hooks/usePermissions";
 import { organizationsService } from "../services/organizations";
 import { permissionsService } from "../services/permissions";
 import { usersService } from "../services/users";
+import type { CustomRole } from "../services/customRoles";
+import { customRolesService } from "../services/customRoles";
 import type { LeadIndustry, Organization, PaginatedResponse, User, UserPermissions, UserRole } from "../types";
 import { ROLES_BY_INDUSTRY } from "../types/crm";
 import { extractErrorMessage } from "../utils/errors";
 import { formatDate } from "../utils/format";
 import { titleCase } from "../utils/options";
+import { RolesTab } from "./users/components/RolesTab";
 
 
 const emptyList: PaginatedResponse<User> = {
@@ -31,8 +34,6 @@ const emptyList: PaginatedResponse<User> = {
   pagination: { page: 1, page_size: 20, total: 0, total_pages: 1 }
 };
 
-// Full catalog of permission codes. Mirrors backend `PermissionCode` enum.
-// Used by the drawer to render a fixed checkbox grid.
 const ALL_PERMISSION_CODES: ReadonlyArray<string> = [
   "DASHBOARD_VIEW",
   "LEAD_VIEW", "LEAD_MANAGE", "LEAD_IMPORT", "LEAD_DOCS_MANAGE",
@@ -48,6 +49,8 @@ const ALL_PERMISSION_CODES: ReadonlyArray<string> = [
   "EXPORT_DATA",
 ];
 
+// Sentinel prefix for custom role option values in the select dropdown.
+const CUSTOM_ROLE_PREFIX = "custom:";
 
 interface CreateFormState {
   first_name: string;
@@ -55,21 +58,26 @@ interface CreateFormState {
   email: string;
   password: string;
   phone: string;
-  role: UserRole;
+  // Either a UserRole string, or "custom:<uuid>" for custom roles.
+  roleValue: string;
   status: "active" | "invited";
 }
 
-
-function emptyForm(defaultRole: UserRole): CreateFormState {
+function emptyForm(defaultRoleValue: string): CreateFormState {
   return {
     first_name: "",
     last_name: "",
     email: "",
     password: "",
     phone: "",
-    role: defaultRole,
+    roleValue: defaultRoleValue,
     status: "active",
   };
+}
+
+function roleLabel(user: User): string {
+  if (user.role === "custom") return user.custom_role_name ? `Custom: ${user.custom_role_name}` : "Custom";
+  return titleCase(user.role);
 }
 
 
@@ -80,18 +88,26 @@ export default function UsersPage() {
   const canView = hasPerm("USER_VIEW");
   const canManage = hasPerm("USER_MANAGE");
 
+  const [activeTab, setActiveTab] = useState<"users" | "roles">("users");
+
   const [page, setPage] = useState(1);
   const [data, setData] = useState<PaginatedResponse<User>>(emptyList);
   const [loading, setLoading] = useState(false);
 
-  // Org currency lookup is unrelated — but we need the org's business_type to
-  // filter the role dropdown in the create modal.
   const [org, setOrg] = useState<Organization | null>(null);
+  const [customRoles, setCustomRoles] = useState<CustomRole[]>([]);
+
   useEffect(() => {
     if (!canManage) return;
     let cancelled = false;
-    void organizationsService.me().then((value) => {
-      if (!cancelled) setOrg(value);
+    void Promise.all([
+      organizationsService.me(),
+      customRolesService.list(),
+    ]).then(([orgData, roles]) => {
+      if (!cancelled) {
+        setOrg(orgData);
+        setCustomRoles(roles.filter((r) => r.is_active));
+      }
     }).catch(() => undefined);
     return () => { cancelled = true; };
   }, [canManage]);
@@ -105,8 +121,7 @@ export default function UsersPage() {
     if (!canView) return;
     setLoading(true);
     try {
-      const response = await usersService.list(query);
-      setData(response);
+      setData(await usersService.list(query));
     } catch (error) {
       toast.error("Failed to load users", extractErrorMessage(error));
     } finally {
@@ -114,9 +129,7 @@ export default function UsersPage() {
     }
   }, [canView, query, toast]);
 
-  useEffect(() => {
-    void refresh();
-  }, [refresh]);
+  useEffect(() => { void refresh(); }, [refresh]);
 
   // --- Create modal ------------------------------------------------------
   const [createOpen, setCreateOpen] = useState(false);
@@ -125,8 +138,6 @@ export default function UsersPage() {
   const [createSubmitting, setCreateSubmitting] = useState(false);
 
   function openCreate() {
-    // Default to the second role (skipping `owner`) so admins don't accidentally
-    // promote every new hire to org owner.
     const defaultRole = assignableRoles.find((r) => r !== "owner") ?? assignableRoles[0];
     setForm(emptyForm(defaultRole));
     setCreateError(null);
@@ -138,14 +149,19 @@ export default function UsersPage() {
     setCreateSubmitting(true);
     setCreateError(null);
     try {
+      const isCustom = form.roleValue.startsWith(CUSTOM_ROLE_PREFIX);
+      const role = isCustom ? "custom" : form.roleValue;
+      const custom_role_id = isCustom ? form.roleValue.slice(CUSTOM_ROLE_PREFIX.length) : undefined;
+
       await usersService.create({
         first_name: form.first_name.trim(),
         last_name: form.last_name.trim(),
         email: form.email.trim(),
         password: form.password,
         phone: form.phone.trim() || null,
-        role: form.role,
+        role: role as UserRole,
         status: form.status,
+        custom_role_id,
       });
       toast.success("User created", `${form.first_name} ${form.last_name}`);
       setCreateOpen(false);
@@ -176,10 +192,7 @@ export default function UsersPage() {
     }
   }
 
-  function closeDrawer() {
-    setDrawerUser(null);
-    setDrawerPerms(null);
-  }
+  function closeDrawer() { setDrawerUser(null); setDrawerPerms(null); }
 
   async function togglePermission(code: string, shouldGrant: boolean) {
     if (!drawerUser) return;
@@ -214,9 +227,7 @@ export default function UsersPage() {
       header: "Name",
       render: (user) => (
         <div>
-          <div style={{ fontWeight: 600 }}>
-            {user.first_name} {user.last_name}
-          </div>
+          <div style={{ fontWeight: 600 }}>{user.first_name} {user.last_name}</div>
           <div className="text-xs muted">{user.email}</div>
         </div>
       )
@@ -224,7 +235,11 @@ export default function UsersPage() {
     {
       key: "role",
       header: "Role",
-      render: (user) => <Badge tone="primary">{titleCase(user.role)}</Badge>
+      render: (user) => (
+        <Badge tone={user.role === "custom" ? "neutral" : "primary"}>
+          {roleLabel(user)}
+        </Badge>
+      )
     },
     {
       key: "status",
@@ -266,190 +281,230 @@ export default function UsersPage() {
   const roleDefaults = new Set(drawerPerms?.role_defaults ?? []);
   const grantedCodes = new Set((drawerPerms?.granted ?? []).map((g) => g.permission_code));
 
+  // Role dropdown options: predefined roles + separator + active custom roles.
+  const roleOptions = [
+    ...assignableRoles.map((r) => ({ value: r, label: titleCase(r) })),
+    ...(customRoles.length > 0
+      ? [
+          { value: "__separator__", label: "── Custom roles ──" },
+          ...customRoles.map((r) => ({
+            value: `${CUSTOM_ROLE_PREFIX}${r.id}`,
+            label: `Custom: ${r.name}`,
+          })),
+        ]
+      : []),
+  ];
+
   return (
     <>
       <div className="page-header">
         <div className="page-header__titles">
-          <h1>Users</h1>
-          <p>Directory of team members with access to this workspace.</p>
+          <h1>Users &amp; Roles</h1>
+          <p>Manage team members and define custom permission templates.</p>
         </div>
-        <div className="page-header__actions">
-          <Button
-            variant="secondary"
-            size="sm"
-            icon={<RefreshCw size={14} />}
-            onClick={() => void refresh()}
-            loading={loading}
-          >
-            Refresh
-          </Button>
-          {canManage && (
-            <Button icon={<Plus size={14} />} onClick={openCreate}>
-              New user
-            </Button>
-          )}
-        </div>
-      </div>
-
-      <div className="card" style={{ padding: 0 }}>
-        <div className="table-wrap" style={{ border: "none", borderRadius: 0, boxShadow: "none" }}>
-          {loading && data.items.length === 0 ? (
-            <LoadingBlock label="Loading users…" />
-          ) : (
-            <DataTable
-              columns={columns}
-              rows={data.items}
-              rowKey={(user) => user.id}
-              empty={<EmptyState title="No users yet" />}
-            />
-          )}
-        </div>
-        <Pagination
-          page={data.pagination.page}
-          pageSize={data.pagination.page_size}
-          total={data.pagination.total}
-          totalPages={data.pagination.total_pages}
-          onPageChange={setPage}
-        />
-      </div>
-
-      {/* Create-user modal — role dropdown filtered by the org's vertical so an
-          Education org never sees `visa_coordinator` and vice-versa. */}
-      <Modal
-        open={createOpen}
-        onClose={() => setCreateOpen(false)}
-        title="New user"
-        footer={
-          <>
-            <Button variant="secondary" onClick={() => setCreateOpen(false)} disabled={createSubmitting}>
-              Cancel
-            </Button>
-            <Button type="submit" form="user-create-form" loading={createSubmitting} disabled={createSubmitting}>
-              Create user
-            </Button>
-          </>
-        }
-      >
-        <form id="user-create-form" className="form" onSubmit={handleCreateSubmit}>
-          <div className="form-grid">
-            <TextField
-              id="user-first-name"
-              label="First name"
-              value={form.first_name}
-              onChange={(event) => setForm({ ...form, first_name: event.target.value })}
-              required
-            />
-            <TextField
-              id="user-last-name"
-              label="Last name"
-              value={form.last_name}
-              onChange={(event) => setForm({ ...form, last_name: event.target.value })}
-              required
-            />
-          </div>
-          <TextField
-            id="user-email"
-            label="Email"
-            type="email"
-            value={form.email}
-            onChange={(event) => setForm({ ...form, email: event.target.value })}
-            required
-          />
-          <TextField
-            id="user-password"
-            label="Initial password"
-            type="password"
-            value={form.password}
-            onChange={(event) => setForm({ ...form, password: event.target.value })}
-            required
-            hint="At least 8 characters."
-          />
-          <TextField
-            id="user-phone"
-            label="Phone"
-            value={form.phone}
-            onChange={(event) => setForm({ ...form, phone: event.target.value })}
-            placeholder="Optional"
-          />
-          <SelectField
-            id="user-role"
-            label="Role"
-            value={form.role}
-            onChange={(event) => setForm({ ...form, role: event.target.value as UserRole })}
-            options={assignableRoles.map((role) => ({
-              value: role,
-              label: titleCase(role),
-            }))}
-            hint={`Roles available for your ${titleCase(orgIndustry)} workspace.`}
-          />
-          {createError && <div className="error-banner">{createError}</div>}
-        </form>
-      </Modal>
-
-      {/* Permissions drawer — checkbox grid with role-default chips shown as
-          disabled-checked, and explicit grants toggleable. */}
-      <Modal
-        open={Boolean(drawerUser)}
-        onClose={closeDrawer}
-        title={drawerUser ? `Permissions — ${drawerUser.first_name} ${drawerUser.last_name}` : ""}
-        footer={<Button onClick={closeDrawer}>Done</Button>}
-      >
-        {drawerLoading ? (
-          <LoadingBlock label="Loading permissions…" />
-        ) : drawerPerms ? (
-          <div className="stack" style={{ gap: "0.75rem" }}>
-            <div className="muted text-sm">
-              <strong>{drawerPerms.role_defaults.length}</strong> permission
-              {drawerPerms.role_defaults.length === 1 ? "" : "s"} from role default ·{" "}
-              <strong>{drawerPerms.granted.length}</strong> explicit grant
-              {drawerPerms.granted.length === 1 ? "" : "s"} ·{" "}
-              <strong>{drawerPerms.effective.length}</strong> effective.
-            </div>
-            <div className="text-xs muted">
-              Role-default permissions are checked and locked — to remove a default, change the user's role.
-              Grants override on top of defaults.
-            </div>
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))",
-                gap: "0.5rem",
-              }}
+        {activeTab === "users" && (
+          <div className="page-header__actions">
+            <Button
+              variant="secondary"
+              size="sm"
+              icon={<RefreshCw size={14} />}
+              onClick={() => void refresh()}
+              loading={loading}
             >
-              {ALL_PERMISSION_CODES.map((code) => {
-                const isDefault = roleDefaults.has(code);
-                const isGranted = grantedCodes.has(code);
-                const isChecked = isDefault || isGranted;
-                const disabled = isDefault || drawerSavingCode === code;
-                return (
-                  <label
-                    key={code}
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: "0.5rem",
-                      padding: "0.4rem 0.5rem",
-                      border: "1px solid var(--color-border)",
-                      borderRadius: 6,
-                      background: isDefault ? "var(--color-bg-muted)" : "transparent",
-                      cursor: disabled && !isDefault ? "wait" : isDefault ? "not-allowed" : "pointer",
-                    }}
-                    title={isDefault ? "Comes from the role default" : "Click to grant / revoke"}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={isChecked}
-                      disabled={disabled}
-                      onChange={(event) => void togglePermission(code, event.target.checked)}
-                    />
-                    <span style={{ fontSize: "0.85rem" }}>{code}</span>
-                  </label>
-                );
-              })}
-            </div>
+              Refresh
+            </Button>
+            {canManage && (
+              <Button icon={<Plus size={14} />} onClick={openCreate}>New user</Button>
+            )}
           </div>
-        ) : null}
-      </Modal>
+        )}
+      </div>
+
+      {/* Tab bar */}
+      <div style={{ display: "flex", gap: "0.25rem", marginBottom: "1.25rem", borderBottom: "1px solid var(--color-border)" }}>
+        {(["users", "roles"] as const).map((tab) => (
+          <button
+            key={tab}
+            onClick={() => setActiveTab(tab)}
+            style={{
+              padding: "0.5rem 1rem",
+              border: "none",
+              background: "transparent",
+              fontWeight: activeTab === tab ? 600 : 400,
+              color: activeTab === tab ? "var(--color-primary)" : "var(--color-text-muted)",
+              borderBottom: activeTab === tab ? "2px solid var(--color-primary)" : "2px solid transparent",
+              cursor: "pointer",
+              marginBottom: "-1px",
+            }}
+          >
+            {titleCase(tab)}
+          </button>
+        ))}
+      </div>
+
+      {activeTab === "roles" ? (
+        <RolesTab canManage={canManage} />
+      ) : (
+        <>
+          <div className="card" style={{ padding: 0 }}>
+            <div className="table-wrap" style={{ border: "none", borderRadius: 0, boxShadow: "none" }}>
+              {loading && data.items.length === 0 ? (
+                <LoadingBlock label="Loading users…" />
+              ) : (
+                <DataTable
+                  columns={columns}
+                  rows={data.items}
+                  rowKey={(user) => user.id}
+                  empty={<EmptyState title="No users yet" />}
+                />
+              )}
+            </div>
+            <Pagination
+              page={data.pagination.page}
+              pageSize={data.pagination.page_size}
+              total={data.pagination.total}
+              totalPages={data.pagination.total_pages}
+              onPageChange={setPage}
+            />
+          </div>
+
+          {/* Create-user modal */}
+          <Modal
+            open={createOpen}
+            onClose={() => setCreateOpen(false)}
+            title="New user"
+            footer={
+              <>
+                <Button variant="secondary" onClick={() => setCreateOpen(false)} disabled={createSubmitting}>Cancel</Button>
+                <Button type="submit" form="user-create-form" loading={createSubmitting} disabled={createSubmitting}>
+                  Create user
+                </Button>
+              </>
+            }
+          >
+            <form id="user-create-form" className="form" onSubmit={handleCreateSubmit}>
+              <div className="form-grid">
+                <TextField
+                  id="user-first-name"
+                  label="First name"
+                  value={form.first_name}
+                  onChange={(e) => setForm({ ...form, first_name: e.target.value })}
+                  required
+                />
+                <TextField
+                  id="user-last-name"
+                  label="Last name"
+                  value={form.last_name}
+                  onChange={(e) => setForm({ ...form, last_name: e.target.value })}
+                  required
+                />
+              </div>
+              <TextField
+                id="user-email"
+                label="Email"
+                type="email"
+                value={form.email}
+                onChange={(e) => setForm({ ...form, email: e.target.value })}
+                required
+              />
+              <TextField
+                id="user-password"
+                label="Initial password"
+                type="password"
+                value={form.password}
+                onChange={(e) => setForm({ ...form, password: e.target.value })}
+                required
+                hint="At least 8 characters."
+              />
+              <TextField
+                id="user-phone"
+                label="Phone"
+                value={form.phone}
+                onChange={(e) => setForm({ ...form, phone: e.target.value })}
+                placeholder="Optional"
+              />
+              <SelectField
+                id="user-role"
+                label="Role"
+                value={form.roleValue}
+                onChange={(e) => setForm({ ...form, roleValue: e.target.value })}
+                options={roleOptions.filter((o) => o.value !== "__separator__").map((o) => ({
+                  value: o.value,
+                  label: o.label,
+                }))}
+                hint={`Predefined + custom roles for your ${titleCase(orgIndustry)} workspace.`}
+              />
+              {createError && <div className="error-banner">{createError}</div>}
+            </form>
+          </Modal>
+
+          {/* Permissions drawer */}
+          <Modal
+            open={Boolean(drawerUser)}
+            onClose={closeDrawer}
+            title={drawerUser ? `Permissions — ${drawerUser.first_name} ${drawerUser.last_name}` : ""}
+            footer={<Button onClick={closeDrawer}>Done</Button>}
+          >
+            {drawerLoading ? (
+              <LoadingBlock label="Loading permissions…" />
+            ) : drawerPerms ? (
+              <div className="stack" style={{ gap: "0.75rem" }}>
+                {drawerUser?.role === "custom" && drawerUser.custom_role_name && (
+                  <div className="text-sm" style={{ padding: "0.4rem 0.6rem", background: "var(--color-bg-muted)", borderRadius: 6 }}>
+                    Role template: <strong>{drawerUser.custom_role_name}</strong>
+                  </div>
+                )}
+                <div className="muted text-sm">
+                  <strong>{drawerPerms.role_defaults.length}</strong> from role ·{" "}
+                  <strong>{drawerPerms.granted.length}</strong> explicit grant{drawerPerms.granted.length === 1 ? "" : "s"} ·{" "}
+                  <strong>{drawerPerms.effective.length}</strong> effective.
+                </div>
+                <div className="text-xs muted">
+                  Role permissions are checked and locked. Grants add on top.
+                </div>
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))",
+                    gap: "0.5rem",
+                  }}
+                >
+                  {ALL_PERMISSION_CODES.map((code) => {
+                    const isDefault = roleDefaults.has(code);
+                    const isGranted = grantedCodes.has(code);
+                    const isChecked = isDefault || isGranted;
+                    const disabled = isDefault || drawerSavingCode === code;
+                    return (
+                      <label
+                        key={code}
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: "0.5rem",
+                          padding: "0.4rem 0.5rem",
+                          border: "1px solid var(--color-border)",
+                          borderRadius: 6,
+                          background: isDefault ? "var(--color-bg-muted)" : "transparent",
+                          cursor: disabled && !isDefault ? "wait" : isDefault ? "not-allowed" : "pointer",
+                        }}
+                        title={isDefault ? "Comes from the role template" : "Click to grant / revoke"}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={isChecked}
+                          disabled={disabled}
+                          onChange={(e) => void togglePermission(code, e.target.checked)}
+                        />
+                        <span style={{ fontSize: "0.85rem" }}>{code}</span>
+                      </label>
+                    );
+                  })}
+                </div>
+              </div>
+            ) : null}
+          </Modal>
+        </>
+      )}
     </>
   );
 }

@@ -15,7 +15,7 @@ interface Props {
 }
 
 export function BookingWizard({ unit, onClose, onComplete }: Props) {
-  const { push } = useToast();
+  const toast = useToast();
   const [step, setStep] = useState(1);
   const [booking, setBooking] = useState<Booking | null>(null);
   const [saving, setSaving] = useState(false);
@@ -39,7 +39,7 @@ export function BookingWizard({ unit, onClose, onComplete }: Props) {
       setBooking(created);
       setStep(2);
     } catch {
-      push({ message: "Failed to start booking", tone: "danger" });
+      toast.error("Failed to start booking");
     } finally {
       setSaving(false);
     }
@@ -53,7 +53,7 @@ export function BookingWizard({ unit, onClose, onComplete }: Props) {
       setBooking(updated);
       setStep(3);
     } catch {
-      push({ message: "KYC upload failed", tone: "danger" });
+      toast.error("KYC upload failed");
     } finally {
       setSaving(false);
     }
@@ -67,7 +67,7 @@ export function BookingWizard({ unit, onClose, onComplete }: Props) {
       setBooking(updated);
       setStep(4);
     } catch {
-      push({ message: "Failed to save pricing", tone: "danger" });
+      toast.error("Failed to save pricing");
     } finally {
       setSaving(false);
     }
@@ -81,7 +81,7 @@ export function BookingWizard({ unit, onClose, onComplete }: Props) {
       setDocUrl(url);
       setDocTitle(docType === "booking_form" ? "Booking Form" : "Allotment Letter");
     } catch {
-      push({ message: "Document generation failed", tone: "danger" });
+      toast.error("Document generation failed");
     } finally {
       setSaving(false);
     }
@@ -92,10 +92,10 @@ export function BookingWizard({ unit, onClose, onComplete }: Props) {
     setSaving(true);
     try {
       const updated = await bookingsService.advanceStep(booking.id, 4, { scheduledDate });
-      push({ message: "Booking confirmed!", tone: "success" });
+      toast.success("Booking confirmed!");
       onComplete(updated);
     } catch {
-      push({ message: "Failed to confirm booking", tone: "danger" });
+      toast.error("Failed to confirm booking");
     } finally {
       setSaving(false);
     }

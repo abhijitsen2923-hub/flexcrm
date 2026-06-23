@@ -16,6 +16,7 @@ from app.core.security import (
 )
 from app.core.tenancy import bypass, set_scope, set_tenant_schema
 from app.database.enums import UserRole, UserStatus
+from app.models.custom_role import UserCustomRoleAssignment
 from app.models.organization import Organization
 from app.models.user import User
 from app.models.user_permission_grant import UserPermissionGrant
@@ -215,10 +216,29 @@ class AuthService(ServiceBase):
                 )
             )
         ).scalars().all()
-        effective = effective_permissions_for_user(user.role, grant_codes)
-        return UserRead.model_validate(user).model_copy(
-            update={"permissions": sorted(code.value for code in effective)}
-        )
+
+        updates: dict = {}
+
+        if user.role == UserRole.custom:
+            assignment = (
+                await self.session.execute(
+                    select(UserCustomRoleAssignment).where(
+                        UserCustomRoleAssignment.user_id == user.id
+                    )
+                )
+            ).scalar_one_or_none()
+            if assignment and assignment.custom_role:
+                updates["custom_role_id"] = assignment.custom_role_id
+                updates["custom_role_name"] = assignment.custom_role.name
+                base = assignment.custom_role.permissions
+            else:
+                base = []
+            effective = effective_permissions_for_user(UserRole.custom, grant_codes, base_override=base)
+        else:
+            effective = effective_permissions_for_user(user.role, grant_codes)
+
+        updates["permissions"] = sorted(code.value for code in effective)
+        return UserRead.model_validate(user).model_copy(update=updates)
 
     async def _build_token_response_async(
         self,

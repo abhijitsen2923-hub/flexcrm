@@ -31,7 +31,7 @@ function MediaGallery({ project }: { project: Project }) {
 
 const COLUMNS: DataTableColumn<Project>[] = [
   { key: "name", header: "Project", render: (p) => <strong>{p.name}</strong> },
-  { key: "builderName", header: "Builder" },
+  { key: "builderName", header: "Builder", render: (p) => p.builderName },
   { key: "location", header: "Location", render: (p) => `${p.location}, ${p.city}` },
   { key: "totalUnits", header: "Total Units", render: (p) => p.totalUnits },
   {

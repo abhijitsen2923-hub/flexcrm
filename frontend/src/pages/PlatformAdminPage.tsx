@@ -16,12 +16,16 @@ const MODULE_LABELS: Record<ModuleKey, string> = {
   activities: "Activities",
   finance: "Finance",
   hr: "HR",
+  inventory: "Inventory",
+  bookings: "Bookings",
+  site_visits: "Site Visits",
+  projects: "Projects",
 };
 
 
 export function PlatformAdminPage() {
   const { user } = useAuth();
-  const { addToast } = useToast();
+  const toast = useToast();
   const [orgs, setOrgs] = useState<Organization[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState<Record<string, boolean>>({});
@@ -36,7 +40,7 @@ export function PlatformAdminPage() {
       const data = await adminService.listOrganizations();
       setOrgs(data);
     } catch (err) {
-      addToast({ type: "error", message: extractErrorMessage(err, "Failed to load organizations") });
+      toast.error("Failed to load organizations", extractErrorMessage(err));
     } finally {
       setLoading(false);
     }
@@ -61,7 +65,7 @@ export function PlatformAdminPage() {
       setOrgs((prev) =>
         prev.map((o) => (o.id === org.id ? { ...o, modules: org.modules } : o))
       );
-      addToast({ type: "error", message: extractErrorMessage(err, "Failed to update module access") });
+      toast.error("Failed to update module access", extractErrorMessage(err));
     } finally {
       setSaving((prev) => ({ ...prev, [org.id]: false }));
     }

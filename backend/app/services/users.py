@@ -7,6 +7,7 @@ from app.core.permissions import LEGACY_ROLES, role_is_valid_for_industry
 from app.core.security import hash_password
 from app.core.tenancy import current_org
 from app.database.enums import UserRole
+from app.models.custom_role import CustomRole, UserCustomRoleAssignment
 from app.models.organization import Organization
 from app.repositories.refresh_tokens import RefreshTokenRepository
 from app.repositories.users import UserRepository
@@ -44,7 +45,23 @@ class UserService(ServiceBase):
     async def create_user(self, payload: UserCreate, *, actor_id: UUID | None):
         if await self.repository.get_by_email(payload.email):
             raise ConflictError("A user with this email already exists.")
-        await self._validate_role_for_current_org(payload.role)
+
+        if payload.role == UserRole.custom:
+            if not payload.custom_role_id:
+                raise ValidationError("custom_role_id is required when role is 'custom'.")
+            # Validate the custom role exists and is active.
+            template = (
+                await self.session.execute(
+                    select(CustomRole).where(CustomRole.id == payload.custom_role_id)
+                )
+            ).scalar_one_or_none()
+            if not template:
+                raise ValidationError("Custom role not found.")
+            if not template.is_active:
+                raise ValidationError("This custom role is inactive and cannot be assigned.")
+        else:
+            await self._validate_role_for_current_org(payload.role)
+
         user = await self.repository.create(
             {
                 "first_name": payload.first_name,
@@ -58,6 +75,14 @@ class UserService(ServiceBase):
                 "updated_by_id": actor_id,
             }
         )
+        await self.session.flush()  # get user.id before creating assignment
+
+        if payload.role == UserRole.custom and payload.custom_role_id:
+            self.session.add(UserCustomRoleAssignment(
+                user_id=user.id,
+                custom_role_id=payload.custom_role_id,
+            ))
+
         await self.commit()
         return user
 
@@ -88,6 +113,11 @@ class UserService(ServiceBase):
             raise ValidationError(
                 f"Role '{role.value}' is a legacy role and no longer assignable. "
                 f"Use one of the Phase 8 roles instead."
+            )
+
+        if role == UserRole.custom:
+            raise ValidationError(
+                "Use POST /users/{id}/custom-role to assign a custom role template."
             )
 
         org_id = current_org(self.session)

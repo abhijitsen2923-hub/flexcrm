@@ -17,6 +17,7 @@ export interface UserPayload {
   role: string;
   phone?: string | null;
   status?: string;
+  custom_role_id?: string | null;
 }
 
 export const usersService = {

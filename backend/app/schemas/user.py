@@ -21,6 +21,9 @@ class UserSummary(ORMModel):
     # alias-expanded). Empty on list endpoints — populated only on `/me`,
     # login, and refresh where the caller is identifying themselves.
     permissions: list[str] = Field(default_factory=list)
+    # Populated when role == "custom" so the frontend can display the template name.
+    custom_role_id: UUID | None = None
+    custom_role_name: str | None = None
 
 
 class UserCreate(ORMModel):
@@ -32,6 +35,8 @@ class UserCreate(ORMModel):
     phone: str | None = Field(default=None, max_length=32)
     status: UserStatus = UserStatus.active
     business_type: LeadIndustry | None = None
+    # When role == "custom", supply the CustomRole id to assign.
+    custom_role_id: UUID | None = None
 
 
 class UserUpdate(ORMModel):

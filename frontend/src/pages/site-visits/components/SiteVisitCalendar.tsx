@@ -36,8 +36,8 @@ const DAY_LABELS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
 interface Props {
   visits: SiteVisit[];
-  onSchedule: (payload: CreateSiteVisitPayload) => Promise<void>;
-  onUpdateFeedback: (id: string, patch: { attended?: boolean; feedback?: SiteVisitFeedback | null }) => Promise<void>;
+  onSchedule: (payload: CreateSiteVisitPayload) => Promise<SiteVisit>;
+  onUpdateFeedback: (id: string, patch: { attended?: boolean; feedback?: SiteVisitFeedback | null; notes?: string }) => Promise<SiteVisit>;
 }
 
 interface SlotEvent {
@@ -56,7 +56,7 @@ interface ScheduleForm {
 const BLANK: ScheduleForm = { leadId: "", projectId: "", assignedToId: "", scheduledAt: "", notes: "" };
 
 export function SiteVisitCalendar({ visits, onSchedule, onUpdateFeedback }: Props) {
-  const { push } = useToast();
+  const toast = useToast();
   const [weekStart, setWeekStart] = useState(() => startOfWeek(new Date()));
   const [scheduleOpen, setScheduleOpen] = useState(false);
   const [form, setForm] = useState<ScheduleForm>(BLANK);
@@ -92,11 +92,11 @@ export function SiteVisitCalendar({ visits, onSchedule, onUpdateFeedback }: Prop
         assignedToId: form.assignedToId || null,
         notes: form.notes || null,
       });
-      push({ message: "Site visit scheduled", tone: "success" });
+      toast.success("Site visit scheduled");
       setScheduleOpen(false);
       setForm(BLANK);
     } catch {
-      push({ message: "Failed to schedule site visit", tone: "danger" });
+      toast.error("Failed to schedule site visit");
     } finally {
       setSaving(false);
     }
@@ -107,10 +107,10 @@ export function SiteVisitCalendar({ visits, onSchedule, onUpdateFeedback }: Prop
     setSaving(true);
     try {
       await onUpdateFeedback(selectedVisit.id, { feedback });
-      push({ message: "Feedback recorded", tone: "success" });
+      toast.success("Feedback recorded");
       setSelectedVisit(null);
     } catch {
-      push({ message: "Failed to save feedback", tone: "danger" });
+      toast.error("Failed to save feedback");
     } finally {
       setSaving(false);
     }
@@ -121,10 +121,10 @@ export function SiteVisitCalendar({ visits, onSchedule, onUpdateFeedback }: Prop
     setSaving(true);
     try {
       await onUpdateFeedback(selectedVisit.id, { attended });
-      push({ message: attended ? "Marked as attended" : "Marked as absent", tone: "success" });
+      toast.success(attended ? "Marked as attended" : "Marked as absent");
       setSelectedVisit(null);
     } catch {
-      push({ message: "Failed to update attendance", tone: "danger" });
+      toast.error("Failed to update attendance");
     } finally {
       setSaving(false);
     }

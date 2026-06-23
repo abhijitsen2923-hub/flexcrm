@@ -18,14 +18,18 @@ from fastapi import APIRouter, Depends, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from sqlalchemy.orm import selectinload
+
 from app.api.deps import get_current_user, load_effective_permissions, require_permissions
 from app.core.exceptions import ConflictError, NotFoundError
 from app.core.permissions import (
-    PERMISSION_ALIASES,
     PermissionCode,
     ROLE_PERMISSION_DEFAULTS,
+    _expand_aliases,
 )
+from app.database.enums import UserRole
 from app.database.session import get_db_session
+from app.models.custom_role import UserCustomRoleAssignment
 from app.models.user_permission_grant import UserPermissionGrant
 from app.schemas.common import MessageResponse
 from app.schemas.user_permission_grant import (
@@ -39,22 +43,28 @@ from app.services.users import UserService
 router = APIRouter()
 
 
-def _expand_aliases(codes: set[PermissionCode]) -> set[PermissionCode]:
-    out: set[PermissionCode] = set()
-    pending = list(codes)
-    while pending:
-        code = pending.pop()
-        if code in out:
-            continue
-        out.add(code)
-        for implied in PERMISSION_ALIASES.get(code, ()):
-            if implied not in out:
-                pending.append(implied)
-    return out
+async def _role_default_codes(role, session, user_id) -> list[str]:
+    """Return alias-expanded default permissions for a role.
 
-
-def _role_default_codes(role) -> list[str]:
-    expanded = _expand_aliases(set(ROLE_PERMISSION_DEFAULTS.get(role, ())))
+    For UserRole.custom, looks up the linked CustomRole template instead of
+    ROLE_PERMISSION_DEFAULTS.
+    """
+    if role == UserRole.custom:
+        assignment = (
+            await session.execute(
+                select(UserCustomRoleAssignment).where(UserCustomRoleAssignment.user_id == user_id)
+            )
+        ).scalar_one_or_none()
+        base_codes = assignment.custom_role.permissions if (assignment and assignment.custom_role) else []
+        valid: set[PermissionCode] = set()
+        for raw in base_codes:
+            try:
+                valid.add(PermissionCode(raw))
+            except ValueError:
+                continue
+        expanded = _expand_aliases(valid)
+    else:
+        expanded = _expand_aliases(set(ROLE_PERMISSION_DEFAULTS.get(role, ())))
     return sorted(c.value for c in expanded)
 
 
@@ -76,7 +86,7 @@ async def get_my_permissions(
     effective = await load_effective_permissions(session, current_user)
     return UserPermissionsRead(
         user_id=current_user.id,
-        role_defaults=_role_default_codes(current_user.role),
+        role_defaults=await _role_default_codes(current_user.role, session, current_user.id),
         granted=[GrantedPermissionRead.model_validate(g) for g in grants],
         effective=sorted(c.value for c in effective),
     )
@@ -99,7 +109,7 @@ async def list_user_permissions(
     effective = await load_effective_permissions(session, user)
     return UserPermissionsRead(
         user_id=user_id,
-        role_defaults=_role_default_codes(user.role),
+        role_defaults=await _role_default_codes(user.role, session, user_id),
         granted=[GrantedPermissionRead.model_validate(g) for g in grants],
         effective=sorted(c.value for c in effective),
     )

@@ -30,6 +30,8 @@ class UserRole(StrEnum):
     # External-portal roles (real estate)
     broker = "broker"      # channel partner
     customer = "customer"  # buyer portal
+    # Custom — org-defined role template; permissions sourced from CustomRole table.
+    custom = "custom"
     # Legacy — retained for migration backfill; not assignable post-0010.
     admin = "admin"
     manager = "manager"

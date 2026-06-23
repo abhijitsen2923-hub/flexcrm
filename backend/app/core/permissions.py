@@ -91,6 +91,10 @@ ROLE_INDUSTRIES: dict[UserRole, frozenset[LeadIndustry | None]] = {
     UserRole.crm_team: frozenset({LeadIndustry.real_estate}),
     UserRole.broker: frozenset({LeadIndustry.real_estate}),
     UserRole.customer: frozenset({LeadIndustry.real_estate}),
+    # Custom — org-defined role template, valid in any vertical.
+    # Permissions sourced from CustomRole table, not ROLE_PERMISSION_DEFAULTS.
+    # Must be assigned via /users/{id}/custom-role, not the regular role field.
+    UserRole.custom: frozenset({None}),
 }
 
 
@@ -293,13 +297,24 @@ def effective_permissions_for_role(role: UserRole) -> frozenset[PermissionCode]:
 def effective_permissions_for_user(
     role: UserRole,
     explicit_grants: Iterable[str | PermissionCode],
+    base_override: Iterable[str] | None = None,
 ) -> frozenset[PermissionCode]:
     """Final permissions for a user: defaults ∪ explicit_grants, then alias-expanded.
 
-    Unknown strings in `explicit_grants` are silently dropped (a stale grant
-    pointing at a removed code should never grant anything).
+    For UserRole.custom, pass `base_override` with the CustomRole.permissions list
+    instead of using ROLE_PERMISSION_DEFAULTS. Unknown strings are silently dropped.
     """
-    base = set(ROLE_PERMISSION_DEFAULTS.get(role, ()))
+    if base_override is not None:
+        raw_base: Iterable[str | PermissionCode] = base_override
+    else:
+        raw_base = ROLE_PERMISSION_DEFAULTS.get(role, ())
+
+    base: set[PermissionCode] = set()
+    for raw in raw_base:
+        try:
+            base.add(PermissionCode(raw))
+        except ValueError:
+            continue
     for raw in explicit_grants:
         try:
             base.add(PermissionCode(raw))

@@ -17,6 +17,10 @@ const ALL_OFF: Record<ModuleKey, boolean> = {
   activities: false,
   finance: false,
   hr: false,
+  inventory: false,
+  bookings: false,
+  site_visits: false,
+  projects: false,
 };
 
 interface OrgContextValue {
