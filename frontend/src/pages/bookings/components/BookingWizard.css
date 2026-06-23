@@ -1,0 +1,143 @@
+.booking-wizard {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+}
+
+/* Step indicator */
+.booking-wizard__steps {
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 0;
+  padding: var(--space-2) 0;
+}
+
+.bw-step {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-1);
+  position: relative;
+  flex: 1;
+}
+
+.bw-step__circle {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 2px solid var(--color-border-strong);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.75rem;
+  font-weight: 700;
+  background: var(--color-surface);
+  color: var(--color-text-muted);
+  z-index: 1;
+}
+.bw-step--active .bw-step__circle {
+  border-color: var(--color-primary);
+  background: var(--color-primary);
+  color: #fff;
+}
+.bw-step--done .bw-step__circle {
+  border-color: var(--color-success);
+  background: var(--color-success);
+  color: #fff;
+}
+
+.bw-step__label {
+  font-size: 0.7rem;
+  color: var(--color-text-muted);
+  text-align: center;
+  white-space: nowrap;
+}
+.bw-step--active .bw-step__label {
+  color: var(--color-primary);
+  font-weight: 600;
+}
+.bw-step--done .bw-step__label { color: var(--color-success); }
+
+.bw-step__line {
+  position: absolute;
+  top: 14px;
+  left: calc(50% + 14px);
+  right: calc(-50% + 14px);
+  height: 2px;
+  background: var(--color-border);
+}
+.bw-step--done .bw-step__line { background: var(--color-success); }
+
+/* Step body */
+.bw-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+/* Unit summary */
+.bw-unit-summary {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-3) var(--space-6);
+  background: var(--color-surface-muted);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: var(--space-4);
+}
+.bw-unit-summary__field {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 0.875rem;
+}
+.bw-unit-summary__field span:first-child { color: var(--color-text-muted); font-size: 0.75rem; }
+
+/* KYC */
+.bw-kyc {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.bw-kyc__label {
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--color-text);
+}
+.bw-kyc__input {
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+  padding: var(--space-2);
+  font-size: 0.875rem;
+}
+.bw-kyc__filename {
+  font-size: 0.8rem;
+  color: var(--color-text-muted);
+  margin: 0;
+}
+
+.form-select {
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+  padding: var(--space-2) var(--space-3);
+  font-size: 0.875rem;
+  background: var(--color-surface);
+  color: var(--color-text);
+}
+
+/* Document actions */
+.bw-doc-actions {
+  display: flex;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+
+/* Footer */
+.bw-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-3);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--color-border);
+}

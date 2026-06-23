@@ -3,7 +3,13 @@ import {
   Award,
   BarChart3,
   Briefcase,
+  Building2,
+  CalendarDays,
+  ClipboardCheck,
   ClipboardList,
+  FileCheck2,
+  KeyRound,
+  Layers,
   LayoutDashboard,
   Receipt,
   Settings2,
@@ -40,6 +46,14 @@ const NAV: ReadonlyArray<NavItem> = [
   { to: "/activities", label: "Activities", icon: Activity, requires: ["ACTIVITY_VIEW"], moduleKey: "activities" },
   { to: "/finance", label: "Finance", icon: Receipt, requires: ["FINANCE_VIEW"], moduleKey: "finance" },
   { to: "/hr", label: "HR", icon: Award, requires: ["HR_VIEW"], moduleKey: "hr" },
+  // Real-estate modules
+  { to: "/projects", label: "Projects", icon: Building2, requires: ["LEAD_VIEW"], moduleKey: "projects" },
+  { to: "/inventory", label: "Inventory", icon: Layers, requires: ["LEAD_VIEW"], moduleKey: "inventory" },
+  { to: "/site-visits", label: "Site Visits", icon: CalendarDays, requires: ["LEAD_VIEW"], moduleKey: "site_visits" },
+  { to: "/bookings", label: "Bookings", icon: ClipboardCheck, requires: ["LEAD_MANAGE"], moduleKey: "bookings" },
+  { to: "/trackers/registration", label: "Registration", icon: FileCheck2, requires: ["LEAD_MANAGE"], moduleKey: "bookings" },
+  { to: "/trackers/possession", label: "Possession", icon: KeyRound, requires: ["LEAD_MANAGE"], moduleKey: "bookings" },
+  // Always-visible
   { to: "/analytics", label: "Analytics", icon: BarChart3, requires: ["ANALYTICS_VIEW"] },
   { to: "/users", label: "Users", icon: Users, requires: ["USER_VIEW"] }
 ];

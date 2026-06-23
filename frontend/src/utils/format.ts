@@ -41,6 +41,20 @@ export function formatNumber(value: number | string | null | undefined): string 
 }
 
 
+/**
+ * Format a number in Indian lakh/crore notation with ₹ prefix.
+ * 1,500,000 → ₹15.00L   |   10,000,000 → ₹1.00Cr   |   50,000 → ₹50,000
+ */
+export function formatInr(amount: number | string | null | undefined): string {
+  if (amount === null || amount === undefined || amount === "") return "—";
+  const n = typeof amount === "string" ? Number(amount) : amount;
+  if (Number.isNaN(n)) return "—";
+  if (n >= 10_000_000) return `₹${(n / 10_000_000).toFixed(2)}Cr`;
+  if (n >= 100_000) return `₹${(n / 100_000).toFixed(2)}L`;
+  return `₹${n.toLocaleString("en-IN")}`;
+}
+
+
 export function formatRelative(iso: string | null | undefined): string {
   if (!iso) return "—";
   const date = new Date(iso);

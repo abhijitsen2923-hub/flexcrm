@@ -22,6 +22,11 @@ export const FEATURES: Record<ModuleKey, boolean> = {
   activities: flag(import.meta.env.VITE_FEATURE_ACTIVITIES_ENABLED),
   finance: flag(import.meta.env.VITE_FEATURE_FINANCE_ENABLED),
   hr: flag(import.meta.env.VITE_FEATURE_HR_ENABLED),
+  // Real-estate modules
+  inventory: flag(import.meta.env.VITE_FEATURE_INVENTORY_ENABLED),
+  bookings: flag(import.meta.env.VITE_FEATURE_BOOKINGS_ENABLED),
+  site_visits: flag(import.meta.env.VITE_FEATURE_SITE_VISITS_ENABLED),
+  projects: flag(import.meta.env.VITE_FEATURE_PROJECTS_ENABLED),
 };
 
 export type FeatureKey = ModuleKey;
@@ -31,8 +36,11 @@ export type FeatureKey = ModuleKey;
  * A module is active only when both layers agree it is on.
  */
 export function mergeModules(orgModules: Record<ModuleKey, boolean>): Record<ModuleKey, boolean> {
-  const keys: ModuleKey[] = ["deals", "tasks", "activities", "finance", "hr"];
+  const keys: ModuleKey[] = [
+    "deals", "tasks", "activities", "finance", "hr",
+    "inventory", "bookings", "site_visits", "projects",
+  ];
   return Object.fromEntries(
-    keys.map((k) => [k, FEATURES[k] && orgModules[k]])
+    keys.map((k) => [k, FEATURES[k] && (orgModules[k] ?? false)])
   ) as Record<ModuleKey, boolean>;
 }

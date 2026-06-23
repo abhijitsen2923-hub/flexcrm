@@ -40,7 +40,8 @@ export const customerStatusOptions: Option<CustomerStatus>[] = asOptions([
 
 export const leadIndustryOptions: Option<LeadIndustry>[] = asOptions([
   "education",
-  "travel"
+  "travel",
+  "real_estate"
 ]);
 
 export const dealStageOptions: Option<DealStage>[] = asOptions([
@@ -156,7 +157,11 @@ export function taskStatusTone(status: TaskStatus): StatusTone {
 
 
 export function industryInterestLabel(industry: LeadIndustry): string {
-  return industry === "travel" ? "Destination" : "Course";
+  return industry === "travel"
+    ? "Destination"
+    : industry === "real_estate"
+      ? "Property Interest"
+      : "Course";
 }
 
 

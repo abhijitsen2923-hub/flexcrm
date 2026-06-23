@@ -14,6 +14,13 @@ export type UserRole =
   | "ops_manager"
   | "travel_agent"
   | "visa_coordinator"
+  // Real-estate-only
+  | "broker"
+  | "property_manager"
+  | "site_agent"
+  | "accounts"
+  // Customer portal — end-buyer accounts, no staff access.
+  | "customer"
   // Legacy — kept so old user records still type-check; not assignable from UI.
   | "admin"
   | "manager"
@@ -39,6 +46,7 @@ export type PermissionCode =
 export const ROLES_BY_INDUSTRY: Record<LeadIndustry, UserRole[]> = {
   education: ["owner", "academic_admin", "counselor", "fee_admin", "support", "analyst"],
   travel: ["owner", "ops_manager", "travel_agent", "visa_coordinator", "support", "analyst"],
+  real_estate: ["owner", "broker", "property_manager", "site_agent", "accounts", "support", "analyst"],
 };
 export type UserStatus = "active" | "inactive" | "invited" | "suspended";
 export type CustomerStatus = "active" | "inactive" | "prospect" | "churned";
@@ -49,7 +57,7 @@ export type CustomerLifecycleStage =
   | "renewal_due"
   | "renewed"
   | "churned";
-export type LeadIndustry = "education" | "travel";
+export type LeadIndustry = "education" | "travel" | "real_estate";
 export type PipelineStageCategory = "active" | "closed_won" | "closed_lost";
 export type InvoiceStatus = "draft" | "issued" | "paid" | "refunded" | "void";
 export type PaymentStatus = "pending" | "received" | "refunded";
@@ -60,8 +68,13 @@ export type TaskPriority = "low" | "medium" | "high" | "urgent";
 export type TaskStatus = "pending" | "in_progress" | "completed" | "cancelled";
 export type ActivityType = "note" | "call" | "email" | "meeting" | "task" | "status_change";
 
-export type ModuleKey = "deals" | "tasks" | "activities" | "finance" | "hr";
-export const MODULE_KEYS: ModuleKey[] = ["deals", "tasks", "activities", "finance", "hr"];
+export type ModuleKey =
+  | "deals" | "tasks" | "activities" | "finance" | "hr"
+  | "inventory" | "bookings" | "site_visits" | "projects";
+export const MODULE_KEYS: ModuleKey[] = [
+  "deals", "tasks", "activities", "finance", "hr",
+  "inventory", "bookings", "site_visits", "projects",
+];
 
 export interface UserSummary {
   id: string;

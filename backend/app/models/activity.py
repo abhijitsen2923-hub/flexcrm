@@ -3,17 +3,17 @@ from uuid import UUID
 from sqlalchemy import Enum, ForeignKey, Index, Text, Uuid
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.core.tenancy import OrgScopedMixin
-from app.database.base import Base
+from app.database.base import TenantBase
 from app.database.enums import ActivityType
-from app.models.base import AuditMixin, SoftDeleteMixin, TimestampMixin, UUIDPrimaryKeyMixin
+from app.models.base import TenantAuditMixin, TenantSoftDeleteMixin, TimestampMixin, UUIDPrimaryKeyMixin
 
 
-class Activity(Base, UUIDPrimaryKeyMixin, TimestampMixin, AuditMixin, SoftDeleteMixin, OrgScopedMixin):
+class Activity(TenantBase, UUIDPrimaryKeyMixin, TimestampMixin, TenantAuditMixin, TenantSoftDeleteMixin):
     __tablename__ = "activities"
     __table_args__ = (
         Index("ix_activities_customer_created_at", "customer_id", "created_at"),
         Index("ix_activities_type", "type"),
+        {"schema": "tenant"},
     )
 
     customer_id: Mapped[UUID] = mapped_column(

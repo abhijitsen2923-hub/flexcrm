@@ -45,6 +45,12 @@ interface CreateFormState {
   expected_close_date: string;
   source: string;
   interest: string;
+  // Real-estate specific (only submitted when industry === "real_estate")
+  property_type: string;
+  budget_min: string;
+  budget_max: string;
+  preferred_location: string;
+  possession_preference: string;
 }
 
 
@@ -64,7 +70,12 @@ function makeEmptyForm(
     probability: "0",
     expected_close_date: "",
     source: "",
-    interest: ""
+    interest: "",
+    property_type: "",
+    budget_min: "",
+    budget_max: "",
+    preferred_location: "",
+    possession_preference: ""
   };
 }
 
@@ -178,7 +189,14 @@ export default function LeadsPage() {
         probability: Number(form.probability) || 0,
         expected_close_date: form.expected_close_date || null,
         source: form.source.trim() || null,
-        interest: form.interest.trim() || null
+        interest: form.interest.trim() || null,
+        ...(form.industry === "real_estate" ? {
+          property_type: form.property_type || null,
+          budget_min: form.budget_min ? Number(form.budget_min) : null,
+          budget_max: form.budget_max ? Number(form.budget_max) : null,
+          preferred_location: form.preferred_location.trim() || null,
+          possession_preference: form.possession_preference || null
+        } : {})
       });
       toast.success("Lead created", form.title.trim());
       setFormOpen(false);
@@ -577,8 +595,71 @@ export default function LeadsPage() {
             label={industryInterestLabel(form.industry)}
             value={form.interest}
             onChange={(event) => setForm({ ...form, interest: event.target.value })}
-            placeholder={form.industry === "travel" ? "e.g. Bali — 7 days" : "e.g. MBA — Marketing"}
+            placeholder={
+              form.industry === "travel"
+                ? "e.g. Bali — 7 days"
+                : form.industry === "real_estate"
+                  ? "e.g. 2BHK in North Bengaluru"
+                  : "e.g. MBA — Marketing"
+            }
           />
+          {form.industry === "real_estate" && (
+            <>
+              <SelectField
+                id="lead-property-type"
+                label="Property type"
+                value={form.property_type}
+                onChange={(event) => setForm({ ...form, property_type: event.target.value })}
+                options={[
+                  { value: "apartment", label: "Apartment" },
+                  { value: "villa", label: "Villa / Independent house" },
+                  { value: "plot", label: "Plot / Land" },
+                  { value: "commercial", label: "Commercial" }
+                ]}
+              />
+              <div className="form-grid">
+                <TextField
+                  id="lead-budget-min"
+                  label="Budget min (₹)"
+                  type="number"
+                  min={0}
+                  step="100000"
+                  value={form.budget_min}
+                  onChange={(event) => setForm({ ...form, budget_min: event.target.value })}
+                  placeholder="e.g. 5000000"
+                />
+                <TextField
+                  id="lead-budget-max"
+                  label="Budget max (₹)"
+                  type="number"
+                  min={0}
+                  step="100000"
+                  value={form.budget_max}
+                  onChange={(event) => setForm({ ...form, budget_max: event.target.value })}
+                  placeholder="e.g. 10000000"
+                />
+              </div>
+              <TextField
+                id="lead-preferred-location"
+                label="Preferred location"
+                value={form.preferred_location}
+                onChange={(event) => setForm({ ...form, preferred_location: event.target.value })}
+                placeholder="e.g. Whitefield, Bengaluru"
+              />
+              <SelectField
+                id="lead-possession-preference"
+                label="Possession preference"
+                value={form.possession_preference}
+                onChange={(event) => setForm({ ...form, possession_preference: event.target.value })}
+                options={[
+                  { value: "immediate", label: "Immediate / Ready to move" },
+                  { value: "within_6_months", label: "Within 6 months" },
+                  { value: "1_year", label: "Within 1 year" },
+                  { value: "2_years", label: "Within 2 years" }
+                ]}
+              />
+            </>
+          )}
           <TextField
             id="lead-source"
             label="Source"

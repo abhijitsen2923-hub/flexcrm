@@ -20,6 +20,19 @@ export interface MonthlyReport {
   rows: MonthlyReportRow[];
 }
 
+export interface CollectionEntry {
+  booking_id: string;
+  booking_number: string;
+  unit_number: string;
+  project_name: string;
+  installment_name: string;
+  due_date: string;
+  demand_amount: number;
+  paid_amount: number;
+  outstanding: number;
+  is_overdue: boolean;
+}
+
 export const financeService = {
   async listSalesOrders(): Promise<SalesOrder[]> {
     const { data } = await apiClient.get<SalesOrder[]>("/finance/sales-orders");
@@ -45,6 +58,10 @@ export const financeService = {
   },
   async monthlyReport(month: string): Promise<MonthlyReport> {
     const { data } = await apiClient.get<MonthlyReport>(`/finance/reports/monthly?month=${month}`);
+    return data;
+  },
+  async listCollectionLedger(): Promise<CollectionEntry[]> {
+    const { data } = await apiClient.get<CollectionEntry[]>("/bookings/collection-ledger");
     return data;
   }
 };

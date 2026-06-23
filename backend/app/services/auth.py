@@ -6,6 +6,7 @@ from sqlalchemy import select
 
 from app.core.exceptions import AuthenticationError, ConflictError
 from app.core.permissions import effective_permissions_for_user
+from app.core.schema_naming import make_schema_name
 from app.core.security import (
     create_access_token,
     create_refresh_token,
@@ -13,7 +14,7 @@ from app.core.security import (
     hash_password,
     verify_password,
 )
-from app.core.tenancy import bypass, set_scope
+from app.core.tenancy import bypass, set_scope, set_tenant_schema
 from app.database.enums import UserRole, UserStatus
 from app.models.organization import Organization
 from app.models.user import User
@@ -24,6 +25,7 @@ from app.schemas.auth import LoginRequest, RefreshTokenRequest, RegisterRequest,
 from app.schemas.user import UserRead
 from app.services.base import ServiceBase
 from app.services.email import EmailService
+from app.services.tenant_provisioner import provision_tenant
 
 
 class AuthService(ServiceBase):
@@ -58,6 +60,7 @@ class AuthService(ServiceBase):
                 business_type=payload.business_type,
                 plan="free",
                 features=None,
+                schema_name=make_schema_name(payload.business_type.value, org_name),
             )
             self.session.add(organization)
             await self.session.flush()
@@ -92,8 +95,13 @@ class AuthService(ServiceBase):
                 ip_address=ip_address,
             )
 
-        # Scope the session before commit so any cache invalidation /
-        # event-driven inserts that fire on commit are correctly stamped.
+        # Provision the tenant schema before committing so the transaction
+        # rolls back cleanly if schema creation or migrations fail.
+        await provision_tenant(organization, self.session)
+
+        # Activate schema routing so _build_token_response_async can query
+        # UserPermissionGrant (which now lives in the tenant schema).
+        await set_tenant_schema(self.session, organization.schema_name)
         set_scope(self.session, organization.id)
         await self.commit()
 
@@ -127,6 +135,9 @@ class AuthService(ServiceBase):
                 ip_address=ip_address,
             )
 
+        # Platform admins only query public tables; no tenant schema needed.
+        if not user.is_platform_admin:
+            await self._activate_tenant_schema(user.organization_id)
         set_scope(self.session, user.organization_id)
         await self.commit()
         return await self._build_token_response_async(token_response, user)
@@ -161,6 +172,8 @@ class AuthService(ServiceBase):
                 ip_address=ip_address,
             )
 
+        if not user.is_platform_admin:
+            await self._activate_tenant_schema(user.organization_id)
         set_scope(self.session, user.organization_id)
         await self.commit()
         return await self._build_token_response_async(token_response, user)
@@ -177,29 +190,31 @@ class AuthService(ServiceBase):
             await self.refresh_token_repository.revoke(stored_token)
         await self.commit()
 
+    async def _activate_tenant_schema(self, org_id: UUID | None) -> None:
+        """Look up schema_name for org_id and activate tenant schema routing."""
+        if not org_id:
+            return
+        result = await self.session.execute(
+            select(Organization.schema_name).where(Organization.id == org_id)
+        )
+        schema_name: str | None = result.scalar_one_or_none()
+        if schema_name:
+            await set_tenant_schema(self.session, schema_name)
+
     async def load_user_with_permissions(self, user: User) -> UserRead:
         """Return a UserRead with the user's effective permissions populated.
 
-        Used by login/register/refresh (via `_build_token_response_async`) AND by
-        the `/auth/profile` endpoint, so the SPA's session-restore on page reload
-        sees the same permission set as the original login. Without this on the
-        profile path, `permissions` would default to `[]` and the frontend
-        sidebar / button gates lose their inputs (every nav item gets filtered out).
-
-        Grants are loaded under `bypass(session)` because login/register run with
-        the org scope freshly set (or about to be) — bypassing avoids any
-        ordering surprises on first login. For `/profile` the tenancy filter is
-        already in place via `get_current_user`, so the bypass is a no-op there
-        but harmless.
+        Called by login/register/refresh (via `_build_token_response_async`) AND by
+        the `/auth/profile` endpoint. By the time this is called, the tenant schema
+        is active so UserPermissionGrant queries route to the correct schema.
         """
-        with bypass(self.session):
-            grant_codes = (
-                await self.session.execute(
-                    select(UserPermissionGrant.permission_code).where(
-                        UserPermissionGrant.user_id == user.id
-                    )
+        grant_codes = (
+            await self.session.execute(
+                select(UserPermissionGrant.permission_code).where(
+                    UserPermissionGrant.user_id == user.id
                 )
-            ).scalars().all()
+            )
+        ).scalars().all()
         effective = effective_permissions_for_user(user.role, grant_codes)
         return UserRead.model_validate(user).model_copy(
             update={"permissions": sorted(code.value for code in effective)}

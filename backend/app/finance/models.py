@@ -1,13 +1,4 @@
-"""Finance domain models.
-
-Five tables created by the Phase 4 migration (alembic step 0005):
-- `sales_orders` — the "Deal" in spec terminology, created at Sold transition.
-- `sales_order_assists` — many-to-many crediting assist owners with percent share.
-- `invoices` — auto-created from a SalesOrder.
-- `payments` — recorded against an invoice.
-- `commission_ledger` — per-user running ledger of accrued/payable/paid/reversed.
-- `refunds` — reverses a payment, debits the commission.
-"""
+"""Finance domain models — per-tenant schema."""
 from datetime import date, datetime
 from decimal import Decimal
 from uuid import UUID
@@ -28,20 +19,20 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.core.tenancy import OrgScopedMixin
-from app.database.base import Base
+from app.database.base import TenantBase
 from app.database.enums import CommissionDirection, InvoiceStatus, PaymentStatus
-from app.models.base import AuditMixin, SoftDeleteMixin, TimestampMixin, UUIDPrimaryKeyMixin
+from app.models.base import TenantAuditMixin, TenantSoftDeleteMixin, TimestampMixin, UUIDPrimaryKeyMixin
 
 
-class SalesOrder(Base, UUIDPrimaryKeyMixin, TimestampMixin, AuditMixin, SoftDeleteMixin, OrgScopedMixin):
+class SalesOrder(TenantBase, UUIDPrimaryKeyMixin, TimestampMixin, TenantAuditMixin, TenantSoftDeleteMixin):
     __tablename__ = "sales_orders"
     __table_args__ = (
         CheckConstraint("deal_value >= 0", name="ck_sales_orders_value_non_negative"),
-        # Per-org sequence: each org maintains its own SO-1001, SO-1002, …
-        UniqueConstraint("organization_id", "order_number", name="uq_sales_orders_org_order_number"),
+        # Schema isolation removes the need for org_id in the uniqueness constraint.
+        UniqueConstraint("order_number", name="uq_sales_orders_order_number"),
         Index("ix_sales_orders_customer", "customer_id"),
         Index("ix_sales_orders_owner", "primary_owner_id"),
+        {"schema": "tenant"},
     )
 
     order_number: Mapped[str] = mapped_column(String(32), nullable=False)
@@ -58,7 +49,7 @@ class SalesOrder(Base, UUIDPrimaryKeyMixin, TimestampMixin, AuditMixin, SoftDele
     )
     primary_owner_id: Mapped[UUID | None] = mapped_column(
         Uuid,
-        ForeignKey("users.id", ondelete="SET NULL"),
+        ForeignKey("public.users.id", ondelete="SET NULL"),
         nullable=True,
     )
     title: Mapped[str] = mapped_column(String(255), nullable=False)
@@ -89,11 +80,12 @@ class SalesOrder(Base, UUIDPrimaryKeyMixin, TimestampMixin, AuditMixin, SoftDele
     )
 
 
-class SalesOrderAssist(Base, UUIDPrimaryKeyMixin, OrgScopedMixin):
+class SalesOrderAssist(TenantBase, UUIDPrimaryKeyMixin):
     __tablename__ = "sales_order_assists"
     __table_args__ = (
         CheckConstraint("percent >= 0 AND percent <= 100", name="ck_sales_order_assists_percent_range"),
         Index("ix_sales_order_assists_user", "user_id"),
+        {"schema": "tenant"},
     )
 
     sales_order_id: Mapped[UUID] = mapped_column(
@@ -104,7 +96,7 @@ class SalesOrderAssist(Base, UUIDPrimaryKeyMixin, OrgScopedMixin):
     )
     user_id: Mapped[UUID] = mapped_column(
         Uuid,
-        ForeignKey("users.id", ondelete="CASCADE"),
+        ForeignKey("public.users.id", ondelete="CASCADE"),
         nullable=False,
     )
     percent: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
@@ -114,14 +106,14 @@ class SalesOrderAssist(Base, UUIDPrimaryKeyMixin, OrgScopedMixin):
     user = relationship("User")
 
 
-class Invoice(Base, UUIDPrimaryKeyMixin, TimestampMixin, AuditMixin, SoftDeleteMixin, OrgScopedMixin):
+class Invoice(TenantBase, UUIDPrimaryKeyMixin, TimestampMixin, TenantAuditMixin, TenantSoftDeleteMixin):
     __tablename__ = "invoices"
     __table_args__ = (
         CheckConstraint("amount >= 0", name="ck_invoices_amount_non_negative"),
-        # Per-org invoice numbering: INV-1001 in Org A and Org B don't collide.
-        UniqueConstraint("organization_id", "invoice_number", name="uq_invoices_org_invoice_number"),
+        UniqueConstraint("invoice_number", name="uq_invoices_invoice_number"),
         Index("ix_invoices_sales_order", "sales_order_id"),
         Index("ix_invoices_status", "status"),
+        {"schema": "tenant"},
     )
 
     invoice_number: Mapped[str] = mapped_column(String(32), nullable=False)
@@ -146,11 +138,12 @@ class Invoice(Base, UUIDPrimaryKeyMixin, TimestampMixin, AuditMixin, SoftDeleteM
     )
 
 
-class Payment(Base, UUIDPrimaryKeyMixin, OrgScopedMixin):
+class Payment(TenantBase, UUIDPrimaryKeyMixin):
     __tablename__ = "payments"
     __table_args__ = (
         CheckConstraint("amount >= 0", name="ck_payments_amount_non_negative"),
         Index("ix_payments_invoice", "invoice_id"),
+        {"schema": "tenant"},
     )
 
     invoice_id: Mapped[UUID] = mapped_column(
@@ -166,22 +159,23 @@ class Payment(Base, UUIDPrimaryKeyMixin, OrgScopedMixin):
     txn_ref: Mapped[str | None] = mapped_column(String(120), nullable=True)
     recorded_by_id: Mapped[UUID | None] = mapped_column(
         Uuid,
-        ForeignKey("users.id", ondelete="SET NULL"),
+        ForeignKey("public.users.id", ondelete="SET NULL"),
         nullable=True,
     )
 
     invoice = relationship("Invoice", back_populates="payments")
 
 
-class CommissionLedger(Base, UUIDPrimaryKeyMixin, OrgScopedMixin):
+class CommissionLedger(TenantBase, UUIDPrimaryKeyMixin):
     __tablename__ = "commission_ledger"
     __table_args__ = (
         Index("ix_commission_ledger_user_recorded", "user_id", "recorded_at"),
+        {"schema": "tenant"},
     )
 
     user_id: Mapped[UUID] = mapped_column(
         Uuid,
-        ForeignKey("users.id", ondelete="CASCADE"),
+        ForeignKey("public.users.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     )
@@ -205,10 +199,11 @@ class CommissionLedger(Base, UUIDPrimaryKeyMixin, OrgScopedMixin):
     sales_order = relationship("SalesOrder")
 
 
-class Refund(Base, UUIDPrimaryKeyMixin, OrgScopedMixin):
+class Refund(TenantBase, UUIDPrimaryKeyMixin):
     __tablename__ = "refunds"
     __table_args__ = (
         CheckConstraint("amount >= 0", name="ck_refunds_amount_non_negative"),
+        {"schema": "tenant"},
     )
 
     payment_id: Mapped[UUID] = mapped_column(
@@ -224,7 +219,7 @@ class Refund(Base, UUIDPrimaryKeyMixin, OrgScopedMixin):
     )
     refunded_by_id: Mapped[UUID | None] = mapped_column(
         Uuid,
-        ForeignKey("users.id", ondelete="SET NULL"),
+        ForeignKey("public.users.id", ondelete="SET NULL"),
         nullable=True,
     )
 

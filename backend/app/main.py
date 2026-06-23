@@ -12,9 +12,8 @@ from app.core.platform_admin import ensure_platform_admin
 from app.core.tenancy import register_listeners as register_tenancy_listeners
 from app.database.session import db_manager
 from app.middleware import RateLimitMiddleware, RequestContextMiddleware
-# Importing the models package walks every model file and registers its
-# SQLAlchemy mapper. Side-effect: every OrgScopedMixin subclass joins the
-# scoping registry so the global filter knows about it.
+# Import model packages so SQLAlchemy registers mappers for both SharedBase
+# and TenantBase before the application starts accepting requests.
 import app.models  # noqa: F401
 import app.finance.models  # noqa: F401
 import app.hr.models  # noqa: F401

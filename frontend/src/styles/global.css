@@ -46,6 +46,20 @@
 
   --sidebar-width: 240px;
   --topbar-height: 56px;
+
+  /* Inventory unit lifecycle status */
+  --status-available: #16a34a;
+  --status-available-soft: #dcfce7;
+  --status-reserved: #d97706;
+  --status-reserved-soft: #fef3c7;
+  --status-booked: #2563eb;
+  --status-booked-soft: #dbeafe;
+  --status-sold: #6b7280;
+  --status-sold-soft: #f3f4f6;
+
+  /* Display scale — prices, unit counts, key numbers */
+  --text-display-xl: 2rem;
+  --text-display-lg: 1.5rem;
 }
 
 * {

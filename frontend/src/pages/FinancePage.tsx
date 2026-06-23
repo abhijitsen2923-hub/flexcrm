@@ -11,18 +11,20 @@ import {
   useToast,
   type DataTableColumn
 } from "../components";
+import { FEATURES } from "../config/features";
 import { usePermissions } from "../hooks/usePermissions";
 import { useRealtimeEvent } from "../realtime";
 import {
   financeService,
+  type CollectionEntry,
   type MonthlyReport
 } from "../services/finance";
 import type { CommissionLedgerEntry, Invoice, SalesOrder } from "../types";
 import { extractErrorMessage } from "../utils/errors";
-import { formatCurrency, formatDateTime } from "../utils/format";
+import { formatCurrency, formatDateTime, formatInr } from "../utils/format";
 
 
-type TabKey = "orders" | "invoices" | "commissions" | "monthly";
+type TabKey = "orders" | "invoices" | "commissions" | "monthly" | "collection";
 
 
 function ymNow(): string {
@@ -36,6 +38,7 @@ export default function FinancePage() {
   const [orders, setOrders] = useState<SalesOrder[]>([]);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [ledger, setLedger] = useState<CommissionLedgerEntry[]>([]);
+  const [collection, setCollection] = useState<CollectionEntry[]>([]);
   const [report, setReport] = useState<MonthlyReport | null>(null);
   const [reportMonth, setReportMonth] = useState(ymNow());
   const [loading, setLoading] = useState(false);
@@ -56,14 +59,16 @@ export default function FinancePage() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [o, inv, led] = await Promise.all([
+      const [o, inv, led, col] = await Promise.all([
         financeService.listSalesOrders(),
         financeService.listInvoices(),
-        financeService.listLedger()
+        financeService.listLedger(),
+        FEATURES.bookings ? financeService.listCollectionLedger() : Promise.resolve([])
       ]);
       setOrders(o);
       setInvoices(inv);
       setLedger(led);
+      setCollection(col);
     } catch (error) {
       toast.error("Could not load finance data", extractErrorMessage(error));
     } finally {
@@ -188,8 +193,12 @@ export default function FinancePage() {
       </div>
 
       <div className="drawer__tabs" style={{ marginBottom: "1rem" }}>
-        {(["orders", "invoices", "commissions", "monthly"] as TabKey[])
-          .filter((key) => key !== "monthly" || canSeeReports)
+        {(["orders", "invoices", "commissions", "collection", "monthly"] as TabKey[])
+          .filter((key) => {
+            if (key === "monthly") return canSeeReports;
+            if (key === "collection") return FEATURES.bookings;
+            return true;
+          })
           .map((key) => (
             <button
               key={key}
@@ -203,7 +212,9 @@ export default function FinancePage() {
                   ? "Invoices"
                   : key === "commissions"
                     ? "Commission Ledger"
-                    : "Monthly Report"}
+                    : key === "collection"
+                      ? "Collection Ledger"
+                      : "Monthly Report"}
             </button>
           ))}
       </div>
@@ -246,6 +257,73 @@ export default function FinancePage() {
               rows={ledger}
               rowKey={(row) => row.id}
               empty={<EmptyState title="Ledger is empty" />}
+            />
+          </div>
+        </div>
+      )}
+
+      {tab === "collection" && (
+        <div className="card" style={{ padding: 0 }}>
+          <div className="table-wrap" style={{ border: "none", boxShadow: "none" }}>
+            <DataTable
+              columns={[
+                {
+                  key: "booking",
+                  header: "Booking",
+                  render: (row) => <strong>{row.booking_number || row.booking_id.slice(0, 8)}</strong>
+                },
+                { key: "project", header: "Project", render: (row) => row.project_name },
+                { key: "unit", header: "Unit", render: (row) => row.unit_number },
+                { key: "installment", header: "Installment", render: (row) => row.installment_name },
+                {
+                  key: "due",
+                  header: "Due date",
+                  render: (row) => (
+                    <span style={row.is_overdue ? { color: "var(--color-danger)", fontWeight: 600 } : {}}>
+                      {new Date(row.due_date).toLocaleDateString()}
+                    </span>
+                  )
+                },
+                {
+                  key: "demand",
+                  header: "Demand",
+                  align: "right",
+                  render: (row) => formatInr(row.demand_amount)
+                },
+                {
+                  key: "paid",
+                  header: "Paid",
+                  align: "right",
+                  render: (row) => (
+                    <span style={{ color: "var(--status-available)" }}>{formatInr(row.paid_amount)}</span>
+                  )
+                },
+                {
+                  key: "outstanding",
+                  header: "Outstanding",
+                  align: "right",
+                  render: (row) => (
+                    <span style={row.outstanding > 0 ? { color: "var(--color-danger)", fontWeight: 600 } : {}}>
+                      {formatInr(row.outstanding)}
+                    </span>
+                  )
+                },
+                {
+                  key: "status",
+                  header: "Status",
+                  render: (row) =>
+                    row.is_overdue ? (
+                      <Badge tone="danger">Overdue</Badge>
+                    ) : row.outstanding === 0 ? (
+                      <Badge tone="success">Cleared</Badge>
+                    ) : (
+                      <Badge tone="warning">Pending</Badge>
+                    )
+                }
+              ] as DataTableColumn<CollectionEntry>[]}
+              rows={collection}
+              rowKey={(row) => `${row.booking_id}-${row.installment_name}`}
+              empty={<EmptyState title="No collection entries" description="Payment schedules from bookings appear here." />}
             />
           </div>
         </div>

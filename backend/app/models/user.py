@@ -1,13 +1,14 @@
-from sqlalchemy import Boolean, Enum, Index, String, text
+from uuid import UUID
+
+from sqlalchemy import Boolean, Enum, ForeignKey, Index, String, Uuid, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.core.tenancy import OrgScopedMixin
 from app.database.base import Base
 from app.database.enums import LeadIndustry, UserRole, UserStatus
 from app.models.base import AuditMixin, SoftDeleteMixin, TimestampMixin, UUIDPrimaryKeyMixin
 
 
-class User(Base, UUIDPrimaryKeyMixin, TimestampMixin, AuditMixin, SoftDeleteMixin, OrgScopedMixin):
+class User(Base, UUIDPrimaryKeyMixin, TimestampMixin, AuditMixin, SoftDeleteMixin):
     __tablename__ = "users"
     __table_args__ = (
         Index(
@@ -42,10 +43,19 @@ class User(Base, UUIDPrimaryKeyMixin, TimestampMixin, AuditMixin, SoftDeleteMixi
         index=True,
     )
 
+    # Users remain in public schema. organization_id links each user to their
+    # tenant so the auth layer can resolve schema_name for schema routing.
+    organization_id: Mapped[UUID | None] = mapped_column(
+        Uuid,
+        ForeignKey("organizations.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+
     organization = relationship(
         "Organization",
         back_populates="users",
-        foreign_keys=lambda: [User.organization_id],
+        foreign_keys=[organization_id],
     )
 
     assigned_leads = relationship("Lead", back_populates="assigned_to", foreign_keys="Lead.assigned_to_id")

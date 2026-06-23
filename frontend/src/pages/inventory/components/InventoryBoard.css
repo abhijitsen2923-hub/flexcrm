@@ -1,0 +1,142 @@
+.inv-board {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+}
+
+.inv-board--empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 300px;
+  color: var(--color-text-muted);
+}
+
+/* Legend */
+.inv-legend {
+  display: flex;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+  padding: var(--space-3) var(--space-4);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.inv-legend__item {
+  font-size: 0.75rem;
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.inv-legend__item::before {
+  content: "";
+  width: 12px;
+  height: 12px;
+  border-radius: var(--radius-sm);
+  display: inline-block;
+}
+.inv-legend__item--available::before { background: var(--status-available); }
+.inv-legend__item--reserved::before  { background: var(--status-reserved); }
+.inv-legend__item--booked::before    { background: var(--status-booked); }
+.inv-legend__item--sold::before      { background: var(--status-sold); }
+
+/* Project section */
+.inv-project {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.inv-project__header {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+}
+.inv-project__header h2 {
+  font-size: 1.1rem;
+  font-weight: 600;
+  margin: 0;
+}
+.inv-project__meta {
+  font-size: 0.8rem;
+  color: var(--color-text-muted);
+}
+
+.inv-project__towers {
+  display: flex;
+  gap: var(--space-8);
+  overflow-x: auto;
+  padding-bottom: var(--space-2);
+}
+
+/* Tower */
+.inv-tower {
+  min-width: 200px;
+  flex-shrink: 0;
+}
+.inv-tower__name {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin: 0 0 var(--space-3);
+}
+.inv-tower__floors {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+/* Floor row */
+.inv-floor {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.inv-floor__label {
+  width: 2rem;
+  font-size: 0.7rem;
+  color: var(--color-text-subtle);
+  text-align: right;
+  flex-shrink: 0;
+}
+.inv-floor__units {
+  display: flex;
+  gap: 2px;
+  flex-wrap: wrap;
+}
+
+/* Unit cell */
+.inv-cell {
+  width: 48px;
+  height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: var(--radius-sm);
+  font-size: 0.65rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 0.15s, transform 0.1s;
+  color: #fff;
+  letter-spacing: 0.02em;
+}
+.inv-cell:hover { opacity: 0.85; transform: scale(1.08); }
+.inv-cell:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
+
+.inv-cell--available { background: var(--status-available); }
+.inv-cell--reserved  { background: var(--status-reserved); }
+.inv-cell--booked    { background: var(--status-booked); }
+.inv-cell--sold      { background: var(--status-sold); }
+
+/* Backdrop for the panel */
+.drawer-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.3);
+  z-index: 49;
+}

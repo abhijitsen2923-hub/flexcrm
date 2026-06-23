@@ -1,9 +1,4 @@
-"""HR domain models.
-
-Two tables:
-- `employee_profiles` — 1:1 with User. Targets, commission rate, score weights.
-- `performance_snapshots` — daily row per user. Computed by the scorecard job.
-"""
+"""HR domain models — per-tenant schema."""
 from datetime import date, datetime
 from decimal import Decimal
 from uuid import UUID
@@ -23,14 +18,10 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.core.tenancy import OrgScopedMixin
-from app.database.base import Base
+from app.database.base import TenantBase
 from app.models.base import TimestampMixin, UUIDPrimaryKeyMixin
 
 
-# Default 40/20/15/10/10/5 weighting (spec §5.3). Each EmployeeProfile can
-# override via `score_weights`. The keys must sum to 100; the scorecard
-# service normalises if they don't.
 DEFAULT_SCORE_WEIGHTS: dict[str, int] = {
     "revenue": 40,
     "collections": 20,
@@ -41,16 +32,17 @@ DEFAULT_SCORE_WEIGHTS: dict[str, int] = {
 }
 
 
-class EmployeeProfile(Base, UUIDPrimaryKeyMixin, TimestampMixin, OrgScopedMixin):
+class EmployeeProfile(TenantBase, UUIDPrimaryKeyMixin, TimestampMixin):
     __tablename__ = "employee_profiles"
     __table_args__ = (
         UniqueConstraint("user_id", name="uq_employee_profiles_user"),
         CheckConstraint("commission_rate >= 0 AND commission_rate <= 100", name="ck_employee_profiles_rate_range"),
+        {"schema": "tenant"},
     )
 
     user_id: Mapped[UUID] = mapped_column(
         Uuid,
-        ForeignKey("users.id", ondelete="CASCADE"),
+        ForeignKey("public.users.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     )
@@ -58,7 +50,7 @@ class EmployeeProfile(Base, UUIDPrimaryKeyMixin, TimestampMixin, OrgScopedMixin)
     commission_rate: Mapped[Decimal] = mapped_column(Numeric(5, 2), nullable=False, default=0)
     manager_id: Mapped[UUID | None] = mapped_column(
         Uuid,
-        ForeignKey("users.id", ondelete="SET NULL"),
+        ForeignKey("public.users.id", ondelete="SET NULL"),
         nullable=True,
     )
     score_weights: Mapped[dict | None] = mapped_column(JSON, nullable=True)
@@ -67,16 +59,17 @@ class EmployeeProfile(Base, UUIDPrimaryKeyMixin, TimestampMixin, OrgScopedMixin)
     manager = relationship("User", foreign_keys=[manager_id])
 
 
-class PerformanceSnapshot(Base, UUIDPrimaryKeyMixin, OrgScopedMixin):
+class PerformanceSnapshot(TenantBase, UUIDPrimaryKeyMixin):
     __tablename__ = "performance_snapshots"
     __table_args__ = (
         UniqueConstraint("user_id", "snapshot_date", name="uq_performance_snapshots_user_date"),
         Index("ix_performance_snapshots_user_date", "user_id", "snapshot_date"),
+        {"schema": "tenant"},
     )
 
     user_id: Mapped[UUID] = mapped_column(
         Uuid,
-        ForeignKey("users.id", ondelete="CASCADE"),
+        ForeignKey("public.users.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     )

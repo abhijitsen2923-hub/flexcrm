@@ -4,17 +4,17 @@ from uuid import UUID
 from sqlalchemy import DateTime, Enum, ForeignKey, Index, Numeric, Uuid, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.core.tenancy import OrgScopedMixin
-from app.database.base import Base
+from app.database.base import TenantBase
 from app.database.enums import ReferralStatus
 from app.models.base import UUIDPrimaryKeyMixin
 
 
-class Referral(Base, UUIDPrimaryKeyMixin, OrgScopedMixin):
+class Referral(TenantBase, UUIDPrimaryKeyMixin):
     __tablename__ = "referrals"
     __table_args__ = (
         Index("ix_referrals_referring_customer", "referring_customer_id"),
         Index("ix_referrals_referred_lead", "referred_lead_id"),
+        {"schema": "tenant"},
     )
 
     referring_customer_id: Mapped[UUID] = mapped_column(

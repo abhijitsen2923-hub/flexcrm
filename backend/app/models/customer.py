@@ -4,21 +4,20 @@ from uuid import UUID
 from sqlalchemy import DateTime, Enum, ForeignKey, Index, Integer, Numeric, String, Text, UniqueConstraint, Uuid
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.core.tenancy import OrgScopedMixin
-from app.database.base import Base
+from app.database.base import TenantBase
 from app.database.enums import CustomerLifecycleStage, CustomerStatus
-from app.models.base import AuditMixin, SoftDeleteMixin, TimestampMixin, UUIDPrimaryKeyMixin
+from app.models.base import TenantAuditMixin, TenantSoftDeleteMixin, TimestampMixin, UUIDPrimaryKeyMixin
 
 
-class Customer(Base, UUIDPrimaryKeyMixin, TimestampMixin, AuditMixin, SoftDeleteMixin, OrgScopedMixin):
+class Customer(TenantBase, UUIDPrimaryKeyMixin, TimestampMixin, TenantAuditMixin, TenantSoftDeleteMixin):
     __tablename__ = "customers"
     __table_args__ = (
         Index("ix_customers_company_name", "company_name"),
         Index("ix_customers_source_status", "source", "status"),
         Index("ix_customers_lifecycle_stage", "lifecycle_stage"),
-        # Per-org customer numbering; each org maintains its own sequence
-        # starting at 50001.
-        UniqueConstraint("organization_id", "customer_number", name="uq_customers_org_customer_number"),
+        # Schema isolation removes the need for org_id in the uniqueness constraint.
+        UniqueConstraint("customer_number", name="uq_customers_customer_number"),
+        {"schema": "tenant"},
     )
 
     company_name: Mapped[str] = mapped_column(String(255), nullable=False)
@@ -33,14 +32,11 @@ class Customer(Base, UUIDPrimaryKeyMixin, TimestampMixin, AuditMixin, SoftDelete
         default=CustomerStatus.prospect,
     )
 
-    # Phase 3 — full customer lifecycle.
     lifecycle_stage: Mapped[CustomerLifecycleStage] = mapped_column(
         Enum(CustomerLifecycleStage, name="customer_lifecycle_stage_enum"),
         nullable=False,
         default=CustomerLifecycleStage.onboarding,
     )
-    # Per-org sequence (50001+). Uniqueness is enforced by the composite
-    # `uq_customers_org_customer_number` constraint in __table_args__.
     customer_number: Mapped[int | None] = mapped_column(Integer, nullable=True)
     onboarding_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     renewal_due_at: Mapped[date | None] = mapped_column(nullable=True, index=True)
@@ -48,18 +44,17 @@ class Customer(Base, UUIDPrimaryKeyMixin, TimestampMixin, AuditMixin, SoftDelete
     churn_reason: Mapped[str | None] = mapped_column(String(255), nullable=True)
     original_owner_id: Mapped[UUID | None] = mapped_column(
         Uuid,
-        ForeignKey("users.id", ondelete="SET NULL"),
+        ForeignKey("public.users.id", ondelete="SET NULL"),
         nullable=True,
         index=True,
     )
     current_owner_id: Mapped[UUID | None] = mapped_column(
         Uuid,
-        ForeignKey("users.id", ondelete="SET NULL"),
+        ForeignKey("public.users.id", ondelete="SET NULL"),
         nullable=True,
         index=True,
     )
 
-    # Tracks the originating Lead (if any) that this Customer was promoted from.
     source_lead_id: Mapped[UUID | None] = mapped_column(
         Uuid,
         ForeignKey("leads.id", ondelete="SET NULL", use_alter=True, name="fk_customers_source_lead"),
@@ -72,10 +67,6 @@ class Customer(Base, UUIDPrimaryKeyMixin, TimestampMixin, AuditMixin, SoftDelete
         back_populates="customer",
         foreign_keys="Lead.customer_id",
     )
-    # `selectin` (separate SELECT) — a LEFT JOIN would compose poorly with
-    # the tenancy filter's `with_loader_criteria` on `leads_1.organization_id`,
-    # because the NULL row from a missing join fails the equality check and
-    # drops the parent customer.
     source_lead = relationship(
         "Lead",
         foreign_keys=[source_lead_id],

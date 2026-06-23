@@ -4,17 +4,17 @@ from uuid import UUID
 from sqlalchemy import CheckConstraint, Enum, ForeignKey, Index, Numeric, String, Uuid
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.core.tenancy import OrgScopedMixin
-from app.database.base import Base
+from app.database.base import TenantBase
 from app.database.enums import DealStage, DealStatus
-from app.models.base import AuditMixin, SoftDeleteMixin, TimestampMixin, UUIDPrimaryKeyMixin
+from app.models.base import TenantAuditMixin, TenantSoftDeleteMixin, TimestampMixin, UUIDPrimaryKeyMixin
 
 
-class Deal(Base, UUIDPrimaryKeyMixin, TimestampMixin, AuditMixin, SoftDeleteMixin, OrgScopedMixin):
+class Deal(TenantBase, UUIDPrimaryKeyMixin, TimestampMixin, TenantAuditMixin, TenantSoftDeleteMixin):
     __tablename__ = "deals"
     __table_args__ = (
         CheckConstraint("amount >= 0", name="ck_deals_amount_non_negative"),
         Index("ix_deals_stage_status", "stage", "status"),
+        {"schema": "tenant"},
     )
 
     customer_id: Mapped[UUID] = mapped_column(

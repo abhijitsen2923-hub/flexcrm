@@ -28,7 +28,7 @@ import { mergeModules } from "../config/features";
 import { useOrgModules } from "../context/OrgContext";
 import { useDashboard } from "../hooks/useDashboard";
 import { useRealtimeEvent } from "../realtime";
-import { formatCurrency, formatNumber, formatRelative } from "../utils/format";
+import { formatCurrency, formatInr, formatNumber, formatRelative } from "../utils/format";
 
 
 const PIE_COLORS = ["#2563eb", "#0ea5e9", "#16a34a", "#d97706", "#dc2626", "#7c3aed"];
@@ -56,7 +56,8 @@ export default function DashboardPage() {
       event.event.startsWith("customer.") ||
       event.event.startsWith("lead.") ||
       event.event.startsWith("deal.") ||
-      event.event.startsWith("task.")
+      event.event.startsWith("task.") ||
+      event.event.startsWith("unit.")
     ) {
       void dashboard.refresh();
     }
@@ -67,6 +68,18 @@ export default function DashboardPage() {
   }
 
   const { summary, charts, recentActivities } = dashboard;
+
+  // Optional real-estate fields — populated only when inventory module is active
+  type InventorySummary = typeof summary & {
+    units_available?: number;
+    units_booked_month?: number;
+    collection_month?: number;
+    inventory_status_breakdown?: { label: string; value: number }[];
+  };
+  const invSummary = summary as InventorySummary;
+  const invCharts = charts as typeof charts & {
+    inventory_status_breakdown?: { label: string; value: number }[];
+  };
 
   return (
     <>
@@ -105,6 +118,23 @@ export default function DashboardPage() {
           <KpiCard label="Recent activity (7d)" value={formatNumber(summary.recent_activity_count)} />
         )}
       </div>
+
+      {FEATURES.inventory && (
+        <div className="kpi-grid" style={{ marginTop: 0 }}>
+          <KpiCard
+            label="Units available"
+            value={formatNumber(invSummary.units_available ?? 0)}
+          />
+          <KpiCard
+            label="Units booked (month)"
+            value={formatNumber(invSummary.units_booked_month ?? 0)}
+          />
+          <KpiCard
+            label="Collection (month)"
+            value={formatInr(invSummary.collection_month ?? 0)}
+          />
+        </div>
+      )}
 
       <div className={FEATURES.deals || FEATURES.finance ? "chart-grid chart-grid--2-1" : "chart-grid"}>
         {(FEATURES.deals || FEATURES.finance) && (
@@ -152,6 +182,42 @@ export default function DashboardPage() {
           )}
         </Card>
       </div>
+
+      {FEATURES.inventory && (
+        <div className="chart-grid">
+          <Card title="Inventory status" subtitle="Units by lifecycle stage">
+            {!invCharts.inventory_status_breakdown?.length ? (
+              <EmptyState title="No inventory data yet" description="Add a project and units to see the breakdown." />
+            ) : (
+              <div style={{ height: 240 }}>
+                <ResponsiveContainer>
+                  <PieChart>
+                    <Pie
+                      data={invCharts.inventory_status_breakdown}
+                      dataKey="value"
+                      nameKey="label"
+                      innerRadius={50}
+                      outerRadius={80}
+                    >
+                      {invCharts.inventory_status_breakdown.map((entry, index) => {
+                        const STATUS_COLORS: Record<string, string> = {
+                          Available: "#16a34a",
+                          Reserved: "#d97706",
+                          Booked: "#2563eb",
+                          Sold: "#6b7280"
+                        };
+                        return <Cell key={index} fill={STATUS_COLORS[entry.label] ?? PIE_COLORS[index % PIE_COLORS.length]} />;
+                      })}
+                    </Pie>
+                    <Tooltip />
+                    <Legend />
+                  </PieChart>
+                </ResponsiveContainer>
+              </div>
+            )}
+          </Card>
+        </div>
+      )}
 
       {(FEATURES.tasks || FEATURES.activities) && (
         <div className={FEATURES.tasks && FEATURES.activities ? "chart-grid chart-grid--1-1" : "chart-grid"}>

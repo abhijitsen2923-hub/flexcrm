@@ -9,6 +9,7 @@ Called once in the FastAPI lifespan. Idempotent:
 import logging
 
 from app.core.config import get_settings
+from app.core.schema_naming import make_schema_name
 from app.core.security import hash_password
 from app.core.tenancy import bypass
 from app.database.enums import LeadIndustry, UserRole, UserStatus
@@ -46,6 +47,7 @@ async def ensure_platform_admin() -> None:
                 name="FlexCRM Platform",
                 business_type=LeadIndustry.education,
                 plan="platform",
+                schema_name=make_schema_name(LeadIndustry.education.value, "FlexCRM Platform"),
             )
             session.add(org)
             await session.flush()   # populate org.id

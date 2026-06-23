@@ -1,0 +1,73 @@
+.possession-card {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+}
+
+.possession-card__info {
+  min-width: 150px;
+}
+
+.possession-card__id {
+  font-weight: 600;
+  font-size: 0.95rem;
+}
+
+.possession-card__progress {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex: 1;
+  min-width: 140px;
+}
+
+.possession-progress-bar {
+  height: 6px;
+  background: var(--color-border);
+  border-radius: 3px;
+  flex: 1;
+  overflow: hidden;
+}
+
+.possession-progress-bar__fill {
+  height: 100%;
+  width: var(--fill, 0%);
+  background: var(--color-primary);
+  border-radius: 3px;
+  transition: width 0.3s ease;
+}
+
+/* Checklist modal */
+.possession-checklist {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.possession-check-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  cursor: pointer;
+  padding: var(--space-3) 0;
+  border-bottom: 1px solid var(--color-border);
+  user-select: none;
+}
+
+.possession-check-item:last-child {
+  border-bottom: none;
+}
+
+.possession-check-item input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  cursor: pointer;
+  accent-color: var(--color-primary);
+}
+
+.possession-check-item .done-text {
+  text-decoration: line-through;
+  color: var(--color-text-muted);
+}

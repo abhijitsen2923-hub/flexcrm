@@ -1,0 +1,52 @@
+.unit-panel {
+  position: fixed;
+  top: 0;
+  right: 0;
+  height: 100vh;
+  width: min(420px, 100%);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-lg);
+  display: flex;
+  flex-direction: column;
+  z-index: 50;
+  border-left: 1px solid var(--color-border);
+}
+
+.unit-panel__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  padding: var(--space-6);
+  overflow-y: auto;
+  flex: 1;
+}
+
+.unit-panel__status-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.unit-panel__grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-4);
+}
+
+.unit-panel__field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.unit-panel__label {
+  font-size: 0.75rem;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.unit-panel__book-btn {
+  width: 100%;
+  margin-top: auto;
+}

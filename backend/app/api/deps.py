@@ -5,18 +5,38 @@ from fastapi.security import HTTPAuthorizationCredentials
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.cache import cache_client
+from app.core.config import get_settings
 from app.core.exceptions import AuthenticationError, AuthorizationError
 from app.core.permissions import (
     PermissionCode,
     effective_permissions_for_user,
 )
 from app.core.security import bearer_scheme, decode_token, get_bearer_token
-from app.core.tenancy import bypass, set_scope
+from app.core.tenancy import bypass, set_scope, set_tenant_schema
 from app.database.enums import UserStatus
 from app.database.session import get_db_session
+from app.models.organization import Organization
 from app.models.user_permission_grant import UserPermissionGrant
 from app.repositories.users import UserRepository
 from app.schemas.common import PaginationParams
+
+
+async def _resolve_schema_for_org(session: AsyncSession, org_id: UUID) -> str | None:
+    """Return the tenant schema_name for org_id, using Redis cache."""
+    cache_key = f"schema:{org_id}"
+    cached = await cache_client.get_json(cache_key)
+    if cached:
+        return cached
+
+    result = await session.execute(
+        select(Organization.schema_name).where(Organization.id == org_id)
+    )
+    schema_name: str | None = result.scalar_one_or_none()
+    if schema_name:
+        settings = get_settings()
+        await cache_client.set_json(cache_key, schema_name, ttl_seconds=settings.cache_ttl_seconds)
+    return schema_name
 
 
 async def get_current_user(
@@ -28,24 +48,30 @@ async def get_current_user(
     if payload.get("type") != "access":
         raise AuthenticationError("Invalid access token.")
 
-    # The user lookup itself must bypass the tenancy filter — at this point
-    # the session has no org context yet. As soon as we resolve the user, we
-    # set the scope so every subsequent query in the request is filtered.
+    # The user lookup must bypass tenant routing — at this point the session
+    # has no schema context yet. SharedBase tables (users) are always in public.
     with bypass(session):
         user = await UserRepository(session).get(UUID(payload["sub"]))
     if user is None or user.status != UserStatus.active:
         raise AuthenticationError("The user account is not active.")
 
-    # Prefer the org_id from the JWT (cheap), fall back to the user row in
-    # case an older token was issued before this field existed.
-    org_id_str = payload.get("org") or (str(user.organization_id) if user.organization_id else None)
-    set_scope(session, UUID(org_id_str) if org_id_str else None)
-
-    # Stamp the is_platform_admin flag from the JWT onto the transient User
-    # object so endpoint code can check it without a second DB hit. The model
-    # column is the source of truth; the JWT merely caches it for the request.
+    # Stamp is_platform_admin from JWT (avoids a second DB hit per request).
     if payload.get("is_platform_admin"):
         user.is_platform_admin = True
+
+    if user.is_platform_admin:
+        # Platform admins query public tables only; no tenant schema routing needed.
+        return user
+
+    # Resolve org_id and activate tenant schema routing for this request.
+    org_id_str = payload.get("org") or (str(user.organization_id) if user.organization_id else None)
+    org_id = UUID(org_id_str) if org_id_str else None
+    set_scope(session, org_id)
+
+    if org_id:
+        schema_name = await _resolve_schema_for_org(session, org_id)
+        if schema_name:
+            await set_tenant_schema(session, schema_name)
 
     return user
 
@@ -56,8 +82,8 @@ async def load_effective_permissions(
 ) -> frozenset[PermissionCode]:
     """Compute the user's effective permissions: role defaults ∪ explicit grants.
 
-    Grants are tenancy-filtered automatically because `UserPermissionGrant`
-    inherits `OrgScopedMixin` — Org A grants are invisible to Org B sessions.
+    Grants are in the tenant schema and are automatically scoped by the
+    schema_translate_map set in get_current_user.
     """
     rows = (
         await session.execute(
