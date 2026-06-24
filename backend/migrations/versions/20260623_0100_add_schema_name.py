@@ -26,18 +26,41 @@ def upgrade() -> None:
     op.add_column("organizations", sa.Column("schema_name", sa.Text(), nullable=True))
 
     # Step 2: Backfill — derive schema name from business_type + name.
-    # regexp_replace strips non-alphanumeric runs to underscores; left() truncates.
+    # If two orgs normalise to the same base name, rank them by (created_at, id)
+    # and append _2, _3, … so the unique index below can always be created.
     op.execute("""
-        UPDATE organizations
-        SET schema_name = left(
-            regexp_replace(
-                lower(business_type::text || '_' || name),
-                '[^a-z0-9]+',
-                '_',
-                'g'
-            ),
-            63
+        WITH base AS (
+            SELECT
+                id,
+                created_at,
+                left(
+                    regexp_replace(
+                        lower(business_type::text || '_' || name),
+                        '[^a-z0-9]+',
+                        '_',
+                        'g'
+                    ),
+                    63
+                ) AS base_name
+            FROM organizations
+        ),
+        ranked AS (
+            SELECT
+                id,
+                base_name,
+                ROW_NUMBER() OVER (
+                    PARTITION BY base_name
+                    ORDER BY created_at, id
+                ) AS rn
+            FROM base
         )
+        UPDATE organizations o
+        SET schema_name = CASE
+            WHEN r.rn = 1 THEN r.base_name
+            ELSE left(r.base_name, 59) || '_' || r.rn::text
+        END
+        FROM ranked r
+        WHERE o.id = r.id
     """)
 
     # Step 3: Tighten — NOT NULL + unique constraint now that every row has a value.
