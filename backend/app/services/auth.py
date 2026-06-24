@@ -4,7 +4,7 @@ from uuid import UUID
 from fastapi import BackgroundTasks
 from sqlalchemy import select
 
-from app.core.exceptions import AuthenticationError, ConflictError
+from app.core.exceptions import AuthenticationError, ConflictError, ServiceUnavailableError
 from app.core.permissions import effective_permissions_for_user
 from app.core.schema_naming import make_schema_name
 from app.core.security import (
@@ -98,7 +98,10 @@ class AuthService(ServiceBase):
 
         # Provision the tenant schema before committing so the transaction
         # rolls back cleanly if schema creation or migrations fail.
-        await provision_tenant(organization)
+        try:
+            await provision_tenant(organization)
+        except (ValueError, RuntimeError) as exc:
+            raise ServiceUnavailableError(f"Workspace setup failed — {exc}") from exc
 
         # Activate schema routing so _build_token_response_async can query
         # UserPermissionGrant (which now lives in the tenant schema).

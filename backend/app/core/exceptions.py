@@ -42,6 +42,11 @@ class AuthorizationError(AppException):
     code = "authorization_error"
 
 
+class ServiceUnavailableError(AppException):
+    status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+    code = "service_unavailable"
+
+
 class ValidationError(AppException):
     status_code = status.HTTP_422_UNPROCESSABLE_ENTITY
     code = "validation_error"

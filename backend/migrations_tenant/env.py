@@ -46,22 +46,19 @@ def run_migrations_for_schema(schema_name: str, connection) -> None:
         connection=connection,
         target_metadata=target_metadata,
         version_table="alembic_version",
-        # Each schema tracks its own migration version independently.
         version_table_schema=schema_name,
-        include_schemas=True,
-        compare_type=True,
-        compare_server_default=True,
-        # Alembic needs a search_path context to resolve unqualified names in
-        # migration scripts. We set public last so cross-schema FK names like
-        # "public.users" still resolve without the prefix being mandatory.
-        render_as_batch=False,
     )
-    # Point search_path at the target schema so DDL lands in the right place.
-    connection.execute(text(f'SET search_path TO "{schema_name}", public'))
     with context.begin_transaction():
+        # SET LOCAL scopes search_path to this transaction only.
+        # MUST be inside begin_transaction() — calling connection.execute()
+        # before begin_transaction() triggers SQLAlchemy 2.x autobegin,
+        # causing Alembic to use a SAVEPOINT whose outer transaction is then
+        # rolled back on connection close → 0 tables in the tenant schema.
+        connection.execute(
+            text(f'SET LOCAL search_path TO "{schema_name}", public')
+        )
         context.run_migrations()
-    # Restore default search_path after migrations.
-    connection.execute(text("SET search_path TO public"))
+    # SET LOCAL expires on commit; no explicit restore needed.
 
 
 def run_migrations_offline() -> None:
