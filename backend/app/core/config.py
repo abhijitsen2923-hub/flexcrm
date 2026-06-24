@@ -23,7 +23,10 @@ class Settings(BaseSettings):
     environment: Literal["local", "test", "staging", "production"] = "local"
     api_v1_prefix: str = "/api/v1"
     database_url: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/crm"
-    sync_database_url: str = "postgresql://postgres:postgres@localhost:5432/crm"
+    # If SYNC_DATABASE_URL is not set, it is derived from DATABASE_URL by
+    # replacing the asyncpg driver prefix. This covers Cloud Run deployments
+    # where only DATABASE_URL is configured (Alembic needs a sync psycopg2 URL).
+    sync_database_url: str | None = None
     sqlalchemy_echo: bool = False
 
     jwt_secret_key: str = Field(default=_DEFAULT_JWT_ACCESS, min_length=16)
@@ -69,6 +72,15 @@ class Settings(BaseSettings):
         if isinstance(value, str):
             return [item.strip() for item in value.split(",") if item.strip()]
         return value
+
+    @model_validator(mode="after")
+    def _derive_sync_url(self) -> "Settings":
+        """Derive sync_database_url from database_url when not explicitly set."""
+        if self.sync_database_url is None:
+            self.sync_database_url = self.database_url.replace(
+                "postgresql+asyncpg://", "postgresql://"
+            )
+        return self
 
     @model_validator(mode="after")
     def _reject_insecure_production(self) -> "Settings":
