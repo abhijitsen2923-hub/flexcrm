@@ -9,7 +9,11 @@ from app.schemas.common import ORMModel
 
 # Toggleable module keys. Dashboard / Leads / Customers / Analytics / Users
 # are always-on and not listed here.
-MODULE_KEYS = ("deals", "tasks", "activities", "finance", "hr")
+MODULE_KEYS = (
+    "deals", "tasks", "activities",               # Core CRM — any industry
+    "finance", "hr",                              # Business operations — any industry
+    "inventory", "bookings", "site_visits", "projects",  # Real Estate vertical
+)
 
 
 def get_modules(features: dict | None) -> dict[str, bool]:

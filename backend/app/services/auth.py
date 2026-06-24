@@ -98,7 +98,7 @@ class AuthService(ServiceBase):
 
         # Provision the tenant schema before committing so the transaction
         # rolls back cleanly if schema creation or migrations fail.
-        await provision_tenant(organization, self.session)
+        await provision_tenant(organization)
 
         # Activate schema routing so _build_token_response_async can query
         # UserPermissionGrant (which now lives in the tenant schema).

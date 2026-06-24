@@ -19,9 +19,7 @@ export default function RegisterPage() {
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
   const [password, setPassword] = useState("");
-  // Pre-select the first option so the form is always submittable; the user
-  // confirms with the dropdown.
-  const [businessType, setBusinessType] = useState<LeadIndustry>("education");
+  const [businessType, setBusinessType] = useState<LeadIndustry | "">("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -110,7 +108,8 @@ export default function RegisterPage() {
             id="register-business-type"
             label="Business type"
             value={businessType}
-            onChange={(event) => setBusinessType(event.target.value as LeadIndustry)}
+            placeholder="Choose your business type"
+            onChange={(event) => setBusinessType(event.target.value as LeadIndustry | "")}
             options={leadIndustryOptions}
             required
             hint="Drives the default industry shown on Leads and other CRM views. You can still switch industries later."

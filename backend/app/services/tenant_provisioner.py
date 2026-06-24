@@ -11,8 +11,8 @@ import re
 from alembic import command as alembic_cmd
 from alembic.config import Config
 from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.database.session import db_manager
 from app.models.organization import Organization
 
 
@@ -26,17 +26,22 @@ _SAFE_SCHEMA = re.compile(r"^[a-z][a-z0-9_]{0,62}$")
 _ALEMBIC_TENANT_INI = "alembic_tenant.ini"
 
 
-async def provision_tenant(org: Organization, session: AsyncSession) -> None:
+async def provision_tenant(org: Organization) -> None:
     """Create the tenant schema for `org` and run all tenant migrations.
 
     Steps:
     1. Validate schema_name is safe for raw SQL interpolation.
-    2. CREATE SCHEMA IF NOT EXISTS (idempotent).
+    2. CREATE SCHEMA IF NOT EXISTS — committed immediately in its own transaction.
     3. Run tenant Alembic migrations for this schema (idempotent via alembic_version).
 
-    This must be called AFTER org.schema_name is set and AFTER the session has
-    been flushed so org.id exists. Call it before committing the org row so
-    the transaction can be rolled back if provisioning fails.
+    The schema creation MUST be committed before Alembic migrations run because
+    Alembic opens its own separate psycopg2 connection, which only sees committed
+    DDL (PostgreSQL default READ COMMITTED isolation). Running CREATE SCHEMA inside
+    the caller's open transaction would leave it invisible to Alembic → migrations
+    fail with "schema does not exist" on every registration attempt.
+
+    CREATE SCHEMA IF NOT EXISTS is idempotent: an orphaned schema from a failed
+    registration is harmless — it stays empty until the next attempt succeeds.
 
     Raises ValueError for an invalid schema name.
     Raises RuntimeError if migrations fail.
@@ -50,11 +55,10 @@ async def provision_tenant(org: Organization, session: AsyncSession) -> None:
 
     logger.info("provision_tenant: creating schema %r for org %s", schema, org.id)
 
-    # Step 1: Create schema. Double-quoted identifier prevents SQL injection even
-    # though the regex above already guarantees the name is safe.
-    await session.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{schema}"'))
-    # Flush so the schema exists in the DB before Alembic tries to write to it.
-    await session.flush()
+    # Step 1: Create schema in its own committed transaction so that the Alembic
+    # thread's separate connection can see it immediately.
+    async with db_manager.engine.begin() as conn:
+        await conn.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{schema}"'))
 
     # Step 2: Run tenant migrations in a thread (Alembic is synchronous).
     try:
