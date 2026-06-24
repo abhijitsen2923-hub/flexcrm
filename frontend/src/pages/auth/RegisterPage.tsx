@@ -34,7 +34,7 @@ export default function RegisterPage() {
         email,
         password,
         phone: phone || null,
-        business_type: businessType,
+        business_type: businessType as LeadIndustry,
         organization_name: orgName.trim() || undefined
       });
       navigate("/", { replace: true });
