@@ -68,7 +68,13 @@ class CacheClient:
     async def connect(self) -> None:
         settings = get_settings()
         try:
-            self._redis = Redis.from_url(settings.redis_url, encoding="utf-8", decode_responses=True)
+            self._redis = Redis.from_url(
+                settings.redis_url,
+                encoding="utf-8",
+                decode_responses=True,
+                socket_connect_timeout=10,
+                socket_timeout=10,
+            )
             await self._redis.ping()
             logger.info("Connected to Redis cache")
         except RedisError as exc:
