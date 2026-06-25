@@ -10,7 +10,7 @@ import logging
 
 from app.core.config import get_settings
 from app.core.schema_naming import make_schema_name
-from app.core.security import hash_password
+from app.core.security import hash_password, verify_password
 from app.core.tenancy import bypass
 from app.database.enums import LeadIndustry, UserRole, UserStatus
 from app.database.session import db_manager
@@ -35,11 +35,17 @@ async def ensure_platform_admin() -> None:
             user = await UserRepository(session).get_by_email(email)
 
             if user is not None:
-                if user.is_platform_admin:
-                    return   # already configured — silent no-op
-                user.is_platform_admin = True
-                await session.commit()
-                logger.info("platform_admin: promoted existing user <%s>", email)
+                needs_commit = False
+                if not user.is_platform_admin:
+                    user.is_platform_admin = True
+                    needs_commit = True
+                    logger.info("platform_admin: promoted existing user <%s>", email)
+                if not verify_password(password, user.password_hash):
+                    user.password_hash = hash_password(password)
+                    needs_commit = True
+                    logger.info("platform_admin: updated password for platform admin <%s>", email)
+                if needs_commit:
+                    await session.commit()
                 return
 
             # No user found — create a dedicated org + admin user.
