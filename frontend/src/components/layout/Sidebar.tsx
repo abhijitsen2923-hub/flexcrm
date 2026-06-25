@@ -72,6 +72,7 @@ export function Sidebar({ open, onClose }: SidebarProps) {
   const modules = mergeModules(orgModules);
 
   const visible = NAV.filter((item) => {
+    if (user?.is_platform_admin) return false;
     if (item.moduleKey && !modules[item.moduleKey]) return false;
     return any(item.requires);
   });

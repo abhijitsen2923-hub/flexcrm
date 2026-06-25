@@ -45,6 +45,7 @@ class Settings(BaseSettings):
     cors_origins: Annotated[list[str], NoDecode] = [
         "http://localhost:5173",
         "http://127.0.0.1:5173",
+        "https://flexcrm.abhijitsen2923.workers.dev",
     ]
     docs_enabled: bool = True
 
