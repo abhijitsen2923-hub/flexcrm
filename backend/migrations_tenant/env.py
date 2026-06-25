@@ -80,22 +80,38 @@ def run_migrations_offline() -> None:
 def run_migrations_online() -> None:
     configuration = config.get_section(config.config_ini_section, {})
     configuration["sqlalchemy.url"] = settings.sync_database_url
+
+    target_schema = os.environ.get("TARGET_SCHEMA")
+
+    # Single-schema mode: set search_path as a psycopg2 session option so it
+    # is applied before any transaction begins. This sidesteps the SQLAlchemy
+    # 2.x autobegin problem — any connection.execute() before
+    # context.begin_transaction() triggers autobegin, causing Alembic to fall
+    # back to a SAVEPOINT whose outer transaction is rolled back on connection
+    # close → 0 tables created.
+    connect_args: dict = {}
+    if target_schema:
+        connect_args["options"] = f"-c search_path={target_schema},public"
+
     connectable = engine_from_config(
         configuration,
         prefix="sqlalchemy.",
         poolclass=pool.NullPool,
+        **({"connect_args": connect_args} if connect_args else {}),
     )
 
     with connectable.connect() as connection:
-        target_schema = os.environ.get("TARGET_SCHEMA")
         if target_schema:
-            # Single-schema mode: provision_tenant() sets TARGET_SCHEMA before calling.
+            # Single-schema mode: provision_tenant() sets TARGET_SCHEMA.
+            # search_path is already active via the psycopg2 session option.
             run_migrations_for_schema(target_schema, connection)
         else:
             # Batch mode: migrate all active organizations during upgrade deploys.
+            # Commit the SELECT so each schema gets its own explicit transaction.
             rows = connection.execute(
                 text("SELECT schema_name FROM organizations WHERE is_deleted = false")
             ).fetchall()
+            connection.commit()
             for row in rows:
                 run_migrations_for_schema(row.schema_name, connection)
 

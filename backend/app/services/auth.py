@@ -212,6 +212,14 @@ class AuthService(ServiceBase):
         the `/auth/profile` endpoint. By the time this is called, the tenant schema
         is active so UserPermissionGrant queries route to the correct schema.
         """
+        # Platform admins have no tenant schema; skip tenant-schema queries.
+        # Their permissions are determined solely by their UserRole.
+        if user.is_platform_admin:
+            effective = effective_permissions_for_user(user.role, [])
+            return UserRead.model_validate(user).model_copy(
+                update={"permissions": sorted(code.value for code in effective)}
+            )
+
         grant_codes = (
             await self.session.execute(
                 select(UserPermissionGrant.permission_code).where(
