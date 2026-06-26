@@ -89,7 +89,9 @@ def run_migrations_online() -> None:
     # context.begin_transaction() triggers autobegin, causing Alembic to fall
     # back to a SAVEPOINT whose outer transaction is rolled back on connection
     # close → 0 tables created.
-    connect_args: dict = {}
+    # connect_timeout prevents psycopg2 from hanging indefinitely if the DB
+    # is slow to accept connections (e.g. Neon serverless cold start).
+    connect_args: dict = {"connect_timeout": 30}
     if target_schema:
         connect_args["options"] = f"-c search_path={target_schema},public"
 
@@ -97,7 +99,7 @@ def run_migrations_online() -> None:
         configuration,
         prefix="sqlalchemy.",
         poolclass=pool.NullPool,
-        **({"connect_args": connect_args} if connect_args else {}),
+        connect_args=connect_args,
     )
 
     with connectable.connect() as connection:

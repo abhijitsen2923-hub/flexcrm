@@ -100,7 +100,7 @@ class AuthService(ServiceBase):
         # rolls back cleanly if schema creation or migrations fail.
         try:
             await provision_tenant(organization)
-        except (ValueError, RuntimeError) as exc:
+        except Exception as exc:
             raise ServiceUnavailableError(f"Workspace setup failed — {exc}") from exc
 
         # Activate schema routing so _build_token_response_async can query
