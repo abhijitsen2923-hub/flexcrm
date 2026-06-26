@@ -25,6 +25,11 @@ _SAFE_SCHEMA = re.compile(r"^[a-z][a-z0-9_]{0,62}$")
 # Path to the tenant Alembic config file, relative to where the app runs from.
 _ALEMBIC_TENANT_INI = "alembic_tenant.ini"
 
+# The initial tenant migration creates ~21 tables. If a "successful" migration
+# leaves fewer than this, the transaction silently rolled back (autobegin bug)
+# and we must fail loudly rather than let a half-built tenant slip through.
+_MIN_TENANT_TABLES = 20
+
 
 async def provision_tenant(org: Organization) -> None:
     """Create the tenant schema for `org` and run all tenant migrations.
@@ -67,7 +72,30 @@ async def provision_tenant(org: Organization) -> None:
         logger.error("provision_tenant: migration failed for schema %r: %s", schema, exc)
         raise RuntimeError(f"Tenant migration failed for schema {schema!r}: {exc}") from exc
 
-    logger.info("provision_tenant: schema %r is ready", schema)
+    # Step 3: Verify the migration actually created tables. Alembic can report
+    # success while a transaction-level rollback leaves the schema empty (the
+    # historical autobegin bug). Counting committed tables here turns that silent
+    # failure into a clear error instead of a later "table does not exist" 500.
+    async with db_manager.engine.connect() as conn:
+        table_count = await conn.scalar(
+            text(
+                "SELECT count(*) FROM information_schema.tables "
+                "WHERE table_schema = :schema"
+            ),
+            {"schema": schema},
+        )
+    if not table_count or table_count < _MIN_TENANT_TABLES:
+        logger.error(
+            "provision_tenant: schema %r has only %s tables after migration (expected >= %s)",
+            schema, table_count or 0, _MIN_TENANT_TABLES,
+        )
+        raise RuntimeError(
+            f"Tenant migration for schema {schema!r} completed but created "
+            f"{table_count or 0} tables (expected >= {_MIN_TENANT_TABLES}). "
+            "The migration transaction was rolled back."
+        )
+
+    logger.info("provision_tenant: schema %r is ready (%s tables)", schema, table_count)
 
 
 def _run_tenant_migrations(schema_name: str) -> None:
