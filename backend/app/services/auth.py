@@ -1,8 +1,9 @@
+import logging
 from datetime import UTC, datetime
 from uuid import UUID
 
 from fastapi import BackgroundTasks
-from sqlalchemy import select
+from sqlalchemy import select, text
 
 from app.core.exceptions import AuthenticationError, ConflictError, ServiceUnavailableError
 from app.core.permissions import effective_permissions_for_user
@@ -27,6 +28,9 @@ from app.schemas.user import UserRead
 from app.services.base import ServiceBase
 from app.services.email import EmailService
 from app.services.tenant_provisioner import provision_tenant
+
+
+logger = logging.getLogger(__name__)
 
 
 class AuthService(ServiceBase):
@@ -96,18 +100,40 @@ class AuthService(ServiceBase):
                 ip_address=ip_address,
             )
 
-        # Provision the tenant schema before committing so the transaction
-        # rolls back cleanly if schema creation or migrations fail.
+        # Commit the public-schema rows (organization, user, refresh token)
+        # BEFORE provisioning. The tenant migration runs on a SEPARATE psycopg2
+        # connection and adds foreign keys that reference public.users, which
+        # requires a SHARE ROW EXCLUSIVE lock on that table. If this request's
+        # transaction were still open, its uncommitted INSERT would hold a
+        # conflicting ROW EXCLUSIVE lock on public.users — and because this
+        # request is itself blocked awaiting the migration, PostgreSQL cannot
+        # see the cycle to break it. Registration would hang until timeout.
+        # Committing first releases the lock so the migration can proceed.
+        await self.commit()
+
         try:
             await provision_tenant(organization)
         except Exception as exc:
+            # The public rows are already committed. Remove them so the email is
+            # free to retry — deleting the organization cascades to its users and
+            # their refresh tokens via ON DELETE CASCADE.
+            try:
+                await self.session.execute(
+                    text("DELETE FROM organizations WHERE id = :org_id"),
+                    {"org_id": organization.id},
+                )
+                await self.commit()
+            except Exception:
+                logger.exception(
+                    "register: cleanup after failed provisioning failed for org %s",
+                    organization.id,
+                )
             raise ServiceUnavailableError(f"Workspace setup failed — {exc}") from exc
 
         # Activate schema routing so _build_token_response_async can query
         # UserPermissionGrant (which now lives in the tenant schema).
         await set_tenant_schema(self.session, organization.schema_name)
         set_scope(self.session, organization.id)
-        await self.commit()
 
         if background_tasks:
             background_tasks.add_task(self.email_service.send_welcome_email, user.email, user.first_name)
