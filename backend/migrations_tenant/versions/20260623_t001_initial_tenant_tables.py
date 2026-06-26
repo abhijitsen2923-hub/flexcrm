@@ -34,7 +34,12 @@ def upgrade() -> None:
         sa.Column("deleted_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("deleted_by_id", sa.Uuid(), nullable=True),
         sa.Column("customer_id", sa.Uuid(), nullable=True),
-        sa.Column("industry", sa.Enum("travel", "education", "realestate", name="lead_industry_enum", create_type=False), nullable=False),
+        # Bind explicitly to public.lead_industry_enum. The leads table lives in
+        # the tenant schema, so an unqualified `lead_industry_enum` resolves to a
+        # schema-local type via search_path — which then does NOT match
+        # public.pipeline_stages.industry, breaking fk_leads_pipeline_stage with a
+        # DatatypeMismatch. schema="public" forces the column to the shared type.
+        sa.Column("industry", sa.Enum("travel", "education", "realestate", name="lead_industry_enum", create_type=False, schema="public"), nullable=False),
         sa.Column("stage_code", sa.String(64), nullable=False),
         sa.Column("lead_number", sa.Integer(), nullable=False),
         sa.Column("title", sa.String(255), nullable=False),
