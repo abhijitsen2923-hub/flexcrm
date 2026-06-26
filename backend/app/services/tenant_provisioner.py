@@ -60,9 +60,23 @@ async def provision_tenant(org: Organization) -> None:
 
     logger.info("provision_tenant: creating schema %r for org %s", schema, org.id)
 
-    # Step 1: Create schema in its own committed transaction so that the Alembic
-    # thread's separate connection can see it immediately.
+    # Step 1: Ensure a clean schema, committed in its own transaction so the
+    # Alembic thread's separate connection can see it immediately.
+    #
+    # If a previous failed attempt left a partial schema, drop it first. We
+    # detect "partial" by the absence of the alembic_version table: a tenant
+    # whose migrations completed always has it. A half-migrated schema can
+    # contain leftover enum types (e.g. lead_industry_enum) that shadow the
+    # public ones, which breaks cross-schema FK creation with a DatatypeMismatch.
+    # Because we only drop when alembic_version is missing, a fully-provisioned
+    # tenant is never touched.
     async with db_manager.engine.begin() as conn:
+        version_rel = await conn.scalar(
+            text("SELECT to_regclass(:rel)"),
+            {"rel": f'"{schema}".alembic_version'},
+        )
+        if version_rel is None:
+            await conn.execute(text(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE'))
         await conn.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{schema}"'))
 
     # Step 2: Run tenant migrations in a thread (Alembic is synchronous).
