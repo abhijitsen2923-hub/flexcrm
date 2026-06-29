@@ -6,6 +6,7 @@ from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
+from app.core.config import get_settings
 from app.core.logging import get_logger, request_id_context
 
 
@@ -94,13 +95,17 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 
 async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
     logger.exception("Unhandled exception", exc_info=exc)
+    # In production, return a generic message so internal details (SQL, schema
+    # names, stack types) aren't leaked to clients. Outside production, include
+    # the exception type/message to speed up debugging. Full traceback is always
+    # logged above regardless of environment.
+    if get_settings().environment == "production":
+        detail = "Internal server error"
+    else:
+        detail = f"Internal server error: {type(exc).__name__}: {exc}"
     return JSONResponse(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        content=_build_error_payload(
-            f"Internal server error: {type(exc).__name__}: {exc}",
-            "internal_server_error",
-            request,
-        ),
+        content=_build_error_payload(detail, "internal_server_error", request),
     )
 
 
