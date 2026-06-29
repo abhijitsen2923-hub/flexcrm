@@ -14,6 +14,7 @@ from collections.abc import Sequence
 
 import sqlalchemy as sa
 from alembic import op
+from sqlalchemy.dialects import postgresql
 
 
 revision: str = "20260623_t001"
@@ -34,12 +35,23 @@ def upgrade() -> None:
         sa.Column("deleted_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("deleted_by_id", sa.Uuid(), nullable=True),
         sa.Column("customer_id", sa.Uuid(), nullable=True),
-        # Bind explicitly to public.lead_industry_enum. The leads table lives in
-        # the tenant schema, so an unqualified `lead_industry_enum` resolves to a
-        # schema-local type via search_path — which then does NOT match
-        # public.pipeline_stages.industry, breaking fk_leads_pipeline_stage with a
-        # DatatypeMismatch. schema="public" forces the column to the shared type.
-        sa.Column("industry", sa.Enum("travel", "education", "realestate", name="lead_industry_enum", create_type=False, schema="public"), nullable=False),
+        # Bind explicitly to public.lead_industry_enum so this column matches
+        # public.pipeline_stages.industry (required for the cross-schema FK
+        # fk_leads_pipeline_stage). Must use postgresql.ENUM, not sa.Enum:
+        # sa.Enum ignores create_type=False and would either create a tenant-local
+        # copy (→ DatatypeMismatch on the FK) or, with schema="public", try to
+        # CREATE TYPE in public where it already exists (→ DuplicateObject).
+        # postgresql.ENUM honors create_type=False, emitting no CREATE TYPE.
+        sa.Column(
+            "industry",
+            postgresql.ENUM(
+                "travel", "education", "realestate",
+                name="lead_industry_enum",
+                create_type=False,
+                schema="public",
+            ),
+            nullable=False,
+        ),
         sa.Column("stage_code", sa.String(64), nullable=False),
         sa.Column("lead_number", sa.Integer(), nullable=False),
         sa.Column("title", sa.String(255), nullable=False),
