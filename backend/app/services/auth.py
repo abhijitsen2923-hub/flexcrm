@@ -135,6 +135,12 @@ class AuthService(ServiceBase):
         await set_tenant_schema(self.session, organization.schema_name)
         set_scope(self.session, organization.id)
 
+        # Reload the freshly-inserted user so server_default columns (created_at,
+        # updated_at) are populated. Without this they remain expired after the
+        # commit, and serializing the user in _build_token_response_async would
+        # trigger a sync lazy-load inside the async session → MissingGreenlet 500.
+        await self.session.refresh(user)
+
         if background_tasks:
             background_tasks.add_task(self.email_service.send_welcome_email, user.email, user.first_name)
 
