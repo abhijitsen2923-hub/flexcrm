@@ -96,7 +96,11 @@ async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONR
     logger.exception("Unhandled exception", exc_info=exc)
     return JSONResponse(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        content=_build_error_payload("Internal server error", "internal_server_error", request),
+        content=_build_error_payload(
+            f"Internal server error: {type(exc).__name__}: {exc}",
+            "internal_server_error",
+            request,
+        ),
     )
 
 
