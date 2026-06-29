@@ -36,11 +36,21 @@ async def set_tenant_schema(session: AsyncSession, schema_name: str) -> None:
     every query against a model with {"schema": "tenant"} in __table_args__ is
     rewritten to use schema_name instead of the literal "tenant". This is
     pooling-safe — the option is scoped to the connection, not the process.
+
+    The map is applied to the live connection IN PLACE via run_sync. Passing
+    execution_options to session.connection() only takes effect when the
+    connection is first procured in the transaction; if a connection was already
+    established earlier in the request (e.g. the user lookup in get_current_user),
+    that form silently no-ops and tenant queries hit the untranslated literal
+    "tenant" schema (UndefinedTableError). Setting it on the existing Connection
+    in place avoids that.
     """
-    conn = await session.connection(
-        execution_options={"schema_translate_map": {"tenant": schema_name}}
+    conn = await session.connection()
+    await conn.run_sync(
+        lambda sync_conn: sync_conn.execution_options(
+            schema_translate_map={"tenant": schema_name}
+        )
     )
-    _ = conn  # side-effect: option is now bound to the connection
     session.info["schema_name"] = schema_name
 
 
