@@ -91,7 +91,17 @@ class Lead(TenantBase, UUIDPrimaryKeyMixin, TimestampMixin, TenantAuditMixin, Te
         foreign_keys=[customer_id],
         post_update=True,
     )
-    assigned_to = relationship(User, foreign_keys=[assigned_to_id])
+    # Cross-schema relationship to the public users table. The FK string
+    # "public.users.id" registers a stub table in TenantBase.metadata that is
+    # distinct from the real User mapper in Base.metadata, so SQLAlchemy can't
+    # infer the join condition (NoForeignKeysError). Specify it explicitly.
+    # viewonly because assignment is written via the assigned_to_id column.
+    assigned_to = relationship(
+        User,
+        primaryjoin=lambda: Lead.assigned_to_id == User.id,
+        foreign_keys=lambda: [Lead.assigned_to_id],
+        viewonly=True,
+    )
     stage_transitions = relationship(
         "StageTransition",
         back_populates="lead",
