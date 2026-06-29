@@ -6,8 +6,14 @@ import { authStorage } from "./storage";
 
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000/api/v1";
 
+// Cap requests so a hung/cold backend surfaces a friendly "timed out" error
+// instead of an indefinite spinner. Registration provisioning is the slowest
+// path (cold start + tenant migration), so allow generous headroom.
+const REQUEST_TIMEOUT_MS = 60000;
+
 export const apiClient = axios.create({
   baseURL: apiBaseUrl,
+  timeout: REQUEST_TIMEOUT_MS,
   headers: {
     "Content-Type": "application/json"
   }
@@ -15,6 +21,7 @@ export const apiClient = axios.create({
 
 const refreshClient = axios.create({
   baseURL: apiBaseUrl,
+  timeout: REQUEST_TIMEOUT_MS,
   headers: {
     "Content-Type": "application/json"
   }

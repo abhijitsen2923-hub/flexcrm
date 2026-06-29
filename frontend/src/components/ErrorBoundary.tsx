@@ -55,20 +55,22 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
         <p style={{ marginBottom: "1.5rem", color: "#4b5563" }}>
           The application hit an unexpected error and could not continue rendering.
         </p>
-        <pre
-          style={{
-            maxWidth: "32rem",
-            padding: "1rem",
-            background: "#fff",
-            border: "1px solid #e5e7eb",
-            borderRadius: "0.5rem",
-            color: "#b91c1c",
-            whiteSpace: "pre-wrap",
-            overflowWrap: "anywhere"
-          }}
-        >
-          {error.message}
-        </pre>
+        {import.meta.env.DEV && (
+          <pre
+            style={{
+              maxWidth: "32rem",
+              padding: "1rem",
+              background: "#fff",
+              border: "1px solid #e5e7eb",
+              borderRadius: "0.5rem",
+              color: "#b91c1c",
+              whiteSpace: "pre-wrap",
+              overflowWrap: "anywhere"
+            }}
+          >
+            {error.message}
+          </pre>
+        )}
         <button
           type="button"
           onClick={this.reset}
