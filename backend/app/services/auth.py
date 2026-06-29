@@ -130,21 +130,30 @@ class AuthService(ServiceBase):
                 )
             raise ServiceUnavailableError(f"Workspace setup failed — {exc}") from exc
 
-        # Activate schema routing so _build_token_response_async can query
-        # UserPermissionGrant (which now lives in the tenant schema).
-        await set_tenant_schema(self.session, organization.schema_name)
-        set_scope(self.session, organization.id)
+        # The org+user are already committed. Surface any failure while building
+        # the session/token response as a clear 503 with the real exception, so
+        # it isn't masked as a generic 500.
+        try:
+            # Activate schema routing so _build_token_response_async can query
+            # UserPermissionGrant (which now lives in the tenant schema).
+            await set_tenant_schema(self.session, organization.schema_name)
+            set_scope(self.session, organization.id)
 
-        # Reload the freshly-inserted user so server_default columns (created_at,
-        # updated_at) are populated. Without this they remain expired after the
-        # commit, and serializing the user in _build_token_response_async would
-        # trigger a sync lazy-load inside the async session → MissingGreenlet 500.
-        await self.session.refresh(user)
+            # Reload the freshly-inserted user so server_default columns
+            # (created_at, updated_at) are populated. Without this they remain
+            # expired after the commit, and serializing the user in
+            # _build_token_response_async would trigger a sync lazy-load inside
+            # the async session → MissingGreenlet.
+            await self.session.refresh(user)
 
-        if background_tasks:
-            background_tasks.add_task(self.email_service.send_welcome_email, user.email, user.first_name)
+            if background_tasks:
+                background_tasks.add_task(self.email_service.send_welcome_email, user.email, user.first_name)
 
-        return await self._build_token_response_async(token_response, user)
+            return await self._build_token_response_async(token_response, user)
+        except Exception as exc:
+            raise ServiceUnavailableError(
+                f"Account created but session setup failed — {type(exc).__name__}: {exc}"
+            ) from exc
 
     async def login(
         self,
