@@ -95,14 +95,14 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 
 async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
     logger.exception("Unhandled exception", exc_info=exc)
-    # In production, return a generic message so internal details (SQL, schema
-    # names, stack types) aren't leaked to clients. Outside production, include
-    # the exception type/message to speed up debugging. Full traceback is always
-    # logged above regardless of environment.
-    if get_settings().environment == "production":
-        detail = "Internal server error"
-    else:
+    # Include the exception type/message only when EXPOSE_ERROR_DETAIL is on
+    # (default during stabilization). Turn it off before go-live so internal
+    # details (SQL, schema names, stack types) aren't leaked to clients. The
+    # full traceback is always logged above regardless.
+    if get_settings().expose_error_detail:
         detail = f"Internal server error: {type(exc).__name__}: {exc}"
+    else:
+        detail = "Internal server error"
     return JSONResponse(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         content=_build_error_payload(detail, "internal_server_error", request),

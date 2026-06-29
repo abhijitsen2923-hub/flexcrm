@@ -49,6 +49,11 @@ class Settings(BaseSettings):
     ]
     docs_enabled: bool = True
 
+    # When true, 500 responses include the exception type/message to aid
+    # debugging. Default true during stabilization; set EXPOSE_ERROR_DETAIL=false
+    # in the deployment env before go-live so internals aren't leaked to clients.
+    expose_error_detail: bool = True
+
     # --- Platform admin bootstrap (optional) ---
     # Set these once to have the app create/promote a platform admin on startup.
     # Idempotent — safe to leave set after the first run.
