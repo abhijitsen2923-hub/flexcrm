@@ -27,9 +27,16 @@ class UserService(ServiceBase):
 
     async def list_users(self, pagination: PaginationParams, filters: UserFilterParams):
         sort_by = validate_sort_field(filters.sort_by, self.allowed_sort_fields)
+        # Users live in the shared public schema, so they are NOT isolated by the
+        # tenant schema routing — scope to the caller's org explicitly. (None for
+        # platform admins, who are intentionally cross-org.)
         return await self.repository.list(
             pagination=pagination,
-            filters={"role": filters.role, "status": filters.status},
+            filters={
+                "role": filters.role,
+                "status": filters.status,
+                "organization_id": current_org(self.session),
+            },
             search=filters.search,
             search_fields=("first_name", "last_name", "email", "phone"),
             sort_by=sort_by,
@@ -39,6 +46,11 @@ class UserService(ServiceBase):
     async def get_user(self, user_id: UUID):
         user = await self.repository.get(user_id)
         if user is None:
+            raise NotFoundError("User not found.")
+        # Enforce org isolation for the public users table. Treat a user in another
+        # org as not-found so we don't leak its existence.
+        org_id = current_org(self.session)
+        if org_id is not None and user.organization_id != org_id:
             raise NotFoundError("User not found.")
         return user
 
@@ -71,6 +83,9 @@ class UserService(ServiceBase):
                 "role": payload.role,
                 "phone": payload.phone,
                 "status": payload.status,
+                # Stamp the new user with the creating admin's org so it is
+                # scoped correctly (the old auto-stamp listener was removed).
+                "organization_id": current_org(self.session),
                 "created_by_id": actor_id,
                 "updated_by_id": actor_id,
             }
