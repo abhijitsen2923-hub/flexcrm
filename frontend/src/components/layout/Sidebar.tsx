@@ -80,8 +80,8 @@ export function Sidebar({ open, onClose }: SidebarProps) {
   return (
     <aside className={["sidebar", open ? "is-open" : null].filter(Boolean).join(" ")}>
       <div className="sidebar__brand">
-        <Sparkles size={20} />
-        FlexCRM
+        <span className="sidebar__brand-chip">F</span>
+        <span className="sidebar__brand-mark">Flex<span>CRM</span></span>
         <button className="sidebar__close" onClick={onClose} aria-label="Close menu">
           <X size={18} />
         </button>

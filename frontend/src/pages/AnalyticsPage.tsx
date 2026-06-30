@@ -16,11 +16,12 @@ import {
 } from "recharts";
 
 import { Card, EmptyState, LoadingBlock, useToast } from "../components";
+import { CHART_AXIS, CHART_GRID, CHART_PALETTE, CHART_PRIMARY } from "../config/chartTheme";
 import { useDashboard } from "../hooks/useDashboard";
 import { formatCurrency, formatNumber } from "../utils/format";
 
 
-const PIE_COLORS = ["#2563eb", "#0ea5e9", "#16a34a", "#d97706", "#dc2626", "#7c3aed"];
+const PIE_COLORS = CHART_PALETTE;
 
 
 export default function AnalyticsPage() {
@@ -66,11 +67,11 @@ export default function AnalyticsPage() {
             <div style={{ height: 260 }}>
               <ResponsiveContainer>
                 <LineChart data={revenueAnalytics.monthly_revenue}>
-                  <CartesianGrid stroke="#e5e7eb" vertical={false} />
-                  <XAxis dataKey="label" stroke="#6b7280" fontSize={12} />
-                  <YAxis stroke="#6b7280" fontSize={12} />
+                  <CartesianGrid stroke={CHART_GRID} vertical={false} />
+                  <XAxis dataKey="label" stroke={CHART_AXIS} fontSize={12} />
+                  <YAxis stroke={CHART_AXIS} fontSize={12} />
                   <Tooltip />
-                  <Line type="monotone" dataKey="value" stroke="#2563eb" strokeWidth={2} dot={false} />
+                  <Line type="monotone" dataKey="value" stroke={CHART_PRIMARY} strokeWidth={2} dot={false} />
                 </LineChart>
               </ResponsiveContainer>
             </div>
@@ -110,11 +111,11 @@ export default function AnalyticsPage() {
           <div style={{ height: 240 }}>
             <ResponsiveContainer>
               <BarChart data={leadAnalytics.source_breakdown}>
-                <CartesianGrid stroke="#e5e7eb" vertical={false} />
-                <XAxis dataKey="label" stroke="#6b7280" fontSize={12} />
-                <YAxis stroke="#6b7280" fontSize={12} />
+                <CartesianGrid stroke={CHART_GRID} vertical={false} />
+                <XAxis dataKey="label" stroke={CHART_AXIS} fontSize={12} />
+                <YAxis stroke={CHART_AXIS} fontSize={12} />
                 <Tooltip />
-                <Bar dataKey="value" fill="#0ea5e9" radius={[4, 4, 0, 0]} />
+                <Bar dataKey="value" fill={CHART_PRIMARY} radius={[4, 4, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
           </div>

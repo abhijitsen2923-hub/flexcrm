@@ -5,16 +5,17 @@
    ───────────────────────────────────────────────────────────────────────── */
 .customer-portal {
   /* Softer palette override for this surface */
-  --cp-bg: #f8fafc;
+  --cp-bg: #f5f6f8;
   --cp-surface: #ffffff;
-  --cp-border: #e2e8f0;
-  --cp-text: #1e293b;
-  --cp-text-muted: #64748b;
-  --cp-primary: #2563eb;
-  --cp-primary-soft: #eff6ff;
+  --cp-border: #e9ecf1;
+  --cp-text: #16202e;
+  --cp-text-muted: #8a93a2;
+  --cp-primary: #f59e0b;
+  --cp-primary-soft: #fef3e2;
+  --cp-on-primary: #1a1205;
   --cp-success: #16a34a;
-  --cp-danger: #dc2626;
-  --cp-warning: #d97706;
+  --cp-danger: #e5484d;
+  --cp-warning: #b26b00;
 
   /* 44 px minimum touch target — WCAG 2.5.5 */
   --tap-target-min: 44px;
@@ -123,9 +124,9 @@
   font-weight: 600;
 }
 
-.cp-pill--success  { background: #dcfce7; color: var(--cp-success); }
-.cp-pill--danger   { background: #fee2e2; color: var(--cp-danger); }
-.cp-pill--warning  { background: #fef3c7; color: var(--cp-warning); }
+.cp-pill--success  { background: #e7f6ec; color: var(--cp-success); }
+.cp-pill--danger   { background: #fcebec; color: var(--cp-danger); }
+.cp-pill--warning  { background: #fef3e2; color: var(--cp-warning); }
 .cp-pill--neutral  { background: var(--cp-border); color: var(--cp-text-muted); }
 .cp-pill--info     { background: var(--cp-primary-soft); color: var(--cp-primary); }
 
@@ -151,9 +152,9 @@
   border-radius: 10px;
   border: none;
   background: var(--cp-primary);
-  color: #fff;
+  color: var(--cp-on-primary);
   font-size: var(--cp-font-body);
-  font-weight: 600;
+  font-weight: 700;
   cursor: pointer;
   width: 100%;
   transition: opacity 0.15s;

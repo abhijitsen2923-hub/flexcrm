@@ -1,0 +1,347 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>FlexCRM × PropVista — Redesign Preview</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  /* ===== PropVista tokens (these map 1:1 onto FlexCRM's global.css :root) ===== */
+  :root{
+    --color-bg:#F5F6F8; --color-surface:#fff; --color-surface-muted:#FAFBFC;
+    --color-border:#E9ECF1; --color-text:#16202E; --color-text-muted:#8A93A2; --color-text-subtle:#9AA3B2;
+    --color-primary:#F59E0B; --color-primary-hover:#E08600; --color-primary-soft:#FEF3E2; --color-on-primary:#1A1205;
+    --color-success:#16A34A; --color-success-soft:#E7F6EC; --color-warning:#B26B00; --color-warning-soft:#FEF3E2;
+    --color-danger:#E5484D; --color-danger-soft:#FCEBEC; --color-info:#2563EB; --color-info-soft:#E8EEFD;
+    --color-accent2:#7C3AED; --color-accent2-soft:#F0E9FD;
+    --color-sidebar:#0E1626; --color-sidebar-text:#AEB7C7; --color-sidebar-hover:rgba(255,255,255,.06);
+    --shadow-sm:0 1px 2px rgba(16,32,56,.05); --shadow-lg:0 18px 50px rgba(8,14,26,.18);
+    --radius-md:14px; --radius-lg:16px;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{font-family:'Manrope',system-ui,sans-serif;background:var(--color-bg);color:var(--color-text);font-size:14px;line-height:1.5;-webkit-font-smoothing:antialiased}
+  .num{font-variant-numeric:tabular-nums}
+  button{font-family:inherit;cursor:pointer}
+  ::-webkit-scrollbar{width:9px;height:9px}::-webkit-scrollbar-thumb{background:#cbd2dc;border-radius:8px;border:2px solid transparent;background-clip:padding-box}
+
+  /* ===== shell ===== */
+  .shell{position:relative;display:flex;height:100vh;overflow:hidden}
+  .scrim{display:none;position:absolute;inset:0;background:rgba(10,16,28,.46);z-index:55}
+  .scrim.show{display:block}
+
+  /* sidebar (navy rail + amber active) */
+  .sidebar{width:248px;flex:0 0 248px;background:var(--color-sidebar);display:flex;flex-direction:column;overflow-y:auto;transition:transform .26s cubic-bezier(.4,0,.2,1)}
+  .brand{display:flex;align-items:center;gap:10px;padding:20px 20px 14px}
+  .brand .chip{width:30px;height:30px;border-radius:9px;background:linear-gradient(135deg,#F7B23B,#F59E0B);display:flex;align-items:center;justify-content:center;color:#1a1205;font-weight:800;box-shadow:0 4px 12px rgba(245,158,11,.35)}
+  .brand .wm{font-weight:800;font-size:17px;color:#F59E0B}.brand .wm span{color:#fff;font-weight:700}
+  .navwrap{flex:1;padding:4px 12px 16px;display:flex;flex-direction:column;gap:2px}
+  .navgrouplabel{font-size:10px;font-weight:800;letter-spacing:.12em;text-transform:uppercase;color:#5d6a82;padding:14px 12px 6px}
+  .nav{display:flex;align-items:center;gap:11px;padding:9px 12px;border-radius:10px;font-size:13.5px;font-weight:600;color:var(--color-sidebar-text);cursor:pointer;border:none;background:transparent;width:100%;text-align:left}
+  .nav svg{width:18px;height:18px;flex:0 0 auto}
+  .nav:hover{background:var(--color-sidebar-hover);color:#fff}
+  .nav.active{background:var(--color-primary);color:var(--color-on-primary);font-weight:700;box-shadow:0 4px 12px rgba(245,158,11,.28)}
+  .sidefoot{padding:14px 22px;color:#5d6a82;font-size:12px;border-top:1px solid rgba(255,255,255,.06)}
+
+  /* main */
+  .main{flex:1;min-width:0;display:flex;flex-direction:column;height:100%}
+  .topbar{flex:0 0 auto;height:62px;background:#fff;border-bottom:1px solid var(--color-border);display:flex;align-items:center;gap:14px;padding:0 18px}
+  .hamb{display:none;width:40px;height:40px;border:1px solid var(--color-border);border-radius:11px;background:#fff;color:var(--color-text);align-items:center;justify-content:center}
+  .ttl{font-size:18px;font-weight:700;letter-spacing:-.01em}
+  .topright{margin-left:auto;display:flex;align-items:center;gap:12px}
+  .iconbtn{position:relative;width:40px;height:40px;border:1px solid var(--color-border);border-radius:11px;background:#fff;display:flex;align-items:center;justify-content:center;color:#566072}
+  .iconbtn .dot{position:absolute;top:9px;right:9px;width:7px;height:7px;border-radius:50%;background:var(--color-primary);border:1.5px solid #fff}
+  .me{display:flex;align-items:center;gap:9px}
+  .me .av{width:36px;height:36px;border-radius:50%;background:linear-gradient(135deg,#FCE5C0,#F7C667);color:#7a4d00;display:flex;align-items:center;justify-content:center;font-weight:800;border:1px solid #F1D49A}
+  .me .nm{font-weight:700;font-size:13.5px}.me .ro{font-size:11.5px;color:var(--color-text-muted);font-weight:600}
+  .content{flex:1;overflow-y:auto;padding:26px 30px 30px}
+
+  /* primitives */
+  .card{background:var(--color-surface);border:1px solid var(--color-border);border-radius:var(--radius-lg);box-shadow:var(--shadow-sm)}
+  .pad{padding:16px 18px}
+  .btn{display:inline-flex;align-items:center;gap:7px;border:none;border-radius:11px;padding:11px 16px;font-weight:700;font-size:13.5px;min-height:44px}
+  .btn--primary{background:var(--color-primary);color:var(--color-on-primary);box-shadow:0 4px 12px rgba(245,158,11,.3)}
+  .btn--secondary{background:#fff;color:var(--color-text);border:1px solid var(--color-border)}
+  .btn svg{width:17px;height:17px}
+  .badge{display:inline-flex;align-items:center;font-size:11.5px;font-weight:700;padding:4px 10px;border-radius:999px}
+  .b-info{background:var(--color-info-soft);color:var(--color-info)}
+  .b-warn{background:var(--color-warning-soft);color:var(--color-warning)}
+  .b-ok{background:var(--color-success-soft);color:var(--color-success)}
+  .b-danger{background:var(--color-danger-soft);color:var(--color-danger)}
+  .b-accent{background:var(--color-accent2-soft);color:var(--color-accent2)}
+  .b-neutral{background:#EEF1F5;color:#6B7280}
+
+  .pagehead{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:18px}
+  .pagehead h1{margin:0 0 3px;font-size:23px;font-weight:800;letter-spacing:-.02em}
+  .pagehead p{margin:0;color:var(--color-text-muted);font-size:14px;font-weight:500}
+
+  .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:14px;margin-bottom:18px}
+  .kpi .row1{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}
+  .kpi .lbl{font-size:12.5px;color:var(--color-text-muted);font-weight:600}
+  .kpi .ic{width:30px;height:30px;border-radius:9px;display:flex;align-items:center;justify-content:center}
+  .kpi .ic svg{width:17px;height:17px}
+  .kpi .val{font-size:24px;font-weight:800;letter-spacing:-.02em}
+  .kpi .sub{font-size:11.5px;font-weight:600;margin-top:3px}
+
+  .d2{display:grid;grid-template-columns:minmax(0,1.55fr) minmax(0,1fr);gap:14px;margin-bottom:18px}
+  .secttl{font-weight:700;font-size:15px;margin-bottom:14px}
+  .bar{display:flex;align-items:center;gap:12px}
+  .bar .bl{width:78px;flex:0 0 auto;font-size:12.5px;color:#566072;font-weight:600;text-align:right}
+  .bar .track{flex:1;height:24px;background:#F2F4F7;border-radius:7px;overflow:hidden}
+  .bar .fill{height:100%;border-radius:7px;background:linear-gradient(90deg,#F7B23B,#F59E0B)}
+  .bar .bv{width:46px;flex:0 0 auto;font-size:12.5px;font-weight:700;text-align:right}
+  .donut{width:150px;height:150px;border-radius:50%;margin:6px auto 16px;position:relative;background:conic-gradient(#F59E0B 0% 42%,#2563EB 42% 70%,#16A34A 70% 88%,#7C3AED 88% 100%)}
+  .donut .hole{position:absolute;inset:26px;background:#fff;border-radius:50%;display:flex;flex-direction:column;align-items:center;justify-content:center}
+  .leg{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+  .leg .it{display:flex;align-items:center;gap:7px;font-size:12.5px;font-weight:600;color:#566072}
+  .leg .sw{width:9px;height:9px;border-radius:3px}
+
+  /* filter chips */
+  .chips{display:flex;gap:7px;margin-bottom:14px;flex-wrap:wrap}
+  .chip2{border:1px solid var(--color-border);background:#fff;color:#566072;padding:7px 14px;border-radius:999px;font-size:12.5px;font-weight:700}
+  .chip2.on{border-color:var(--color-primary);background:var(--color-primary);color:var(--color-on-primary)}
+
+  /* table */
+  .tbl{width:100%;border-collapse:collapse;font-size:13.5px}
+  .tbl thead tr{background:var(--color-surface-muted);border-bottom:1px solid #EEF1F5}
+  .tbl th{text-align:left;padding:12px 16px;font-size:11.5px;font-weight:700;color:var(--color-text-muted);text-transform:uppercase;letter-spacing:.04em}
+  .tbl td{padding:11px 16px;border-bottom:1px solid #F2F4F7}
+  .tbl tbody tr{cursor:pointer}
+  .tbl tbody tr:hover{background:var(--color-surface-muted)}
+  .av2{width:34px;height:34px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12.5px;font-weight:800;flex:0 0 auto}
+  .who{display:flex;align-items:center;gap:11px}
+
+  /* drawer */
+  .drawer{position:absolute;top:0;right:0;height:100%;width:444px;background:#fff;z-index:71;display:flex;flex-direction:column;box-shadow:-12px 0 40px rgba(8,14,26,.18);transform:translateX(100%);transition:transform .28s cubic-bezier(.4,0,.2,1)}
+  .drawer.open{transform:translateX(0)}
+  .drawer .dh{flex:0 0 auto;padding:18px 20px;border-bottom:1px solid #EEF1F5;display:flex;align-items:flex-start;gap:12px}
+  .drawer .db{flex:1;overflow-y:auto;padding:18px 20px}
+  .drawer .df{flex:0 0 auto;padding:14px 20px;border-top:1px solid #EEF1F5;display:flex;gap:10px}
+  .x{background:#F2F4F7;border:none;border-radius:9px;width:32px;height:32px;display:flex;align-items:center;justify-content:center;color:#566072;flex:0 0 auto}
+  .actions3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:9px;margin-bottom:20px}
+  .act{display:flex;flex-direction:column;align-items:center;gap:5px;padding:11px 6px;border:1px solid var(--color-border);border-radius:12px;font-weight:700;font-size:12px}
+  .fields{display:grid;grid-template-columns:1fr 1fr;gap:12px 14px;margin-bottom:20px}
+  .fk{font-size:11px;color:var(--color-text-subtle);font-weight:600;margin-bottom:2px}
+  .fv{font-weight:700;font-size:13.5px}
+  .uplabel{font-size:11.5px;font-weight:700;color:var(--color-text-muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:10px}
+
+  /* bottom tab bar */
+  .bottomnav{display:none;flex:0 0 auto;background:#fff;border-top:1px solid var(--color-border);height:64px;align-items:stretch;justify-content:space-around;padding:0 4px}
+  .tab{flex:1;background:none;border:none;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;color:var(--color-text-subtle);font-size:10.5px;font-weight:700}
+  .tab svg{width:20px;height:20px}.tab.on{color:var(--color-primary)}
+
+  /* ===== responsive: 3 tiers ===== */
+  @media (max-width:1023px){
+    .sidebar{position:absolute;top:0;left:0;height:100%;z-index:60;transform:translateX(-100%);box-shadow:0 20px 60px rgba(8,14,26,.4)}
+    .sidebar.open{transform:translateX(0)}
+    .hamb{display:flex}
+    .d2{grid-template-columns:1fr}
+  }
+  @media (max-width:639px){
+    .content{padding:16px 14px 90px}
+    .bottomnav{display:flex}
+    .kpis{grid-template-columns:1fr 1fr;gap:10px}
+    .drawer{width:100%}
+    .pagehead{flex-direction:column;align-items:stretch}
+    .me .nm,.me .ro{display:none}
+    .tbl thead{display:none}
+    .tbl,.tbl tbody,.tbl tr,.tbl td{display:block;width:100%}
+    .tbl tbody tr{border:1px solid var(--color-border);border-radius:14px;margin-bottom:12px;padding:6px 14px;background:#fff;box-shadow:var(--shadow-sm)}
+    .tbl tbody td{display:flex;justify-content:space-between;align-items:center;gap:16px;text-align:right;padding:9px 0;border-bottom:1px dashed #EEF1F5}
+    .tbl tbody tr td:last-child{border-bottom:none}
+    .tbl tbody td::before{content:attr(data-label);font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--color-text-subtle);text-align:left;flex:0 0 auto}
+  }
+</style>
+</head>
+<body>
+<div class="shell" id="shell">
+  <div class="scrim" id="scrim" onclick="closeNav()"></div>
+
+  <!-- ===== Sidebar ===== -->
+  <aside class="sidebar" id="sidebar">
+    <div class="brand"><div class="chip">F</div><div class="wm">Flex<span>CRM</span></div></div>
+    <div class="navwrap" id="nav"></div>
+    <div class="sidefoot">v1.0 · 2026</div>
+  </aside>
+
+  <!-- ===== Main ===== -->
+  <div class="main">
+    <header class="topbar">
+      <button class="hamb" onclick="toggleNav()" aria-label="Menu">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 12h18M3 6h18M3 18h18"/></svg>
+      </button>
+      <div class="ttl" id="title">Dashboard</div>
+      <div class="topright">
+        <div class="iconbtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg><span class="dot"></span></div>
+        <div class="me"><div class="av">KD</div><div><div class="nm">Kishore Das</div><div class="ro">Owner</div></div></div>
+      </div>
+    </header>
+
+    <main class="content" id="content"></main>
+
+    <nav class="bottomnav" id="bottomnav"></nav>
+  </div>
+
+  <!-- ===== Lead drawer ===== -->
+  <aside class="drawer" id="drawer">
+    <div class="dh">
+      <span class="av2" style="width:44px;height:44px;background:#FCE5C0;color:#7a4d00">RA</span>
+      <div style="flex:1;min-width:0"><div style="font-weight:800;font-size:17px">Rahul Agarwal</div><div style="font-size:12.5px;color:var(--color-text-muted);font-weight:600">Website lead · Real Estate</div></div>
+      <span class="badge b-warn">Interested</span>
+      <button class="x" onclick="closeDrawer()" aria-label="Close"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg></button>
+    </div>
+    <div class="db">
+      <div class="actions3">
+        <div class="act" style="color:var(--color-success)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 16.9v3a2 2 0 0 1-2.2 2A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.4 2.8 1.5 4 1.5 4l-1.5 1.5a16 16 0 0 0 6 6l1.5-1.5s1.2 1.1 4 1.5a2 2 0 0 1 1.7 2z"/></svg>Call</div>
+        <div class="act" style="color:var(--color-success)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 11.5a8.38 8.38 0 0 1-9 8.5 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8A8.5 8.5 0 0 1 12 3a8.5 8.5 0 0 1 9 8.5z"/></svg>WhatsApp</div>
+        <div class="act" style="color:var(--color-info)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-10 5L2 7"/></svg>Email</div>
+      </div>
+      <div class="uplabel">Lead details</div>
+      <div class="fields">
+        <div><div class="fk">Interest</div><div class="fv">Emerald Heights · 3BHK</div></div>
+        <div><div class="fk">Budget</div><div class="fv num">₹1.2–1.5 Cr</div></div>
+        <div><div class="fk">Source</div><div class="fv">Website</div></div>
+        <div><div class="fk">Owner</div><div class="fv">Amit Verma</div></div>
+        <div><div class="fk">Probability</div><div class="fv num">60%</div></div>
+        <div><div class="fk">Expected close</div><div class="fv num">14 Jul 2026</div></div>
+      </div>
+      <div class="uplabel">Stage journey</div>
+      <div style="display:flex;flex-direction:column;gap:14px">
+        <div style="display:flex;gap:11px"><span class="av2" style="width:26px;height:26px;background:var(--color-primary);color:#fff">✓</span><div><div style="font-weight:700;font-size:13.5px">Lead created</div><div style="font-size:11.5px;color:var(--color-text-subtle);font-weight:600">1 Jul 2026</div></div></div>
+        <div style="display:flex;gap:11px"><span class="av2" style="width:26px;height:26px;background:var(--color-primary);color:#fff">✓</span><div><div style="font-weight:700;font-size:13.5px">First contact</div><div style="font-size:11.5px;color:var(--color-text-subtle);font-weight:600">10 Jul 2026</div></div></div>
+        <div style="display:flex;gap:11px"><span class="av2" style="width:26px;height:26px;background:#fff;border:2px solid var(--color-border);color:transparent">.</span><div><div style="font-weight:700;font-size:13.5px;color:var(--color-text-subtle)">Site visit · pending</div></div></div>
+      </div>
+    </div>
+    <div class="df">
+      <button class="btn btn--secondary" style="flex:1;justify-content:center">Schedule visit</button>
+      <button class="btn btn--primary" style="flex:1;justify-content:center">Mark booked</button>
+    </div>
+  </aside>
+</div>
+
+<script>
+  // ----- icons (lucide-ish) -----
+  const ic = {
+    dashboard:'<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>',
+    leads:'<path d="M12 3l1.6 4.8L18 9l-4.4 1.2L12 15l-1.6-4.8L6 9l4.4-1.2z"/>',
+    customers:'<circle cx="12" cy="8" r="4"/><path d="M6 21v-1a6 6 0 0 1 12 0v1"/>',
+    deals:'<path d="M16 21V7a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v14"/><rect x="2" y="11" width="20" height="10" rx="2"/>',
+    tasks:'<rect x="3" y="4" width="18" height="18" rx="2"/><path d="M9 10l2 2 4-4"/>',
+    activities:'<path d="M22 12h-4l-3 9L9 3l-3 9H2"/>',
+    finance:'<rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20"/>',
+    hr:'<circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/>',
+    projects:'<rect x="4" y="3" width="16" height="18" rx="1.5"/><path d="M9 8h2M13 8h2M9 12h2M13 12h2"/>',
+    inventory:'<path d="M21 10c0 7-9 12-9 12s-9-5-9-12a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/>',
+    sitevisits:'<rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/>',
+    bookings:'<path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/>',
+    analytics:'<path d="M3 3v18h18"/><path d="M7 14l3-3 3 3 4-5"/>',
+    users:'<path d="M17 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/>',
+    more:'<circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/>'
+  };
+  const svg = (k) => '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">'+(ic[k]||'')+'</svg>';
+
+  // ----- nav (FlexCRM's real nav, grouped) -----
+  const NAV = [
+    {g:'Overview', items:[['dashboard','Dashboard'],['leads','Leads'],['customers','Customers'],['analytics','Analytics']]},
+    {g:'Sales', items:[['deals','Deals'],['tasks','Tasks'],['activities','Activities']]},
+    {g:'Real estate', items:[['projects','Projects'],['inventory','Inventory'],['sitevisits','Site Visits'],['bookings','Bookings']]},
+    {g:'Business', items:[['finance','Finance'],['hr','HR'],['users','Users']]},
+  ];
+  let route='dashboard';
+  const TITLES={dashboard:'Dashboard',leads:'Leads Management',customers:'Customers',analytics:'Analytics',deals:'Deals',tasks:'Tasks',activities:'Activities',projects:'Projects',inventory:'Inventory',sitevisits:'Site Visits',bookings:'Bookings',finance:'Finance',hr:'HR',users:'Users'};
+
+  function renderNav(){
+    document.getElementById('nav').innerHTML = NAV.map(grp =>
+      '<div class="navgrouplabel">'+grp.g+'</div>'+
+      grp.items.map(([k,l]) => '<button class="nav '+(route===k?'active':'')+'" onclick="go(\''+k+'\')">'+svg(k)+'<span>'+l+'</span></button>').join('')
+    ).join('');
+    const tabs=[['dashboard','Home'],['leads','Leads'],['inventory','Units'],['bookings','Bookings'],['more','More']];
+    document.getElementById('bottomnav').innerHTML = tabs.map(([k,l]) =>
+      '<button class="tab '+(route===k?'on':'')+'" onclick="go(\''+k+'\')">'+svg(k)+'<span>'+l+'</span></button>').join('');
+  }
+  function go(k){ if(k==='more')k='dashboard'; route=k; document.getElementById('title').textContent=TITLES[k]||'FlexCRM'; closeNav(); renderNav(); renderContent(); }
+  function toggleNav(){ document.getElementById('sidebar').classList.toggle('open'); document.getElementById('scrim').classList.toggle('show'); }
+  function closeNav(){ document.getElementById('sidebar').classList.remove('open'); document.getElementById('scrim').classList.remove('show'); }
+  function openDrawer(){ document.getElementById('drawer').classList.add('open'); }
+  function closeDrawer(){ document.getElementById('drawer').classList.remove('open'); }
+
+  // ----- content -----
+  const KPI = (lbl,val,sub,subc,ick,bg,col) =>
+    '<div class="card pad kpi"><div class="row1"><span class="lbl">'+lbl+'</span><span class="ic" style="background:'+bg+';color:'+col+'">'+svg(ick)+'</span></div><div class="val num">'+val+'</div><div class="sub" style="color:'+subc+'">'+sub+'</div></div>';
+
+  function dashboard(){
+    const kpis = [
+      KPI('Customers','248','+12 this month','var(--color-success)','customers','#FEF3E2','#F59E0B'),
+      KPI('Active leads','1,247','+23 new today','var(--color-success)','leads','#E8EEFD','#2563EB'),
+      KPI('Open pipeline','₹12.4 Cr','+4.2% MoM','var(--color-success)','deals','#F0E9FD','#7C3AED'),
+      KPI('Overdue tasks','9','due this week','var(--color-text-muted)','tasks','#FCEBEC','#E5484D'),
+      KPI('Units available','205','across 4 projects','var(--color-text-muted)','inventory','#E7F6EC','#16A34A'),
+      KPI('Collection (mo)','₹3.2 Cr','pending ₹1.8 Cr','var(--color-danger)','finance','#E8EEFD','#2563EB'),
+    ].join('');
+    const fdata=[['New',1247],['Contacted',892],['Interested',534],['Site Visit',287],['Negotiation',134],['Booked',89]];
+    const fmax=1247;
+    const funnel = fdata.map(([l,v])=>'<div class="bar"><div class="bl">'+l+'</div><div class="track"><div class="fill" style="width:'+Math.max(6,Math.round(v/fmax*100))+'%"></div></div><div class="bv num">'+v+'</div></div>').join('');
+    const leg=[['Website','42%','#F59E0B'],['Walk-in','28%','#2563EB'],['Referral','18%','#16A34A'],['Facebook','12%','#7C3AED']]
+      .map(([l,v,c])=>'<div class="it"><span class="sw" style="background:'+c+'"></span>'+l+'<span style="margin-left:auto;color:#16202E;font-weight:700">'+v+'</span></div>').join('');
+    return '<div class="pagehead"><div><h1>Welcome back, Kishore</h1><p>Here\'s what\'s happening across your workspace today.</p></div>'
+      +'<button class="btn btn--primary">Refresh</button></div>'
+      +'<div class="kpis">'+kpis+'</div>'
+      +'<div class="d2">'
+        +'<div class="card pad"><div class="secttl">Sales funnel</div>'+funnel+'</div>'
+        +'<div class="card pad"><div class="secttl">Lead sources</div><div class="donut"><div class="hole"><div style="font-size:21px;font-weight:800" class="num">1,247</div><div style="font-size:10.5px;color:var(--color-text-muted);font-weight:600">total leads</div></div></div>'+'<div class="leg">'+leg+'</div></div>'
+      +'</div>';
+  }
+
+  function leads(){
+    const stats=[['New today','4','#FEF3E2','#F59E0B','leads'],['Hot leads','9','#FCEBEC','#E5484D','activities'],['Follow-ups due','9','#FEF3E2','#B26B00','tasks'],['Booked','2','#E7F6EC','#16A34A','bookings']]
+      .map(([l,v,bg,c,k])=>'<div class="card pad" style="display:flex;align-items:center;gap:11px"><span class="ic" style="width:34px;height:34px;background:'+bg+';color:'+c+'">'+svg(k)+'</span><div><div style="font-size:19px;font-weight:800" class="num">'+v+'</div><div style="font-size:11.5px;color:var(--color-text-muted);font-weight:600">'+l+'</div></div></div>').join('');
+    const chips=[['All',20,1],['New',4,0],['Contacted',5,0],['Interested',4,0],['Negotiation',2,0],['Booked',2,0]]
+      .map(([l,n,on])=>'<button class="chip2 '+(on?'on':'')+'">'+l+' '+n+'</button>').join('');
+    const rows=[
+      ['Rahul Agarwal','LD-1042','rahul.a@gmail.com','Interested','b-warn','Website','Emerald Heights','Amit Verma','₹1.2–1.5 Cr'],
+      ['Neha Singhania','LD-1043','neha.s@gmail.com','Site Visit','b-accent','Partner','Emerald Heights','Amit Verma','₹70–90 L'],
+      ['Vikram Choudhary','LD-1044','vikram.c@gmail.com','New','b-info','Facebook','Sapphire Residency','Kavya Nair','₹45–55 L'],
+      ['Divya Krishna','LD-1045','divya.k@gmail.com','Negotiation','b-danger','Walk-in','Royal Palms','Amit Verma','₹2–2.5 Cr'],
+      ['Pooja Malhotra','LD-1046','pooja.m@gmail.com','Booked','b-ok','Referral','Emerald Heights','Amit Verma','₹1–1.3 Cr'],
+    ].map(r=>{
+      const init=r[0].split(' ').map(w=>w[0]).slice(0,2).join('');
+      const pal=['#FCE5C0','#7a4d00'];
+      return '<tr onclick="openDrawer()">'
+        +'<td data-label="Lead"><div class="who"><span class="av2" style="background:'+pal[0]+';color:'+pal[1]+'">'+init+'</span><div><div style="font-weight:700">'+r[0]+'</div><div style="font-size:12px;color:var(--color-text-muted)">'+r[1]+'</div></div></div></td>'
+        +'<td data-label="Email" style="color:#3D4757;font-weight:500">'+r[2]+'</td>'
+        +'<td data-label="Stage"><span class="badge '+r[4]+'">'+r[3]+'</span></td>'
+        +'<td data-label="Source" style="font-weight:600;color:#566072">'+r[5]+'</td>'
+        +'<td data-label="Interest" style="font-weight:600;color:#3D4757">'+r[6]+'</td>'
+        +'<td data-label="Owner" style="font-weight:600;color:#3D4757">'+r[7]+'</td>'
+        +'<td data-label="Value" style="font-weight:700;text-align:right" class="num">'+r[8]+'</td>'
+      +'</tr>';
+    }).join('');
+    return '<div class="pagehead"><div><h1>Leads Management</h1><p>Track and convert all your prospects.</p></div>'
+      +'<button class="btn btn--primary"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>Add Lead</button></div>'
+      +'<div class="kpis">'+stats+'</div>'
+      +'<div class="chips">'+chips+'</div>'
+      +'<div class="card" style="overflow:hidden"><table class="tbl"><thead><tr>'
+        +'<th>Lead</th><th>Email</th><th>Stage</th><th>Source</th><th>Interest</th><th>Owner</th><th style="text-align:right">Value</th>'
+      +'</tr></thead><tbody>'+rows+'</tbody></table></div>';
+  }
+
+  function placeholder(){
+    return '<div class="pagehead"><div><h1>'+(TITLES[route]||'FlexCRM')+'</h1><p>This screen inherits the same PropVista system (cards, tables→cards, amber actions, drawers).</p></div></div>'
+      +'<div class="card pad" style="display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:60px 20px;color:var(--color-text-muted)">'
+      +'<div class="ic" style="width:56px;height:56px;border-radius:16px;background:var(--color-primary-soft);color:var(--color-primary);margin-bottom:14px">'+svg(route)+'</div>'
+      +'<div style="font-weight:700;font-size:17px;color:var(--color-text)">'+(TITLES[route]||'Module')+'</div>'
+      +'<div style="font-size:13.5px;max-width:340px;margin-top:5px">Open <b>Dashboard</b> or <b>Leads</b> to see fully built screens. Every other page reuses the same primitives.</div></div>';
+  }
+
+  function renderContent(){
+    const el=document.getElementById('content');
+    el.innerHTML = route==='dashboard'?dashboard() : route==='leads'?leads() : placeholder();
+    el.scrollTop=0;
+  }
+
+  renderNav(); renderContent();
+</script>
+</body>
+</html>

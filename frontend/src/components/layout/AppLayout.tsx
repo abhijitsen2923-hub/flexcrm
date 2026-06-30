@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Outlet, useLocation } from "react-router-dom";
 
+import { MobileBottomNav } from "./MobileBottomNav";
 import { Sidebar } from "./Sidebar";
 import { Topbar } from "./Topbar";
 
@@ -42,6 +43,7 @@ export function AppLayout() {
         <main className="app-content">
           <Outlet />
         </main>
+        <MobileBottomNav onMore={() => setSidebarOpen(true)} />
       </div>
     </div>
   );

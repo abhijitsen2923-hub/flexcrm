@@ -25,13 +25,14 @@ import {
   useToast
 } from "../components";
 import { mergeModules } from "../config/features";
+import { CHART_AXIS, CHART_GRID, CHART_PALETTE, CHART_PRIMARY } from "../config/chartTheme";
 import { useOrgModules } from "../context/OrgContext";
 import { useDashboard } from "../hooks/useDashboard";
 import { useRealtimeEvent } from "../realtime";
 import { formatCurrency, formatInr, formatNumber, formatRelative } from "../utils/format";
 
 
-const PIE_COLORS = ["#2563eb", "#0ea5e9", "#16a34a", "#d97706", "#dc2626", "#7c3aed"];
+const PIE_COLORS = CHART_PALETTE;
 
 
 export default function DashboardPage() {
@@ -145,11 +146,11 @@ export default function DashboardPage() {
               <div style={{ height: 240 }}>
                 <ResponsiveContainer>
                   <LineChart data={charts.revenue_trend}>
-                    <CartesianGrid stroke="#e5e7eb" vertical={false} />
-                    <XAxis dataKey="label" stroke="#6b7280" fontSize={12} />
-                    <YAxis stroke="#6b7280" fontSize={12} />
+                    <CartesianGrid stroke={CHART_GRID} vertical={false} />
+                    <XAxis dataKey="label" stroke={CHART_AXIS} fontSize={12} />
+                    <YAxis stroke={CHART_AXIS} fontSize={12} />
                     <Tooltip />
-                    <Line type="monotone" dataKey="value" stroke="#2563eb" strokeWidth={2} dot={false} />
+                    <Line type="monotone" dataKey="value" stroke={CHART_PRIMARY} strokeWidth={2} dot={false} />
                   </LineChart>
                 </ResponsiveContainer>
               </div>
@@ -202,7 +203,7 @@ export default function DashboardPage() {
                       {invCharts.inventory_status_breakdown.map((entry, index) => {
                         const STATUS_COLORS: Record<string, string> = {
                           Available: "#16a34a",
-                          Reserved: "#d97706",
+                          Reserved: "#f59e0b",
                           Booked: "#2563eb",
                           Sold: "#6b7280"
                         };
@@ -229,11 +230,11 @@ export default function DashboardPage() {
                 <div style={{ height: 220 }}>
                   <ResponsiveContainer>
                     <BarChart data={charts.task_status_breakdown}>
-                      <CartesianGrid stroke="#e5e7eb" vertical={false} />
-                      <XAxis dataKey="label" stroke="#6b7280" fontSize={12} />
-                      <YAxis stroke="#6b7280" fontSize={12} />
+                      <CartesianGrid stroke={CHART_GRID} vertical={false} />
+                      <XAxis dataKey="label" stroke={CHART_AXIS} fontSize={12} />
+                      <YAxis stroke={CHART_AXIS} fontSize={12} />
                       <Tooltip />
-                      <Bar dataKey="value" fill="#2563eb" radius={[4, 4, 0, 0]} />
+                      <Bar dataKey="value" fill={CHART_PRIMARY} radius={[4, 4, 0, 0]} />
                     </BarChart>
                   </ResponsiveContainer>
                 </div>
