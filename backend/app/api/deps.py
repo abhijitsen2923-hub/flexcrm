@@ -23,21 +23,37 @@ from app.repositories.users import UserRepository
 from app.schemas.common import PaginationParams
 
 
-async def _resolve_schema_for_org(session: AsyncSession, org_id: UUID) -> str | None:
-    """Return the tenant schema_name for org_id, using Redis cache."""
+async def _resolve_org_context(session: AsyncSession, org_id: UUID) -> dict | None:
+    """Return {schema_name, is_active, is_deleted} for org_id, using the cache.
+
+    Cached under `schema:{org_id}`; platform-admin lifecycle changes delete this
+    key so a disable/archive takes effect immediately. Returns None if the org
+    doesn't exist.
+    """
     cache_key = f"schema:{org_id}"
     cached = await cache_client.get_json(cache_key)
-    if cached:
+    if isinstance(cached, dict):
         return cached
 
-    result = await session.execute(
-        select(Organization.schema_name).where(Organization.id == org_id)
-    )
-    schema_name: str | None = result.scalar_one_or_none()
-    if schema_name:
-        settings = get_settings()
-        await cache_client.set_json(cache_key, schema_name, ttl_seconds=settings.cache_ttl_seconds)
-    return schema_name
+    row = (
+        await session.execute(
+            select(
+                Organization.schema_name,
+                Organization.is_active,
+                Organization.is_deleted,
+            ).where(Organization.id == org_id)
+        )
+    ).first()
+    if row is None:
+        return None
+    context = {
+        "schema_name": row.schema_name,
+        "is_active": row.is_active,
+        "is_deleted": row.is_deleted,
+    }
+    settings = get_settings()
+    await cache_client.set_json(cache_key, context, ttl_seconds=settings.cache_ttl_seconds)
+    return context
 
 
 async def get_current_user(
@@ -70,9 +86,12 @@ async def get_current_user(
     set_scope(session, org_id)
 
     if org_id:
-        schema_name = await _resolve_schema_for_org(session, org_id)
-        if schema_name:
-            await set_tenant_schema(session, schema_name)
+        context = await _resolve_org_context(session, org_id)
+        # Block immediately when the org is missing, archived, or suspended.
+        if context is None or context["is_deleted"] or not context["is_active"]:
+            raise AuthenticationError("This workspace has been disabled. Contact your administrator.")
+        if context["schema_name"]:
+            await set_tenant_schema(session, context["schema_name"])
 
     return user
 

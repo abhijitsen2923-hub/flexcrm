@@ -21,7 +21,7 @@ can't order CREATE/DROP TABLE statements (cycle error in `create_all`).
 from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, JSON, String, Text, Uuid, func
+from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, JSON, String, Text, Uuid, func, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database.base import Base
@@ -40,6 +40,12 @@ class Organization(Base, UUIDPrimaryKeyMixin):
     plan: Mapped[str] = mapped_column(String(32), nullable=False, default="free")
     features: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     schema_name: Mapped[str] = mapped_column(Text, nullable=False, unique=True, index=True)
+
+    # Platform-admin suspension toggle. When false, the org's users are blocked
+    # from login and from authenticated requests (orthogonal to is_deleted).
+    is_active: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default=text("true"), index=True
+    )
 
     # Timestamps inlined here (not via TimestampMixin) to keep the cycle
     # surface minimal.

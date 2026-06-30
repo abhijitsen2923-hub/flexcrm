@@ -170,6 +170,8 @@ class AuthService(ServiceBase):
                 raise AuthenticationError("Invalid email or password.")
             if user.status != UserStatus.active:
                 raise AuthenticationError("This account is not active.")
+            if not user.is_platform_admin:
+                await self._assert_org_usable(user.organization_id)
 
             token_response = await self._issue_tokens(
                 user.id,
@@ -206,6 +208,8 @@ class AuthService(ServiceBase):
             user = await self.user_repository.get(UUID(token_payload["sub"]))
             if user is None or user.status != UserStatus.active:
                 raise AuthenticationError("User account is not active.")
+            if not user.is_platform_admin:
+                await self._assert_org_usable(user.organization_id)
 
             await self.refresh_token_repository.revoke(stored_token)
             token_response = await self._issue_tokens(
@@ -234,6 +238,21 @@ class AuthService(ServiceBase):
                 return
             await self.refresh_token_repository.revoke(stored_token)
         await self.commit()
+
+    async def _assert_org_usable(self, org_id: UUID | None) -> None:
+        """Reject auth when the org is archived (is_deleted) or suspended
+        (is_active=false). Platform admins skip this (they have no client org)."""
+        if not org_id:
+            return
+        row = (
+            await self.session.execute(
+                select(Organization.is_active, Organization.is_deleted).where(
+                    Organization.id == org_id
+                )
+            )
+        ).first()
+        if row is None or row.is_deleted or not row.is_active:
+            raise AuthenticationError("This workspace has been disabled. Contact your administrator.")
 
     async def _activate_tenant_schema(self, org_id: UUID | None) -> None:
         """Look up schema_name for org_id and activate tenant schema routing."""

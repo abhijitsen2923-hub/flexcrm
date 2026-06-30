@@ -36,6 +36,9 @@ class OrganizationRead(ORMModel):
     allowed_currencies: list[str] = []
     # Computed at response time — which optional modules are enabled for this org.
     modules: dict[str, bool] = {}
+    # Lifecycle state (platform admin): active = not suspended; is_deleted = archived.
+    is_active: bool = True
+    is_deleted: bool = False
     created_at: datetime
     updated_at: datetime
 
@@ -49,3 +52,8 @@ class OrganizationUpdate(ORMModel):
 class UpdateModulesRequest(ORMModel):
     """Payload for PATCH /admin/organizations/{id}/modules."""
     modules: dict[str, bool]
+
+
+class SetOrgStatusRequest(ORMModel):
+    """Payload for PATCH /admin/organizations/{id}/status (disable/enable)."""
+    is_active: bool
