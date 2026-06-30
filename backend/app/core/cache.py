@@ -100,37 +100,58 @@ class CacheClient:
     async def get_json(self, key: str) -> Any | None:
         if self._redis is None:
             return await self._fallback.get(key)
-        payload = await self._redis.get(key)
-        return json.loads(payload) if payload else None
+        try:
+            payload = await self._redis.get(key)
+            return json.loads(payload) if payload else None
+        except RedisError as exc:
+            # Fail open: a Redis blip (or hitting a free-tier limit) becomes a
+            # cache miss, not a 500. The caller falls through to the database.
+            logger.warning("Redis get(%s) failed; treating as cache miss: %s", key, exc)
+            return None
 
     async def set_json(self, key: str, value: Any, ttl_seconds: int | None = None) -> None:
         if self._redis is None:
             await self._fallback.set(key, value, ttl_seconds)
             return
-        await self._redis.set(key, json.dumps(value, default=str), ex=ttl_seconds)
+        try:
+            await self._redis.set(key, json.dumps(value, default=str), ex=ttl_seconds)
+        except RedisError as exc:
+            logger.warning("Redis set(%s) failed; skipping cache write: %s", key, exc)
 
     async def delete(self, key: str) -> None:
         if self._redis is None:
             await self._fallback.delete(key)
             return
-        await self._redis.delete(key)
+        try:
+            await self._redis.delete(key)
+        except RedisError as exc:
+            logger.warning("Redis delete(%s) failed; skipping: %s", key, exc)
 
     async def delete_pattern(self, prefix: str) -> None:
         if self._redis is None:
             await self._fallback.delete_pattern(prefix)
             return
-        pattern = f"{prefix}*"
-        async for key in self._scan_iter(pattern):
-            await self._redis.delete(key)
+        try:
+            pattern = f"{prefix}*"
+            async for key in self._scan_iter(pattern):
+                await self._redis.delete(key)
+        except RedisError as exc:
+            logger.warning("Redis delete_pattern(%s) failed; skipping invalidation: %s", prefix, exc)
 
     async def increment(self, key: str, ttl_seconds: int) -> int:
         if self._redis is None:
             return await self._fallback.increment(key, ttl_seconds)
-        async with self._redis.pipeline(transaction=True) as pipeline:
-            pipeline.incr(key)
-            pipeline.expire(key, ttl_seconds)
-            result = await pipeline.execute()
-        return int(result[0])
+        try:
+            async with self._redis.pipeline(transaction=True) as pipeline:
+                pipeline.incr(key)
+                pipeline.expire(key, ttl_seconds)
+                result = await pipeline.execute()
+            return int(result[0])
+        except RedisError as exc:
+            # Fail open: if we can't reach Redis, don't block the request.
+            # Returning 0 keeps the caller under any rate limit.
+            logger.warning("Redis increment(%s) failed; failing open: %s", key, exc)
+            return 0
 
     async def _scan_iter(self, match: str) -> AsyncIterator[str]:
         if self._redis is None:
