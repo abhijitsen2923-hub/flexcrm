@@ -2,13 +2,29 @@ import { RefreshCw } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Navigate } from "react-router-dom";
 
-import { Button, EmptyState, LoadingBlock, useToast } from "../components";
+import { Button, ConfirmDialog, EmptyState, LoadingBlock, useToast } from "../components";
 import { useAuth } from "../hooks/useAuth";
 import { adminService } from "../services/admin";
 import type { ModuleKey, Organization } from "../types";
 import { extractErrorMessage } from "../utils/errors";
 
 type Industry = Organization["business_type"];
+
+function StatusBadge({ org }: { org: Organization }) {
+  const [label, color] = org.is_deleted
+    ? ["Archived", "#6b7280"]
+    : org.is_active
+      ? ["Active", "#15803d"]
+      : ["Disabled", "#b45309"];
+  return (
+    <span
+      className="badge"
+      style={{ background: `${color}1a`, color, border: `1px solid ${color}40` }}
+    >
+      {label}
+    </span>
+  );
+}
 
 const MODULE_LABELS: Record<ModuleKey, string> = {
   deals: "Deals",
@@ -121,15 +137,17 @@ export function PlatformAdminPage() {
   const [orgs, setOrgs] = useState<Organization[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState<Record<string, boolean>>({});
+  const [includeArchived, setIncludeArchived] = useState(false);
+  const [confirmOrg, setConfirmOrg] = useState<Organization | null>(null);
 
   if (!user?.is_platform_admin) {
     return <Navigate to="/" replace />;
   }
 
-  const load = async () => {
+  const load = async (archived: boolean) => {
     setLoading(true);
     try {
-      const data = await adminService.listOrganizations();
+      const data = await adminService.listOrganizations(archived);
       setOrgs(data);
     } catch (err) {
       toast.error("Failed to load organizations", extractErrorMessage(err));
@@ -139,8 +157,59 @@ export function PlatformAdminPage() {
   };
 
   useEffect(() => {
-    void load();
-  }, []);
+    void load(includeArchived);
+  }, [includeArchived]);
+
+  const handleSetActive = async (org: Organization, isActive: boolean) => {
+    setSaving((prev) => ({ ...prev, [org.id]: true }));
+    try {
+      const fresh = await adminService.setOrgActive(org.id, isActive);
+      setOrgs((prev) => prev.map((o) => (o.id === org.id ? fresh : o)));
+      toast.success(
+        isActive ? "Client enabled" : "Client disabled",
+        `${org.name} ${isActive ? "can sign in again" : "is now suspended"}`,
+      );
+    } catch (err) {
+      toast.error(isActive ? "Enable failed" : "Disable failed", extractErrorMessage(err));
+    } finally {
+      setSaving((prev) => ({ ...prev, [org.id]: false }));
+    }
+  };
+
+  const handleRestore = async (org: Organization) => {
+    setSaving((prev) => ({ ...prev, [org.id]: true }));
+    try {
+      const fresh = await adminService.restoreOrganization(org.id);
+      setOrgs((prev) => prev.map((o) => (o.id === org.id ? fresh : o)));
+      toast.success("Client restored", `${org.name} is active again`);
+    } catch (err) {
+      toast.error("Restore failed", extractErrorMessage(err));
+    } finally {
+      setSaving((prev) => ({ ...prev, [org.id]: false }));
+    }
+  };
+
+  const handleArchiveConfirmed = async () => {
+    const org = confirmOrg;
+    if (!org) return;
+    setSaving((prev) => ({ ...prev, [org.id]: true }));
+    try {
+      const fresh = await adminService.archiveOrganization(org.id);
+      // In the default view archived orgs are hidden; remove it. When showing
+      // archived, keep it in place so the Restore action is available.
+      setOrgs((prev) =>
+        includeArchived
+          ? prev.map((o) => (o.id === org.id ? fresh : o))
+          : prev.filter((o) => o.id !== org.id),
+      );
+      toast.success("Client deleted", `${org.name} was archived and can be restored.`);
+    } catch (err) {
+      toast.error("Delete failed", extractErrorMessage(err));
+    } finally {
+      setSaving((prev) => ({ ...prev, [org.id]: false }));
+      setConfirmOrg(null);
+    }
+  };
 
   const handleToggle = async (org: Organization, key: ModuleKey, enabled: boolean) => {
     const updated = { ...org.modules, [key]: enabled };
@@ -180,8 +249,16 @@ export function PlatformAdminPage() {
           <h1>Platform Admin</h1>
           <p>Control which modules each organisation can access.</p>
         </div>
-        <div className="page-header__actions">
-          <Button variant="secondary" size="sm" icon={<RefreshCw size={14} />} onClick={load}>
+        <div className="page-header__actions" style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
+          <label style={{ display: "flex", alignItems: "center", gap: "0.375rem", fontSize: "0.875rem", cursor: "pointer" }}>
+            <input
+              type="checkbox"
+              checked={includeArchived}
+              onChange={(e) => setIncludeArchived(e.target.checked)}
+            />
+            Show archived
+          </label>
+          <Button variant="secondary" size="sm" icon={<RefreshCw size={14} />} onClick={() => void load(includeArchived)}>
             Refresh
           </Button>
         </div>
@@ -199,63 +276,101 @@ export function PlatformAdminPage() {
             gap: "1rem",
           }}
         >
-          {orgs.map((org) => (
-            <div key={org.id} className="card">
-              <div
-                style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "flex-start",
-                  gap: "0.5rem",
-                  marginBottom: "1rem",
-                }}
-              >
-                <div>
-                  <div style={{ fontWeight: 600, marginBottom: "0.3rem" }}>{org.name}</div>
-                  <div style={{ display: "flex", gap: "0.375rem", flexWrap: "wrap" }}>
-                    <span className="badge badge--neutral">
-                      {INDUSTRY_LABEL[org.business_type] ?? org.business_type}
-                    </span>
-                    <span className="badge badge--neutral">{org.plan}</span>
+          {orgs.map((org) => {
+            const busy = !!saving[org.id];
+            const locked = org.is_deleted || !org.is_active;
+            return (
+              <div key={org.id} className="card" style={{ opacity: org.is_deleted ? 0.6 : 1 }}>
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "flex-start",
+                    gap: "0.5rem",
+                    marginBottom: "1rem",
+                  }}
+                >
+                  <div>
+                    <div style={{ fontWeight: 600, marginBottom: "0.3rem" }}>{org.name}</div>
+                    <div style={{ display: "flex", gap: "0.375rem", flexWrap: "wrap" }}>
+                      <StatusBadge org={org} />
+                      <span className="badge badge--neutral">
+                        {INDUSTRY_LABEL[org.business_type] ?? org.business_type}
+                      </span>
+                      <span className="badge badge--neutral">{org.plan}</span>
+                    </div>
+                  </div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: "0.375rem", alignItems: "stretch" }}>
+                    {org.is_deleted ? (
+                      <Button variant="primary" size="sm" disabled={busy} onClick={() => void handleRestore(org)}>
+                        Restore
+                      </Button>
+                    ) : (
+                      <>
+                        <Button variant="secondary" size="sm" disabled={busy} onClick={() => void handleApplyDefaults(org)}>
+                          Apply defaults
+                        </Button>
+                        {org.is_active ? (
+                          <Button variant="secondary" size="sm" disabled={busy} onClick={() => void handleSetActive(org, false)}>
+                            Disable
+                          </Button>
+                        ) : (
+                          <Button variant="primary" size="sm" disabled={busy} onClick={() => void handleSetActive(org, true)}>
+                            Enable
+                          </Button>
+                        )}
+                        <Button variant="danger" size="sm" disabled={busy} onClick={() => setConfirmOrg(org)}>
+                          Delete
+                        </Button>
+                      </>
+                    )}
                   </div>
                 </div>
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  disabled={!!saving[org.id]}
-                  onClick={() => void handleApplyDefaults(org)}
-                >
-                  Apply defaults
-                </Button>
-              </div>
 
-              <ModuleGroup
-                title="Core CRM"
-                keys={CORE_MODULES}
-                org={org}
-                disabled={!!saving[org.id]}
-                onToggle={(key, val) => void handleToggle(org, key, val)}
-              />
-              <ModuleGroup
-                title="Business Operations"
-                keys={OPS_MODULES}
-                org={org}
-                disabled={!!saving[org.id]}
-                onToggle={(key, val) => void handleToggle(org, key, val)}
-              />
-              {org.business_type === "real_estate" && (
                 <ModuleGroup
-                  title="Real Estate"
-                  keys={RE_MODULES}
+                  title="Core CRM"
+                  keys={CORE_MODULES}
                   org={org}
-                  disabled={!!saving[org.id]}
+                  disabled={busy || locked}
                   onToggle={(key, val) => void handleToggle(org, key, val)}
                 />
-              )}
-            </div>
-          ))}
+                <ModuleGroup
+                  title="Business Operations"
+                  keys={OPS_MODULES}
+                  org={org}
+                  disabled={busy || locked}
+                  onToggle={(key, val) => void handleToggle(org, key, val)}
+                />
+                {org.business_type === "real_estate" && (
+                  <ModuleGroup
+                    title="Real Estate"
+                    keys={RE_MODULES}
+                    org={org}
+                    disabled={busy || locked}
+                    onToggle={(key, val) => void handleToggle(org, key, val)}
+                  />
+                )}
+              </div>
+            );
+          })}
         </div>
       )}
+
+      <ConfirmDialog
+        open={confirmOrg !== null}
+        title="Delete client"
+        description={
+          confirmOrg
+            ? `Delete "${confirmOrg.name}"? Its users lose access immediately. The data is archived and can be restored later from "Show archived".`
+            : ""
+        }
+        confirmLabel="Delete"
+        cancelLabel="Cancel"
+        destructive
+        loading={confirmOrg ? !!saving[confirmOrg.id] : false}
+        onCancel={() => setConfirmOrg(null)}
+        onConfirm={() => void handleArchiveConfirmed()}
+      />
     </>
   );
 }

@@ -121,6 +121,8 @@ export interface Organization {
   features: Record<string, unknown> | null;
   allowed_currencies: string[];
   modules: Record<ModuleKey, boolean>;
+  is_active: boolean;
+  is_deleted: boolean;
   created_at: string;
   updated_at: string;
 }
