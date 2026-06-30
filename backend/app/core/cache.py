@@ -74,6 +74,12 @@ class CacheClient:
                 decode_responses=True,
                 socket_connect_timeout=10,
                 socket_timeout=10,
+                # Bound the pool per instance so multiple Cloud Run instances stay
+                # under the Redis Cloud free-tier ~30-connection cap (2 instances
+                # x 12 = 24). Redis ops are sub-ms, so the pool sustains high
+                # throughput via reuse; rare overflow hits the fail-open path.
+                max_connections=12,
+                health_check_interval=30,
             )
             await self._redis.ping()
             logger.info("Connected to Redis cache")

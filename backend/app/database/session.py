@@ -28,6 +28,14 @@ class DatabaseSessionManager:
             echo=settings.sqlalchemy_echo,
             future=True,
             pool_pre_ping=True,
+            # Explicit, bounded pool: 20 conns/instance gives headroom for ~30
+            # concurrent users. pool_recycle drops connections Neon has idle-closed
+            # before we reuse them (works with pre_ping). Keep DATABASE_URL on
+            # Neon's pooled (-pooler) endpoint so instances share real connections.
+            pool_size=10,
+            max_overflow=10,
+            pool_timeout=20,
+            pool_recycle=300,
         )
         self._session_factory = async_sessionmaker(
             bind=self._engine,
