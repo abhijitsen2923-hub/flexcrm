@@ -36,7 +36,11 @@ interface RetriableRequestConfig extends InternalAxiosRequestConfig {
 // rollout 5xx — carry no response (and no CORS header), so the browser reports
 // them as "CORS" / network errors. Auto-retry these a few times with backoff so
 // a brief blip never surfaces to the user. Only idempotent requests are retried.
-const MAX_TRANSIENT_RETRIES = 3;
+// Retry budget is sized to outlast a Cloud Run cold start / deploy rollover
+// (min-instances=0): 5 attempts at ~0.5/1/2/4/4s ≈ 11.5s total, so login and
+// the dashboard ride through the window where a fresh, still-cold revision is
+// dropping requests rather than surfacing "Unable to reach the server".
+const MAX_TRANSIENT_RETRIES = 5;
 const TRANSIENT_STATUS = new Set([502, 503, 504]);
 
 function isTransientError(error: AxiosError): boolean {
@@ -60,8 +64,9 @@ function isRetryableRequest(config: RetriableRequestConfig): boolean {
 }
 
 function backoffDelay(attempt: number): number {
-  // attempt 1 → ~500ms, 2 → ~1000ms, 3 → ~2000ms, plus jitter.
-  return 500 * 2 ** (attempt - 1) + Math.floor(Math.random() * 200);
+  // 0.5s, 1s, 2s, 4s, 4s (capped) + jitter. Capping keeps later attempts from
+  // ballooning while still spanning a multi-second cold start.
+  return Math.min(500 * 2 ** (attempt - 1), 4000) + Math.floor(Math.random() * 250);
 }
 
 let refreshPromise: Promise<StoredSession | null> | null = null;
