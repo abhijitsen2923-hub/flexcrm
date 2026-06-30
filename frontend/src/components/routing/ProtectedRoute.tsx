@@ -2,15 +2,22 @@ import type { PropsWithChildren } from "react";
 import { Navigate, useLocation } from "react-router-dom";
 
 import { useAuth } from "../../hooks/useAuth";
-import { LoadingBlock } from "../ui/Spinner";
+import { SessionRestoreScreen } from "./SessionRestoreScreen";
 
 
 export function ProtectedRoute({ children }: PropsWithChildren) {
-  const { user, loading, session } = useAuth();
+  const { user, loading, session, restoreFailed, refreshProfile } = useAuth();
   const location = useLocation();
 
-  if (loading && session) {
-    return <LoadingBlock label="Restoring your session…" />;
+  // We have a session token but no profile yet: either restoring (spinner) or it
+  // failed transiently (retry). Never bounce a still-valid session to /login.
+  if (session && !user) {
+    return (
+      <SessionRestoreScreen
+        failed={restoreFailed && !loading}
+        onRetry={() => void refreshProfile()}
+      />
+    );
   }
 
   if (!user) {
