@@ -2,6 +2,8 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from sqlalchemy import text
 
 from app.api.v1.api import api_router
 from app.core.cache import cache_client
@@ -64,6 +66,18 @@ def create_app() -> FastAPI:
     @app.get("/health", tags=["Health"])
     async def health():
         return {"status": "ok"}
+
+    @app.get("/health/db", tags=["Health"])
+    async def health_db():
+        """Lightweight DB ping. Hit this on a schedule (e.g. every ~4 min) to
+        keep the Neon serverless compute warm and avoid cold-start latency on
+        the first real query."""
+        try:
+            async with db_manager.engine.connect() as conn:
+                await conn.execute(text("SELECT 1"))
+        except Exception:
+            return JSONResponse(status_code=503, content={"status": "error", "db": "unreachable"})
+        return {"status": "ok", "db": "ok"}
 
     return app
 
