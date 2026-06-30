@@ -2,11 +2,24 @@
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "flexcrm",
   "compatibility_date": "2024-12-01",
+  // Worker entry: serves the SPA via the ASSETS binding and runs the cron
+  // keep-alive (scheduled handler). Static assets are still served first by the
+  // platform, so this doesn't change SPA delivery.
+  "main": "worker/index.js",
   // Workers with Static Assets — serves the Vite build output from ./dist.
   // The SPA fallback replaces the Pages-only `public/_redirects` behavior:
   // any unmatched route serves index.html so React Router can take over.
   "assets": {
     "directory": "./dist",
-    "not_found_handling": "single-page-application"
+    "not_found_handling": "single-page-application",
+    "binding": "ASSETS"
+  },
+  // Cron: ping the backend DB health endpoint every 4 minutes to keep the Neon
+  // serverless compute warm (no cold-start latency on real requests).
+  "triggers": {
+    "crons": ["*/4 * * * *"]
+  },
+  "vars": {
+    "KEEPALIVE_URL": "https://flexcrm-backend-539170436218.asia-south1.run.app/health/db"
   }
 }
