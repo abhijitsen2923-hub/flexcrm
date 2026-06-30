@@ -1,5 +1,6 @@
 from app.core.cache import cache_client
 from app.core.config import get_settings
+from app.core.tenancy import get_schema
 from app.repositories.analytics import AnalyticsRepository
 from app.repositories.dashboard import DashboardRepository
 from app.schemas.analytics import (
@@ -12,15 +13,32 @@ from app.schemas.dashboard import ChartPoint
 
 class AnalyticsService:
     def __init__(self, session):
+        self.session = session
         self.repository = AnalyticsRepository(session)
         self.dashboard_repository = DashboardRepository(session)
         self.cache_ttl = get_settings().cache_ttl_seconds
 
-    async def get_revenue(self) -> AnalyticsRevenueResponse:
-        cache_key = "analytics:revenue"
+    def _cache_key(self, name: str) -> str:
+        # Scope by tenant schema so cached analytics never cross tenants (shared Redis).
+        scope = get_schema(self.session) or "public"
+        return f"analytics:{name}:{scope}"
+
+    async def _read_cache(self, cache_key: str, model_cls):
+        """Validated model from cache, or None on miss / stale entry (recompute)."""
         cached = await cache_client.get_json(cache_key)
-        if cached:
-            return AnalyticsRevenueResponse(**cached)
+        if not cached:
+            return None
+        try:
+            return model_cls(**cached)
+        except Exception:
+            await cache_client.delete(cache_key)
+            return None
+
+    async def get_revenue(self) -> AnalyticsRevenueResponse:
+        cache_key = self._cache_key("revenue")
+        cached = await self._read_cache(cache_key, AnalyticsRevenueResponse)
+        if cached is not None:
+            return cached
 
         monthly_revenue = [
             ChartPoint(label=label, value=value) for label, value in await self.dashboard_repository.revenue_trend()
@@ -34,10 +52,10 @@ class AnalyticsService:
         return response
 
     async def get_leads(self) -> AnalyticsLeadsResponse:
-        cache_key = "analytics:leads"
-        cached = await cache_client.get_json(cache_key)
-        if cached:
-            return AnalyticsLeadsResponse(**cached)
+        cache_key = self._cache_key("leads")
+        cached = await self._read_cache(cache_key, AnalyticsLeadsResponse)
+        if cached is not None:
+            return cached
 
         response = AnalyticsLeadsResponse(
             total_leads=await self.repository.total_leads(),
@@ -53,10 +71,10 @@ class AnalyticsService:
         return response
 
     async def get_conversion(self) -> AnalyticsConversionResponse:
-        cache_key = "analytics:conversion"
-        cached = await cache_client.get_json(cache_key)
-        if cached:
-            return AnalyticsConversionResponse(**cached)
+        cache_key = self._cache_key("conversion")
+        cached = await self._read_cache(cache_key, AnalyticsConversionResponse)
+        if cached is not None:
+            return cached
 
         total_leads = await self.repository.total_leads()
         won_leads = await self.repository.won_leads()
