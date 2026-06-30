@@ -78,12 +78,23 @@ async def list_organizations(
     _=Depends(require_platform_admin()),
     session: AsyncSession = Depends(get_db_session),
 ):
-    """List organizations across all tenants (platform admin only).
+    """List CLIENT organizations across all tenants (platform admin only).
 
-    Archived (is_deleted) orgs are excluded unless include_archived is true.
+    Platform organizations — those hosting a platform admin, i.e. the operator's
+    own FlexCRM Platform org — are excluded; the SaaS operator manages client
+    tenants, not their own org. Archived (is_deleted) orgs are excluded unless
+    include_archived is true.
     """
     with bypass(session):
-        conditions = [] if include_archived else [Organization.is_deleted.is_(False)]
+        platform_org_ids = (
+            select(User.organization_id).where(
+                User.is_platform_admin.is_(True),
+                User.organization_id.is_not(None),
+            )
+        )
+        conditions = [Organization.id.not_in(platform_org_ids)]
+        if not include_archived:
+            conditions.append(Organization.is_deleted.is_(False))
         orgs = (
             await session.execute(
                 select(Organization).where(*conditions).order_by(Organization.name)
