@@ -2,7 +2,7 @@ import { RefreshCw } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Navigate } from "react-router-dom";
 
-import { Button, ConfirmDialog, EmptyState, LoadingBlock, useToast } from "../components";
+import { Button, ConfirmDialog, EmptyState, LoadingBlock, Modal, useToast } from "../components";
 import { useAuth } from "../hooks/useAuth";
 import { adminService } from "../services/admin";
 import type { ModuleKey, Organization } from "../types";
@@ -139,6 +139,8 @@ export function PlatformAdminPage() {
   const [saving, setSaving] = useState<Record<string, boolean>>({});
   const [includeArchived, setIncludeArchived] = useState(false);
   const [confirmOrg, setConfirmOrg] = useState<Organization | null>(null);
+  const [purgeOrg, setPurgeOrg] = useState<Organization | null>(null);
+  const [purgeText, setPurgeText] = useState("");
 
   if (!user?.is_platform_admin) {
     return <Navigate to="/" replace />;
@@ -208,6 +210,27 @@ export function PlatformAdminPage() {
     } finally {
       setSaving((prev) => ({ ...prev, [org.id]: false }));
       setConfirmOrg(null);
+    }
+  };
+
+  const closePurge = () => {
+    setPurgeOrg(null);
+    setPurgeText("");
+  };
+
+  const handlePurgeConfirmed = async () => {
+    const org = purgeOrg;
+    if (!org || purgeText !== org.name) return;
+    setSaving((prev) => ({ ...prev, [org.id]: true }));
+    try {
+      await adminService.purgeOrganization(org.id);
+      setOrgs((prev) => prev.filter((o) => o.id !== org.id));
+      toast.success("Client permanently deleted", `${org.name} and all its data were removed.`);
+      closePurge();
+    } catch (err) {
+      toast.error("Permanent delete failed", extractErrorMessage(err));
+    } finally {
+      setSaving((prev) => ({ ...prev, [org.id]: false }));
     }
   };
 
@@ -302,9 +325,14 @@ export function PlatformAdminPage() {
                   </div>
                   <div style={{ display: "flex", flexDirection: "column", gap: "0.375rem", alignItems: "stretch" }}>
                     {org.is_deleted ? (
-                      <Button variant="primary" size="sm" disabled={busy} onClick={() => void handleRestore(org)}>
-                        Restore
-                      </Button>
+                      <>
+                        <Button variant="primary" size="sm" disabled={busy} onClick={() => void handleRestore(org)}>
+                          Restore
+                        </Button>
+                        <Button variant="danger" size="sm" disabled={busy} onClick={() => { setPurgeOrg(org); setPurgeText(""); }}>
+                          Delete permanently
+                        </Button>
+                      </>
                     ) : (
                       <>
                         <Button variant="secondary" size="sm" disabled={busy} onClick={() => void handleApplyDefaults(org)}>
@@ -371,6 +399,43 @@ export function PlatformAdminPage() {
         onCancel={() => setConfirmOrg(null)}
         onConfirm={() => void handleArchiveConfirmed()}
       />
+
+      <Modal
+        open={purgeOrg !== null}
+        title="Delete permanently"
+        onClose={closePurge}
+        footer={
+          <>
+            <Button variant="secondary" onClick={closePurge} disabled={purgeOrg ? !!saving[purgeOrg.id] : false}>
+              Cancel
+            </Button>
+            <Button
+              variant="danger"
+              disabled={!purgeOrg || purgeText !== purgeOrg.name || !!saving[purgeOrg.id]}
+              onClick={() => void handlePurgeConfirmed()}
+            >
+              Delete permanently
+            </Button>
+          </>
+        }
+      >
+        <p style={{ marginTop: 0 }}>
+          This permanently deletes <strong>{purgeOrg?.name}</strong> and{" "}
+          <strong>all of its data</strong> — leads, customers, deals, users, everything. This
+          cannot be undone.
+        </p>
+        <p style={{ marginBottom: "0.375rem" }}>
+          Type the organization name <strong>{purgeOrg?.name}</strong> to confirm:
+        </p>
+        <input
+          type="text"
+          value={purgeText}
+          onChange={(e) => setPurgeText(e.target.value)}
+          placeholder={purgeOrg?.name}
+          autoFocus
+          style={{ width: "100%", padding: "0.5rem", borderRadius: "0.375rem", border: "1px solid #d1d5db" }}
+        />
+      </Modal>
     </>
   );
 }

@@ -40,4 +40,8 @@ export const adminService = {
     );
     return data;
   },
+
+  async purgeOrganization(orgId: string): Promise<void> {
+    await apiClient.delete(`/admin/organizations/${orgId}/permanent`);
+  },
 };

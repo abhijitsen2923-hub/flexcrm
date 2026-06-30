@@ -6,8 +6,8 @@ Regular users always receive 403 from `require_platform_admin`.
 from datetime import UTC, datetime
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query
-from sqlalchemy import select
+from fastapi import APIRouter, Depends, Query, status
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_db_session, require_platform_admin
@@ -15,6 +15,7 @@ from app.core.cache import cache_client
 from app.core.currencies import allowed_currencies_for_org
 from app.core.exceptions import NotFoundError, ValidationError
 from app.core.tenancy import bypass
+from app.database.session import db_manager
 from app.models.organization import Organization
 from app.models.user import User
 from app.schemas.organization import (
@@ -24,6 +25,7 @@ from app.schemas.organization import (
     UpdateModulesRequest,
     get_modules,
 )
+from app.services.tenant_provisioner import _SAFE_SCHEMA
 
 
 router = APIRouter()
@@ -186,3 +188,42 @@ async def restore_organization(
         await session.refresh(org)
     await cache_client.delete(f"schema:{org_id}")
     return _to_read(org)
+
+
+@router.delete("/organizations/{org_id}/permanent", status_code=status.HTTP_204_NO_CONTENT)
+async def purge_organization(
+    org_id: UUID,
+    _=Depends(require_platform_admin()),
+    session: AsyncSession = Depends(get_db_session),
+) -> None:
+    """Permanently delete an archived organization and ALL its data.
+
+    Drops the tenant schema (every per-tenant table/row) and removes the org
+    row, which cascades to its users and refresh tokens. Irreversible. Only
+    allowed once the org has been archived (is_deleted) and never for the
+    platform organization.
+    """
+    with bypass(session):
+        org = await _load_org(session, org_id, include_deleted=True)
+        await _reject_if_platform_org(session, org_id)
+        if not org.is_deleted:
+            raise ValidationError("Archive the organization before deleting it permanently.")
+        schema = org.schema_name
+        if not _SAFE_SCHEMA.match(schema):
+            raise ValidationError("Refusing to drop a tenant schema with an unsafe name.")
+
+        # 1) Drop the tenant schema (and all its tables/data) in its own
+        #    committed transaction. Doing this first removes the cross-schema
+        #    FKs from tenant tables to public.users.
+        async with db_manager.engine.begin() as conn:
+            await conn.execute(text(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE'))
+
+        # 2) Delete the org row. Raw DELETE so PostgreSQL's ON DELETE CASCADE
+        #    removes the org's users and their refresh tokens (the ORM would
+        #    null the FKs instead).
+        await session.execute(
+            text("DELETE FROM organizations WHERE id = :id"), {"id": org_id}
+        )
+        await session.commit()
+
+    await cache_client.delete(f"schema:{org_id}")
