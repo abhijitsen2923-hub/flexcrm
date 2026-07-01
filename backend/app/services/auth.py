@@ -182,11 +182,15 @@ class AuthService(ServiceBase):
                 ip_address=ip_address,
             )
 
-        # Platform admins only query public tables; no tenant schema needed.
-        if not user.is_platform_admin:
-            await self._activate_tenant_schema(user.organization_id)
         set_scope(self.session, user.organization_id)
         await self.commit()
+        # Activate schema routing AFTER the commit. commit() releases the
+        # connection and drops the schema_translate_map, so building the token
+        # response (which queries UserPermissionGrant in the tenant schema) would
+        # otherwise hit the literal "tenant" schema → UndefinedTableError. Platform
+        # admins have no tenant schema and skip this. (register does the same.)
+        if not user.is_platform_admin:
+            await self._activate_tenant_schema(user.organization_id)
         return await self._build_token_response_async(token_response, user)
 
     async def refresh(
@@ -221,10 +225,13 @@ class AuthService(ServiceBase):
                 ip_address=ip_address,
             )
 
-        if not user.is_platform_admin:
-            await self._activate_tenant_schema(user.organization_id)
         set_scope(self.session, user.organization_id)
         await self.commit()
+        # Re-activate schema routing AFTER commit (see login) so the token
+        # response can query UserPermissionGrant in the tenant schema instead of
+        # the literal "tenant" schema.
+        if not user.is_platform_admin:
+            await self._activate_tenant_schema(user.organization_id)
         return await self._build_token_response_async(token_response, user)
 
     async def logout(self, refresh_token: str) -> None:
