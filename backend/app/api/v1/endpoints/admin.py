@@ -15,7 +15,6 @@ from app.core.cache import cache_client
 from app.core.currencies import allowed_currencies_for_org
 from app.core.exceptions import NotFoundError, ValidationError
 from app.core.tenancy import bypass
-from app.database.session import db_manager
 from app.models.organization import Organization
 from app.models.user import User
 from app.schemas.organization import (
@@ -212,15 +211,17 @@ async def purge_organization(
         if not _SAFE_SCHEMA.match(schema):
             raise ValidationError("Refusing to drop a tenant schema with an unsafe name.")
 
-        # 1) Drop the tenant schema (and all its tables/data) in its own
-        #    committed transaction. Doing this first removes the cross-schema
-        #    FKs from tenant tables to public.users.
-        async with db_manager.engine.begin() as conn:
-            await conn.execute(text(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE'))
-
-        # 2) Delete the org row. Raw DELETE so PostgreSQL's ON DELETE CASCADE
-        #    removes the org's users and their refresh tokens (the ORM would
-        #    null the FKs instead).
+        # Drop the tenant schema (all its tables/data) and delete the org row on
+        # THIS session's connection, in one transaction. A separate connection
+        # for the DROP would deadlock: dropping the tenant tables' cross-schema
+        # FKs needs a lock on public.users, but this session already holds
+        # ACCESS SHARE locks on users/organizations from the reads above and
+        # won't release them until commit — so the DROP hangs the request.
+        # PostgreSQL DDL is transactional, so doing both here is safe. Dropping
+        # the schema first clears the tenant->public.users FKs; the raw DELETE
+        # then relies on ON DELETE CASCADE to remove the org's users and their
+        # refresh tokens (the ORM would null the FKs instead).
+        await session.execute(text(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE'))
         await session.execute(
             text("DELETE FROM organizations WHERE id = :id"), {"id": org_id}
         )
