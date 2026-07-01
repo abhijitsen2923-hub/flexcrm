@@ -2,7 +2,6 @@ import { LogOut, Menu } from "lucide-react";
 import { useLocation } from "react-router-dom";
 
 import { useAuth } from "../../hooks/useAuth";
-import { useRealtime } from "../../realtime";
 import { Button } from "../ui/Button";
 
 
@@ -20,27 +19,6 @@ const PAGE_TITLES: Record<string, string> = {
 
 function initialsFor(firstName: string, lastName: string): string {
   return `${firstName[0] ?? ""}${lastName[0] ?? ""}`.toUpperCase();
-}
-
-
-function ConnectionPill() {
-  const { status } = useRealtime();
-  const tone =
-    status === "online" ? "online" : status === "connecting" ? "connecting" : "offline";
-  const label =
-    status === "online"
-      ? "Live"
-      : status === "connecting"
-        ? "Connecting"
-        : status === "offline"
-          ? "Offline"
-          : "Idle";
-  return (
-    <span className={`connection-pill connection-pill--${tone}`} title={`Realtime status: ${label}`}>
-      <span className="connection-pill__dot" />
-      {label}
-    </span>
-  );
 }
 
 
@@ -65,7 +43,6 @@ export function Topbar({ onMenuClick }: TopbarProps) {
       </button>
       <div className="topbar__title">{title}</div>
       <div className="topbar__actions">
-        <ConnectionPill />
         <div className="topbar__user">
           <div className="avatar">{initialsFor(user.first_name, user.last_name)}</div>
           <div className="user-meta">
