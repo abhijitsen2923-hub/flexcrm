@@ -1,3 +1,5 @@
+import { Eye, EyeOff } from "lucide-react";
+import { useState } from "react";
 import type {
   InputHTMLAttributes,
   ReactNode,
@@ -36,10 +38,33 @@ interface TextFieldProps extends Omit<InputHTMLAttributes<HTMLInputElement>, "si
 }
 
 
-export function TextField({ label, hint, error, id, ...rest }: TextFieldProps) {
+export function TextField({ label, hint, error, id, type = "text", ...rest }: TextFieldProps) {
+  const [visible, setVisible] = useState(false);
+  const isPassword = type === "password";
+  const resolvedType = isPassword && visible ? "text" : type;
+
+  if (isPassword) {
+    return (
+      <FieldWrapper label={label} hint={hint} error={error} htmlFor={id}>
+        <div className="input-password">
+          <input id={id} className="input input--affix" type={resolvedType} {...rest} />
+          <button
+            type="button"
+            className="input-password__toggle"
+            onClick={() => setVisible((prev) => !prev)}
+            aria-label={visible ? "Hide password" : "Show password"}
+            aria-pressed={visible}
+          >
+            {visible ? <EyeOff size={18} /> : <Eye size={18} />}
+          </button>
+        </div>
+      </FieldWrapper>
+    );
+  }
+
   return (
     <FieldWrapper label={label} hint={hint} error={error} htmlFor={id}>
-      <input id={id} className="input" {...rest} />
+      <input id={id} className="input" type={resolvedType} {...rest} />
     </FieldWrapper>
   );
 }
