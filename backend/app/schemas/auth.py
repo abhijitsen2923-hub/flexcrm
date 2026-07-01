@@ -1,15 +1,16 @@
 from datetime import datetime
 
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, Field
 
 from app.database.enums import LeadIndustry, UserRole
+from app.schemas.common import NormalizedEmail
 from app.schemas.user import UserRead
 
 
 class RegisterRequest(BaseModel):
     first_name: str = Field(min_length=1, max_length=100)
     last_name: str = Field(min_length=1, max_length=100)
-    email: EmailStr
+    email: NormalizedEmail
     password: str = Field(min_length=8, max_length=128)
     phone: str | None = Field(default=None, max_length=32)
     # `role` is accepted for backward compat but ignored — every first user of
@@ -26,7 +27,7 @@ class RegisterRequest(BaseModel):
 
 
 class LoginRequest(BaseModel):
-    email: EmailStr
+    email: NormalizedEmail
     password: str = Field(min_length=8, max_length=128)
 
 

@@ -4,7 +4,7 @@ from uuid import UUID
 from pydantic import EmailStr, Field
 
 from app.database.enums import LeadIndustry, UserRole, UserStatus
-from app.schemas.common import ORMModel, SearchSortParams
+from app.schemas.common import NormalizedEmail, ORMModel, SearchSortParams
 
 
 class UserSummary(ORMModel):
@@ -29,7 +29,7 @@ class UserSummary(ORMModel):
 class UserCreate(ORMModel):
     first_name: str = Field(min_length=1, max_length=100)
     last_name: str = Field(min_length=1, max_length=100)
-    email: EmailStr
+    email: NormalizedEmail
     password: str = Field(min_length=8, max_length=128)
     role: UserRole
     phone: str | None = Field(default=None, max_length=32)
@@ -42,7 +42,7 @@ class UserCreate(ORMModel):
 class UserUpdate(ORMModel):
     first_name: str | None = Field(default=None, min_length=1, max_length=100)
     last_name: str | None = Field(default=None, min_length=1, max_length=100)
-    email: EmailStr | None = None
+    email: NormalizedEmail | None = None
     password: str | None = Field(default=None, min_length=8, max_length=128)
     role: UserRole | None = None
     phone: str | None = Field(default=None, max_length=32)

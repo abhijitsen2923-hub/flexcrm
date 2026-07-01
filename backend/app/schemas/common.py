@@ -1,7 +1,18 @@
 from math import ceil
-from typing import Generic, TypeVar
+from typing import Annotated, Generic, TypeVar
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, BeforeValidator, ConfigDict, EmailStr, Field
+
+
+def _normalize_email(value: object) -> object:
+    """Trim + lowercase emails so uniqueness and login are case-insensitive."""
+    return value.strip().lower() if isinstance(value, str) else value
+
+
+# Use for any inbound email field. Normalizes before EmailStr validation so
+# "User@X.com" and "user@x.com" are the same identity everywhere (register,
+# login, user create/update) and the DB's case-insensitive unique index holds.
+NormalizedEmail = Annotated[EmailStr, BeforeValidator(_normalize_email)]
 
 
 class ORMModel(BaseModel):

@@ -24,7 +24,9 @@ logger = logging.getLogger(__name__)
 
 async def ensure_platform_admin() -> None:
     settings = get_settings()
-    email = settings.platform_admin_email
+    # Normalize so the stored value + case-insensitive lookup/index stay in sync
+    # (a mixed-case env value would otherwise collide on the next startup).
+    email = (settings.platform_admin_email or "").strip().lower() or None
     password = settings.platform_admin_password
 
     if not email or not password:

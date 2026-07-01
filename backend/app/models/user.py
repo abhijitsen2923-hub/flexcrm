@@ -11,9 +11,11 @@ from app.models.base import AuditMixin, SoftDeleteMixin, TimestampMixin, UUIDPri
 class User(Base, UUIDPrimaryKeyMixin, TimestampMixin, AuditMixin, SoftDeleteMixin):
     __tablename__ = "users"
     __table_args__ = (
+        # Case-insensitive global uniqueness: one active user per email regardless
+        # of case (paired with NormalizedEmail on inbound schemas).
         Index(
             "uq_users_email_active",
-            "email",
+            text("lower(email)"),
             unique=True,
             postgresql_where=text("is_deleted = false"),
         ),

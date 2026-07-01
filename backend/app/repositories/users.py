@@ -9,7 +9,12 @@ class UserRepository(BaseRepository[User]):
         super().__init__(session, User)
 
     async def get_by_email(self, email: str) -> User | None:
-        query = select(User).where(User.email == email, User.is_deleted.is_(False))
+        # Case-insensitive: emails are stored lowercased (see NormalizedEmail +
+        # the lower(email) unique index), and we normalize here so any caller
+        # passing mixed case still matches.
+        query = select(User).where(
+            User.email == email.strip().lower(), User.is_deleted.is_(False)
+        )
         result = await self.session.execute(query)
         return result.scalar_one_or_none()
 
