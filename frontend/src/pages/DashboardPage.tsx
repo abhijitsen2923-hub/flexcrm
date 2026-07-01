@@ -26,7 +26,7 @@ import {
 } from "../components";
 import { mergeModules } from "../config/features";
 import { CHART_AXIS, CHART_GRID, CHART_PALETTE, CHART_PRIMARY } from "../config/chartTheme";
-import { useOrgModules } from "../context/OrgContext";
+import { useOrg } from "../context/OrgContext";
 import { useDashboard } from "../hooks/useDashboard";
 import { useRealtimeEvent } from "../realtime";
 import { formatCurrency, formatInr, formatNumber, formatRelative } from "../utils/format";
@@ -36,7 +36,11 @@ const PIE_COLORS = CHART_PALETTE;
 
 
 export default function DashboardPage() {
-  const FEATURES = mergeModules(useOrgModules());
+  const { org, modules } = useOrg();
+  const FEATURES = mergeModules(modules);
+  // A freshly-provisioned tenant has no optional modules until the provider
+  // grants them. Wait for `org` to load so the notice doesn't flash on refresh.
+  const noModules = org !== null && Object.values(FEATURES).every((enabled) => !enabled);
   const dashboard = useDashboard();
   const toast = useToast();
 
@@ -101,6 +105,14 @@ export default function DashboardPage() {
           </Button>
         </div>
       </div>
+
+      {noModules && (
+        <div className="notice-banner" role="status">
+          <strong>Modules are managed by your provider.</strong> Your workspace doesn’t have any
+          additional modules enabled yet. Please contact your SaaS provider to request access to
+          modules like Deals, Tasks, Finance, and more.
+        </div>
+      )}
 
       <div className="kpi-grid">
         <KpiCard label="Customers" value={formatNumber(summary.total_customers)} />

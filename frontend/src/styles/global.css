@@ -898,6 +898,20 @@ p {
   font-size: 0.85rem;
 }
 
+.notice-banner {
+  background: var(--color-primary-soft);
+  color: var(--color-warning);
+  border: 1px solid #f1d49a;
+  border-radius: var(--radius-md);
+  padding: 0.75rem 1rem;
+  font-size: 0.85rem;
+  margin-bottom: var(--space-4);
+}
+
+.notice-banner strong {
+  color: var(--color-text);
+}
+
 .tooltip-text { font-size: 0.75rem; color: var(--color-text-muted); }
 
 .connection-pill {
