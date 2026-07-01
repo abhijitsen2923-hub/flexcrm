@@ -21,7 +21,7 @@ import { useAuth } from "../hooks/useAuth";
 import { useLeads } from "../hooks/useLeads";
 import { usePermissions } from "../hooks/usePermissions";
 import { useRealtimeEvent } from "../realtime";
-import { leadsService, type LeadImportResult } from "../services/leads";
+import { leadsService, type LeadDuplicate, type LeadImportResult } from "../services/leads";
 import { organizationsService } from "../services/organizations";
 import type { Lead, LeadIndustry, Organization, PipelineStage } from "../types";
 import { extractErrorMessage } from "../utils/errors";
@@ -162,11 +162,30 @@ export default function LeadsPage() {
   const [form, setForm] = useState<CreateFormState>(() => makeEmptyForm(user?.business_type ?? "education"));
   const [formError, setFormError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  // Warn-but-allow duplicate detection (by email or phone, per-tenant).
+  const [duplicates, setDuplicates] = useState<LeadDuplicate[]>([]);
+  const [dupChecked, setDupChecked] = useState(false);
 
   function openCreate() {
     setForm(makeEmptyForm(user?.business_type ?? "education", allowedCurrencies[0] ?? "INR"));
     setFormError(null);
+    setDuplicates([]);
+    setDupChecked(false);
     setFormOpen(true);
+  }
+
+  // An edit to email/phone means we must re-check before creating.
+  function resetDupCheck() {
+    setDupChecked(false);
+    setDuplicates([]);
+  }
+
+  function openExistingLead(dup: LeadDuplicate) {
+    const found = leads.find((lead) => lead.id === dup.id);
+    setFormOpen(false);
+    if (found) {
+      setDrawerLead(found);
+    }
   }
 
   async function handleCreateSubmit(event: FormEvent<HTMLFormElement>) {
@@ -174,6 +193,19 @@ export default function LeadsPage() {
     setSubmitting(true);
     setFormError(null);
     try {
+      // First submit: check for a duplicate lead by email/phone. If any exist,
+      // surface them and let the user decide — a second click creates anyway.
+      if (!dupChecked) {
+        const matches = await leadsService.checkDuplicates(
+          form.contact_email.trim() || null,
+          form.contact_phone.trim() || null
+        );
+        setDupChecked(true);
+        if (matches.length > 0) {
+          setDuplicates(matches);
+          return; // finally resets `submitting`; wait for "Create anyway"
+        }
+      }
       await createLead({
         // Industry is inherited from the logged-in user's business_type on
         // the backend. We don't ask in the form (single-vertical accounts);
@@ -529,7 +561,7 @@ export default function LeadsPage() {
               Cancel
             </Button>
             <Button type="submit" form="lead-form" loading={submitting} disabled={submitting}>
-              Create lead
+              {duplicates.length > 0 ? "Create anyway" : "Create lead"}
             </Button>
           </>
         }
@@ -572,17 +604,38 @@ export default function LeadsPage() {
               label="Email"
               type="email"
               value={form.contact_email}
-              onChange={(event) => setForm({ ...form, contact_email: event.target.value })}
+              onChange={(event) => { setForm({ ...form, contact_email: event.target.value }); resetDupCheck(); }}
               placeholder="Optional"
             />
             <TextField
               id="lead-contact-phone"
               label="Phone"
               value={form.contact_phone}
-              onChange={(event) => setForm({ ...form, contact_phone: event.target.value })}
+              onChange={(event) => { setForm({ ...form, contact_phone: event.target.value }); resetDupCheck(); }}
               placeholder="Optional"
             />
           </div>
+          {duplicates.length > 0 && (
+            <div className="notice-banner" role="status">
+              <strong>Possible duplicate{duplicates.length > 1 ? "s" : ""}.</strong> A lead with this
+              email or phone already exists in your workspace:
+              <ul style={{ margin: "0.4rem 0 0.25rem", paddingLeft: "1.1rem" }}>
+                {duplicates.map((dup) => (
+                  <li key={dup.id}>
+                    <button type="button" className="link" onClick={() => openExistingLead(dup)} style={{ textAlign: "left" }}>
+                      #{dup.lead_number} — {dup.contact_name}
+                    </button>
+                    {(dup.contact_email || dup.contact_phone) && (
+                      <span className="muted text-xs">
+                        {" "}· {[dup.contact_email, dup.contact_phone].filter(Boolean).join(" · ")}
+                      </span>
+                    )}
+                  </li>
+                ))}
+              </ul>
+              Click <strong>Create anyway</strong> below to add it regardless.
+            </div>
+          )}
           <TextField
             id="lead-company"
             label="Company / Organization"

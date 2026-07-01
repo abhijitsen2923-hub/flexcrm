@@ -10,7 +10,7 @@ from app.core.permissions import PermissionCode
 from app.database.enums import LeadIndustry
 from app.database.session import get_db_session
 from app.schemas.common import MessageResponse, PaginatedResponse, PaginationParams, build_page_meta
-from app.schemas.lead import LeadCreate, LeadFilterParams, LeadRead, LeadUpdate
+from app.schemas.lead import LeadCreate, LeadDuplicate, LeadFilterParams, LeadRead, LeadUpdate
 from app.schemas.lead_document import LeadDocumentRead, LeadDocumentUpload
 from app.schemas.stage_transition import StageTransitionCreate, StageTransitionRead
 from app.services.lead_documents import LeadDocumentService, get_lead_or_404
@@ -31,6 +31,19 @@ async def list_leads(
 ):
     items, total = await LeadService(session).list_leads(pagination, filters)
     return PaginatedResponse[LeadRead](items=items, pagination=build_page_meta(total, pagination))
+
+
+@router.get("/duplicates", response_model=list[LeadDuplicate])
+async def check_duplicate_leads(
+    email: str | None = None,
+    phone: str | None = None,
+    _: object = Depends(require_permissions(PermissionCode.LEAD_VIEW)),
+    session: AsyncSession = Depends(get_db_session),
+):
+    """Warn-but-allow duplicate check for the New Lead form. Returns active
+    leads in the caller's tenant matching the email (case-insensitive) or phone
+    (digits-only). Empty list when nothing matches or both inputs are blank."""
+    return await LeadService(session).find_duplicate_leads(email, phone)
 
 
 @router.post("", response_model=LeadRead, status_code=status.HTTP_201_CREATED)

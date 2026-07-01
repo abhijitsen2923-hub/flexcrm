@@ -75,6 +75,16 @@ export interface LeadImportResult {
   errors: { row: number; error: string }[];
 }
 
+export interface LeadDuplicate {
+  id: string;
+  lead_number: number;
+  title: string;
+  contact_name: string;
+  contact_email?: string | null;
+  contact_phone?: string | null;
+  stage_code: string;
+}
+
 export const leadsService = {
   async list(query: LeadListQuery = {}): Promise<LeadListResponse> {
     const { data } = await apiClient.get<LeadListResponse>(`/leads${buildQueryString(query)}`);
@@ -83,6 +93,19 @@ export const leadsService = {
 
   async create(payload: LeadCreatePayload): Promise<Lead> {
     const { data } = await apiClient.post<Lead>("/leads", payload);
+    return data;
+  },
+
+  // Warn-but-allow duplicate check for the New Lead form. Returns active leads
+  // in the caller's tenant matching the email (case-insensitive) or phone
+  // (digits-only). Returns [] when both inputs are blank or nothing matches.
+  async checkDuplicates(email?: string | null, phone?: string | null): Promise<LeadDuplicate[]> {
+    if (!email?.trim() && !phone?.trim()) {
+      return [];
+    }
+    const { data } = await apiClient.get<LeadDuplicate[]>(
+      `/leads/duplicates${buildQueryString({ email: email ?? undefined, phone: phone ?? undefined })}`
+    );
     return data;
   },
 

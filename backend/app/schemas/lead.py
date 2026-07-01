@@ -107,6 +107,17 @@ class LeadRead(ORMModel):
     assigned_to: UserSummary | None = None
 
 
+class LeadDuplicate(ORMModel):
+    """Lightweight match returned by the duplicate-check endpoint."""
+    id: UUID
+    lead_number: int
+    title: str
+    contact_name: str
+    contact_email: EmailStr | None = None
+    contact_phone: str | None = None
+    stage_code: str
+
+
 class LeadFilterParams(SearchSortParams):
     customer_id: UUID | None = None
     industry: LeadIndustry | None = None

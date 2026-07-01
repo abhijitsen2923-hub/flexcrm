@@ -1,3 +1,4 @@
+import re
 from uuid import UUID
 
 from fastapi import BackgroundTasks
@@ -14,7 +15,7 @@ from app.repositories.customers import CustomerRepository
 from app.repositories.leads import LeadRepository
 from app.repositories.users import UserRepository
 from app.schemas.common import PaginationParams
-from app.schemas.lead import LeadCreate, LeadFilterParams, LeadUpdate
+from app.schemas.lead import LeadCreate, LeadDuplicate, LeadFilterParams, LeadUpdate
 from app.services.base import ServiceBase
 from app.services.email import EmailService
 from app.services.notifications import NotificationService
@@ -68,6 +69,16 @@ class LeadService(ServiceBase):
         if lead is None:
             raise NotFoundError("Lead not found.")
         return lead
+
+    async def find_duplicate_leads(
+        self, email: str | None, phone: str | None
+    ) -> list[LeadDuplicate]:
+        """Warn-but-allow duplicate check: active leads in this tenant whose
+        email (case-insensitive) or phone (digits-only) matches. Never blocks."""
+        norm_email = email.strip().lower() if email and email.strip() else None
+        phone_digits = re.sub(r"\D", "", phone) if phone else ""
+        rows = await self.repository.find_duplicates(norm_email, phone_digits or None)
+        return [LeadDuplicate.model_validate(row) for row in rows]
 
     async def create_lead(
         self,
