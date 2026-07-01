@@ -20,6 +20,7 @@ from collections.abc import Sequence
 
 import sqlalchemy as sa
 from alembic import op
+from sqlalchemy.dialects import postgresql
 
 
 revision: str = "20260623_t002"
@@ -86,7 +87,7 @@ def upgrade() -> None:
         sa.Column("base_price", sa.Numeric(14, 2), nullable=False),
         sa.Column(
             "status",
-            sa.Enum("available", "reserved", "booked", "sold", name="unit_status_enum", create_type=False),
+            postgresql.ENUM("available", "reserved", "booked", "sold", name="unit_status_enum", create_type=False, schema="public"),
             nullable=False,
             server_default="available",
         ),
@@ -113,7 +114,7 @@ def upgrade() -> None:
         sa.Column("assigned_to_id", sa.Uuid(), nullable=True),
         sa.Column(
             "feedback",
-            sa.Enum("hot", "warm", "cold", name="site_visit_feedback_enum", create_type=False),
+            postgresql.ENUM("hot", "warm", "cold", name="site_visit_feedback_enum", create_type=False, schema="public"),
             nullable=True,
         ),
         sa.Column("attended", sa.Boolean(), nullable=True),
@@ -147,7 +148,7 @@ def upgrade() -> None:
         sa.Column("step", sa.Integer(), nullable=False, server_default="1"),
         sa.Column(
             "status",
-            sa.Enum("draft", "confirmed", "cancelled", name="booking_status_enum", create_type=False),
+            postgresql.ENUM("draft", "confirmed", "cancelled", name="booking_status_enum", create_type=False, schema="public"),
             nullable=False,
             server_default="draft",
         ),
