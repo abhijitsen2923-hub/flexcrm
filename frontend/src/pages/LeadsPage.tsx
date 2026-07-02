@@ -21,6 +21,7 @@ import { useAuth } from "../hooks/useAuth";
 import { useLeads } from "../hooks/useLeads";
 import { usePermissions } from "../hooks/usePermissions";
 import { useRealtimeEvent } from "../realtime";
+import { exportsService } from "../services/exports";
 import { leadsService, type LeadDuplicate, type LeadImportResult } from "../services/leads";
 import { organizationsService } from "../services/organizations";
 import type { Lead, LeadIndustry, Organization, PipelineStage } from "../types";
@@ -138,6 +139,7 @@ export default function LeadsPage() {
   const { has: hasPerm } = usePermissions();
   const canManage = hasPerm("LEAD_MANAGE");
   const canImport = hasPerm("LEAD_IMPORT");
+  const canExport = hasPerm("EXPORT_DATA");
   const toast = useToast();
 
   // Auto-refresh when any lead.* envelope arrives — covers create, update,
@@ -431,13 +433,32 @@ export default function LeadsPage() {
           <Button variant="secondary" size="sm" icon={<RefreshCw size={14} />} onClick={() => void refresh()} loading={loading}>
             Refresh
           </Button>
+          {canExport && (
+            <Button
+              variant="secondary"
+              size="sm"
+              icon={<Download size={14} />}
+              onClick={() => {
+                void exportsService
+                  .leads()
+                  .catch((e) => toast.error("Export failed", extractErrorMessage(e)));
+              }}
+              title="Download all leads as a CSV (matches your business type's columns)"
+            >
+              Export
+            </Button>
+          )}
           {canImport && (
             <>
               <Button
                 variant="secondary"
                 size="sm"
                 icon={<Download size={14} />}
-                onClick={() => window.open("/api/v1/leads/import/template.csv", "_blank")}
+                onClick={() => {
+                  void leadsService
+                    .downloadImportTemplate()
+                    .catch((err) => toast.error("Template download failed", extractErrorMessage(err)));
+                }}
                 title="Download a starter CSV template you can fill in and upload"
               >
                 Template

@@ -27,6 +27,7 @@ from sqlalchemy import select
 
 from app.core.currencies import DEFAULT_CURRENCY, allowed_currencies_for_org
 from app.core.exceptions import AppException, ValidationError
+from app.core.lead_csv import CsvColumn, import_columns_for
 from app.core.tenancy import current_org
 from app.database.enums import LeadIndustry, UserRole
 from app.database.pipeline_seed import initial_stage_code
@@ -40,22 +41,8 @@ from app.services.leads import LeadService
 from app.services.stage_transitions import StageTransitionService
 
 
-# Header aliases — we accept either the exact column name or a friendlier
-# variant. Keys are the canonical names used by the service.
-HEADER_ALIASES: dict[str, set[str]] = {
-    "contact_name": {"contact_name", "name", "lead_name", "contact"},
-    "title": {"title", "subject", "lead_title"},
-    "contact_email": {"contact_email", "email"},
-    "contact_phone": {"contact_phone", "phone", "mobile"},
-    "company_name": {"company_name", "company", "organization", "org", "company / organization"},
-    "stage": {"stage", "stage_code", "lead_stage", "status"},
-    "source": {"source", "lead_source"},
-    "interest": {"interest", "course", "destination", "course_destination"},
-    "value": {"value", "amount", "deal_value"},
-    "currency": {"currency", "currency_code"},
-    "probability": {"probability", "prob", "probability (%)"},
-    "expected_close_date": {"expected_close_date", "close_date", "expected_close", "expected close"},
-}
+# Column definitions (headers, aliases, parse kinds) live in app.core.lead_csv,
+# keyed per business type, so the template / importer / exporter stay in sync.
 
 
 @dataclass
@@ -98,19 +85,20 @@ class LeadImportService(ServiceBase):
         if reader.fieldnames is None:
             raise ValidationError("CSV is empty or has no header row.")
 
-        # Build a canonical-name → actual-header map from the CSV's columns.
-        header_map = self._build_header_map(reader.fieldnames)
-        if "contact_name" not in header_map:
-            raise ValidationError(
-                "CSV must include a `contact_name` column (aliases: name, lead_name, contact)."
-            )
-
-        # Pre-load the org so we can validate currency + stages per row.
+        # Resolve the vertical first — it determines which columns we accept
+        # (e.g. Destination for travel, property/budget fields for real estate).
         org = await self._load_org_or_default_industry(actor_business_type)
         industry = org.business_type if org else actor_business_type
         if industry is None:
             raise ValidationError(
                 "Cannot determine the import industry — your account has no business_type set."
+            )
+
+        columns = import_columns_for(industry)
+        header_map = self._build_header_map(reader.fieldnames, columns)
+        if "contact_name" not in header_map:
+            raise ValidationError(
+                "CSV must include a `contact_name` column (aliases: name, lead_name, contact)."
             )
 
         allowed_currencies = allowed_currencies_for_org(org) if org else [DEFAULT_CURRENCY]
@@ -122,10 +110,11 @@ class LeadImportService(ServiceBase):
         # CSV row numbering starts at 2 (header is row 1) so the user can
         # cross-reference with their spreadsheet.
         for offset, raw in enumerate(reader, start=2):
-            row = {canonical: self._read_field(raw, header_map.get(canonical)) for canonical in HEADER_ALIASES}
+            row = {col.key: self._read_field(raw, header_map.get(col.key)) for col in columns}
             try:
                 created_lead_id, was_promoted = await self._import_row(
                     row,
+                    columns=columns,
                     actor_id=actor_id,
                     actor_role=actor_role,
                     industry=industry,
@@ -160,6 +149,7 @@ class LeadImportService(ServiceBase):
         self,
         row: dict[str, str | None],
         *,
+        columns: list[CsvColumn],
         actor_id: UUID,
         actor_role: UserRole,
         industry: LeadIndustry,
@@ -171,38 +161,43 @@ class LeadImportService(ServiceBase):
         if not contact_name:
             raise ValidationError("contact_name is required.")
 
-        title = (row.get("title") or "").strip() or contact_name
-
         currency = (row.get("currency") or DEFAULT_CURRENCY).strip().upper() or DEFAULT_CURRENCY
         if currency not in allowed_currencies:
             raise ValidationError(
                 f"Currency '{currency}' is not enabled for this org. Allowed: {', '.join(allowed_currencies)}."
             )
 
-        value = self._parse_decimal(row.get("value"), field="value", default=Decimal("0"))
-        probability = self._parse_int(row.get("probability"), field="probability", default=0, lo=0, hi=100)
+        # Build the LeadCreate payload straight from the vertical's column
+        # registry so vertical-specific fields (property_type, budget_*, …) map
+        # through automatically. `stage` is handled separately via a transition.
+        payload_kwargs: dict = {
+            "industry": industry,
+            "contact_name": contact_name,
+            "title": (row.get("title") or "").strip() or contact_name,
+            "currency": currency,
+        }
+        _handled = {"stage", "contact_name", "title", "currency"}
+        for col in columns:
+            if col.key in _handled:
+                continue
+            raw_val = row.get(col.key)
+            if col.kind == "decimal":
+                default = Decimal("0") if col.key == "value" else None
+                payload_kwargs[col.key] = self._parse_decimal(raw_val, field=col.header, default=default)
+            elif col.kind == "int":
+                payload_kwargs[col.key] = self._parse_int(raw_val, field=col.header, default=0, lo=0, hi=100)
+            elif col.kind == "date":
+                payload_kwargs[col.key] = self._parse_date(raw_val)
+            else:
+                payload_kwargs[col.key] = raw_val or None
 
-        target_stage = self._resolve_stage(row.get("stage"), stage_lookup, industry, default=initial_code)
-
-        payload = LeadCreate(
-            industry=industry,
-            title=title,
-            contact_name=contact_name,
-            contact_email=row.get("contact_email") or None,
-            contact_phone=row.get("contact_phone") or None,
-            company_name=row.get("company_name") or None,
-            value=value,
-            currency=currency,
-            probability=probability,
-            source=row.get("source") or None,
-            interest=row.get("interest") or None,
-            expected_close_date=self._parse_date(row.get("expected_close_date")),
-        )
+        payload = LeadCreate(**payload_kwargs)
 
         lead = await self.lead_service.create_lead(
             payload, actor_id=actor_id, actor_business_type=industry
         )
 
+        target_stage = self._resolve_stage(row.get("stage"), stage_lookup, industry, default=initial_code)
         was_promoted = False
         if target_stage.code != initial_code:
             # Move the lead to the requested stage via the regular transition
@@ -224,17 +219,17 @@ class LeadImportService(ServiceBase):
 
     # --- helpers -----------------------------------------------------------
 
-    def _build_header_map(self, fieldnames: list[str]) -> dict[str, str]:
-        """Map canonical names to the actual headers present in the CSV.
+    def _build_header_map(self, fieldnames: list[str], columns: list[CsvColumn]) -> dict[str, str]:
+        """Map each registry column's key to the actual header present in the CSV.
 
         Lowercases + strips both sides. The first matching alias wins.
         """
         normalised = {(h or "").strip().lower(): h for h in fieldnames}
         out: dict[str, str] = {}
-        for canonical, aliases in HEADER_ALIASES.items():
-            for alias in aliases:
+        for col in columns:
+            for alias in col.all_aliases():
                 if alias in normalised:
-                    out[canonical] = normalised[alias]
+                    out[col.key] = normalised[alias]
                     break
         return out
 
@@ -247,7 +242,7 @@ class LeadImportService(ServiceBase):
         text = str(value).strip()
         return text if text else None
 
-    def _parse_decimal(self, value: str | None, *, field: str, default: Decimal) -> Decimal:
+    def _parse_decimal(self, value: str | None, *, field: str, default: Decimal | None) -> Decimal | None:
         if not value:
             return default
         try:

@@ -20,6 +20,7 @@ import { useCustomers } from "../hooks/useCustomers";
 import { usePermissions } from "../hooks/usePermissions";
 import { useRealtimeEvent } from "../realtime";
 import type { Customer, CustomerLifecycleStage, CustomerStatus } from "../types";
+import { exportsService } from "../services/exports";
 import { extractErrorMessage } from "../utils/errors";
 import { formatDate } from "../utils/format";
 import { customerStatusOptions, customerStatusTone, titleCase } from "../utils/options";
@@ -281,7 +282,11 @@ export default function CustomersPage() {
               variant="secondary"
               size="sm"
               icon={<Download size={14} />}
-              onClick={() => window.location.assign("/api/v1/exports/customers.csv")}
+              onClick={() => {
+                void exportsService
+                  .customers()
+                  .catch((e) => toast.error("Export failed", extractErrorMessage(e)));
+              }}
             >
               Export CSV
             </Button>

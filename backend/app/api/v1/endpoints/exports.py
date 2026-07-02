@@ -16,12 +16,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.api.deps import require_permissions
+from app.core.lead_csv import CsvColumn, columns_for
 from app.core.permissions import PermissionCode
+from app.core.tenancy import current_org
 from app.database.enums import LeadIndustry
 from app.database.session import get_db_session
 from app.finance.models import SalesOrder
 from app.models.customer import Customer
 from app.models.lead import Lead
+from app.models.organization import Organization
 
 
 router = APIRouter()
@@ -40,6 +43,18 @@ def _csv_response(filename: str, rows: list[list[str]], header: list[str]) -> St
     )
 
 
+def _lead_cell(lead: Lead, col: CsvColumn) -> str:
+    attr = "stage_code" if col.key == "stage" else col.key
+    value = getattr(lead, attr, None)
+    if value is None:
+        return ""
+    if hasattr(value, "value"):  # enum
+        return str(value.value)
+    if hasattr(value, "isoformat"):  # date/datetime
+        return value.isoformat()
+    return str(value)
+
+
 @router.get("/leads.csv")
 async def export_leads(
     industry: LeadIndustry | None = None,
@@ -52,17 +67,23 @@ async def export_leads(
     stmt = stmt.order_by(Lead.lead_number)
     leads = (await session.execute(stmt)).scalars().all()
 
-    header = [
-        "lead_number", "industry", "stage_code", "title", "contact_name",
-        "contact_email", "contact_phone", "company_name", "source", "interest",
-        "value", "probability", "customer_id", "created_at",
-    ]
+    # Column layout follows the tenant's vertical (same source of truth as the
+    # import template) so real-estate exports include property/budget columns.
+    vertical = industry
+    if vertical is None:
+        org_id = current_org(session)
+        if org_id is not None:
+            org = (
+                await session.execute(select(Organization).where(Organization.id == org_id))
+            ).scalar_one_or_none()
+            vertical = org.business_type if org else None
+    cols = columns_for(vertical)
+
+    header = ["lead_number", "industry", *[c.header for c in cols], "created_at"]
     rows = [
         [
-            str(lead.lead_number), lead.industry.value, lead.stage_code, lead.title,
-            lead.contact_name or "", lead.contact_email or "", lead.contact_phone or "",
-            lead.company_name or "", lead.source or "", lead.interest or "",
-            str(lead.value), str(lead.probability), str(lead.customer_id or ""),
+            str(lead.lead_number), lead.industry.value,
+            *[_lead_cell(lead, c) for c in cols],
             lead.created_at.isoformat(),
         ]
         for lead in leads

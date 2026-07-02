@@ -6,8 +6,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import pagination_params, require_permissions
 from app.core.exceptions import ValidationError
+from app.core.lead_csv import build_template_csv
 from app.core.permissions import PermissionCode
-from app.database.enums import LeadIndustry
 from app.database.session import get_db_session
 from app.schemas.common import MessageResponse, PaginatedResponse, PaginationParams, build_page_meta
 from app.schemas.lead import LeadCreate, LeadDuplicate, LeadFilterParams, LeadRead, LeadUpdate
@@ -124,50 +124,9 @@ async def create_transition(
 
 # --- CSV bulk import -------------------------------------------------------
 
-# Vertical-aware starter CSVs. Friendly headers (Title, Email, Phone, ...) so
-# users opening this in Excel don't have to translate snake_case columns. The
-# alias map in `app.services.lead_import.HEADER_ALIASES` resolves these to the
-# canonical names on re-upload. Em-dashes replaced with hyphens for cross-
-# spreadsheet-app portability (Excel/Google Sheets sometimes default-decode
-# UTF-8 as Windows-1252).
-_IMPORT_TEMPLATE_EDUCATION = (
-    "Title,contact_name,Email,Phone,Company / Organization,Course,Source,Value,Currency,Probability (%),Expected close\n"
-    "MBA Marketing applicant,Rohan Sharma,rohan.sharma@gmail.com,+91 98300 12345,Tata Consultancy Services,MBA - Marketing,Instagram,150000,INR,60,30-06-2026\n"
-    "Data Science enquiry,Priya Nair,priya.nair@outlook.com,+91 99876 54321,,PG Diploma - Data Science,Referral,95000,INR,45,15-07-2026\n"
-    "Digital Marketing course interest,Aman Verma,aman.verma@yahoo.com,+91 90123 45678,Wipro Ltd,Certificate - Digital Marketing,Walk-in,40000,INR,75,05-06-2026\n"
-    "MBA Finance applicant,Sneha Iyer,sneha.iyer@gmail.com,+91 98765 43210,,MBA - Finance,Website,180000,INR,55,20-08-2026\n"
-    "UX Design bootcamp lead,David Thompson,david.t@protonmail.com,+1 415 555 0192,Freelance,Bootcamp - UX Design,Google Ads,3500,USD,40,12-07-2026\n"
-    "B.Com admission query,Kavya Reddy,kavya.reddy@gmail.com,+91 96543 21098,,B.Com - General,Education Fair,75000,INR,65,01-07-2026\n"
-    "Cloud Computing certification,Arjun Mehta,arjun.mehta@hotmail.com,+91 97654 32109,Infosys,Certificate - AWS Cloud,LinkedIn,55000,INR,50,18-06-2026\n"
-    "Executive MBA enquiry,Fatima Khan,fatima.khan@gmail.com,+91 93456 78901,HDFC Bank,Executive MBA - Leadership,Referral,250000,INR,70,10-09-2026\n"
-    "Graphic Design course lead,Vikram Singh,vikram.singh@gmail.com,+91 91234 56780,,Diploma - Graphic Design,Instagram,48000,INR,35,25-07-2026\n"
-    "Full Stack Developer program,Emily Carter,emily.carter@gmail.com,+1 646 555 0148,Self-employed,Bootcamp - Full Stack Web,Walk-in,4200,USD,80,08-06-2026\n"
-)
-
-_IMPORT_TEMPLATE_TRAVEL = (
-    "Title,contact_name,Email,Phone,Company / Organization,Destination,Source,Value,Currency,Probability (%),Expected close\n"
-    "Bali honeymoon package,Rohit & Anjali Sharma,rohit.sharma@gmail.com,+91 98300 12345,,Bali - 7 days,Instagram,180000,INR,65,30-06-2026\n"
-    "Maldives family vacation,Priya Nair,priya.nair@outlook.com,+91 99876 54321,Tata Steel,Maldives - 5 days,Referral,250000,INR,55,20-07-2026\n"
-    "Europe 14-day tour,Aman Verma,aman.verma@yahoo.com,+91 90123 45678,Wipro,Europe Multi-city - 14 days,Walk-in,450000,INR,40,15-09-2026\n"
-    "Dubai weekend break,Sneha Iyer,sneha.iyer@gmail.com,+91 98765 43210,,Dubai - 3 days,Website,95000,INR,70,12-06-2026\n"
-    "Swiss Alps adventure,David Thompson,david.t@protonmail.com,+1 415 555 0192,Self-employed,Switzerland - 8 days,Google Ads,4200,USD,50,25-07-2026\n"
-    "Thailand group tour,Kavya Reddy,kavya.reddy@gmail.com,+91 96543 21098,,Thailand - 6 days,Travel Expo,85000,INR,75,05-07-2026\n"
-    "Singapore family trip,Arjun Mehta,arjun.mehta@hotmail.com,+91 97654 32109,Infosys,Singapore - 4 days,LinkedIn,120000,INR,60,18-08-2026\n"
-    "Paris romantic getaway,Fatima Khan,fatima.khan@gmail.com,+91 93456 78901,HDFC Bank,Paris - 6 days,Referral,2800,EUR,55,10-10-2026\n"
-    "Goa beach holiday,Vikram Singh,vikram.singh@gmail.com,+91 91234 56780,,Goa - 4 days,Instagram,35000,INR,80,22-06-2026\n"
-    "Bangkok business + leisure,Emily Carter,emily.carter@gmail.com,+1 646 555 0148,Globex Ltd,Bangkok - 5 days,Walk-in,1900,USD,45,08-08-2026\n"
-)
-
-
-def _template_for(business_type: LeadIndustry | None) -> tuple[str, str]:
-    """Return (csv_body, filename) for the caller's vertical.
-
-    Falls back to the Education template if the user has no business_type set
-    (legacy accounts) — Education is the more familiar of the two samples.
-    """
-    if business_type == LeadIndustry.travel:
-        return _IMPORT_TEMPLATE_TRAVEL, "leads-import-template-travel.csv"
-    return _IMPORT_TEMPLATE_EDUCATION, "leads-import-template-education.csv"
+# Per-vertical template/import/export columns live in app.core.lead_csv — the
+# single source of truth. Add or change a column there and the template, the
+# importer, and the export sheet all stay consistent.
 
 
 @router.get("/import/template.csv")
@@ -175,7 +134,7 @@ async def download_import_template(
     current_user=Depends(require_permissions(PermissionCode.LEAD_IMPORT)),
 ):
     """Vertical-aware starter CSV — same shape the `POST /import` endpoint accepts."""
-    body, filename = _template_for(current_user.business_type)
+    body, filename = build_template_csv(current_user.business_type)
     return StreamingResponse(
         iter([body]),
         media_type="text/csv",

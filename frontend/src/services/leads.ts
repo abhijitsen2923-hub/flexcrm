@@ -138,5 +138,21 @@ export const leadsService = {
       headers: { "Content-Type": "multipart/form-data" }
     });
     return data;
+  },
+
+  // Fetch the CSV template through apiClient (adds the auth header + the backend
+  // base URL) as a blob and trigger a download. A plain window.open on the
+  // relative "/api/v1/..." path would hit the frontend SPA (404) and can't send
+  // the Authorization header.
+  async downloadImportTemplate(): Promise<void> {
+    const { data } = await apiClient.get("/leads/import/template.csv", { responseType: "blob" });
+    const url = window.URL.createObjectURL(data as Blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "leads-import-template.csv";
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.URL.revokeObjectURL(url);
   }
 };

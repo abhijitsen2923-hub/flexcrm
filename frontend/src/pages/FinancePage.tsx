@@ -20,6 +20,7 @@ import {
   type MonthlyReport
 } from "../services/finance";
 import type { CommissionLedgerEntry, Invoice, SalesOrder } from "../types";
+import { exportsService } from "../services/exports";
 import { extractErrorMessage } from "../utils/errors";
 import { formatCurrency, formatDateTime, formatInr } from "../utils/format";
 
@@ -184,7 +185,11 @@ export default function FinancePage() {
               variant="secondary"
               size="sm"
               icon={<Download size={14} />}
-              onClick={() => window.location.assign("/api/v1/exports/sales-orders.csv")}
+              onClick={() => {
+                void exportsService
+                  .salesOrders()
+                  .catch((e) => toast.error("Export failed", extractErrorMessage(e)));
+              }}
             >
               Export CSV
             </Button>
