@@ -35,6 +35,7 @@ from app.database.pipeline_seed import initial_stage_code
 from app.models.organization import Organization
 from app.models.pipeline_stage import PipelineStage
 from app.repositories.leads import LeadRepository
+from app.repositories.users import UserRepository
 from app.schemas.lead import LeadCreate
 from app.schemas.stage_transition import StageTransitionCreate
 from app.services.base import ServiceBase
@@ -81,6 +82,7 @@ class LeadImportService(ServiceBase):
         self.lead_service = LeadService(session)
         self.transition_service = StageTransitionService(session)
         self.lead_repository = LeadRepository(session)
+        self.user_repository = UserRepository(session)
 
     async def import_csv(
         self,
@@ -220,7 +222,7 @@ class LeadImportService(ServiceBase):
             "title": (row.get("title") or "").strip() or contact_name,
             "currency": currency,
         }
-        _handled = {"stage", "contact_name", "title", "currency"}
+        _handled = {"stage", "contact_name", "title", "currency", "owner_email"}
         for col in columns:
             if col.key in _handled:
                 continue
@@ -234,6 +236,17 @@ class LeadImportService(ServiceBase):
                 payload_kwargs[col.key] = self._parse_date(raw_val)
             else:
                 payload_kwargs[col.key] = raw_val or None
+
+        # Resolve an optional lead owner by email → a user in this workspace.
+        owner_email = (row.get("owner_email") or "").strip().lower()
+        if owner_email:
+            owner = await self.user_repository.get_by_email(owner_email)
+            org_id = current_org(self.session)
+            if owner is None or (org_id is not None and owner.organization_id != org_id):
+                raise ValidationError(
+                    f"Owner email '{owner_email}' does not match a user in your workspace."
+                )
+            payload_kwargs["assigned_to_id"] = owner.id
 
         payload = LeadCreate(**payload_kwargs)
 

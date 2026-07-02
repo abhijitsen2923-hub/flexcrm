@@ -44,6 +44,8 @@ def _csv_response(filename: str, rows: list[list[str]], header: list[str]) -> St
 
 
 def _lead_cell(lead: Lead, col: CsvColumn) -> str:
+    if col.key == "owner_email":
+        return lead.assigned_to.email if lead.assigned_to else ""
     attr = "stage_code" if col.key == "stage" else col.key
     value = getattr(lead, attr, None)
     if value is None:
@@ -61,7 +63,11 @@ async def export_leads(
     _: object = Depends(require_permissions(PermissionCode.EXPORT_DATA, PermissionCode.LEAD_VIEW)),
     session: AsyncSession = Depends(get_db_session),
 ):
-    stmt = select(Lead).where(Lead.is_deleted.is_(False)).options(selectinload(Lead.customer))
+    stmt = (
+        select(Lead)
+        .where(Lead.is_deleted.is_(False))
+        .options(selectinload(Lead.customer), selectinload(Lead.assigned_to))
+    )
     if industry is not None:
         stmt = stmt.where(Lead.industry == industry)
     stmt = stmt.order_by(Lead.lead_number)

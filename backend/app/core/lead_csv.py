@@ -39,6 +39,9 @@ _COMMON: list[CsvColumn] = [
     ),
     CsvColumn("company_name", "Company / Organization", frozenset({"company", "organization", "org"}), sample=""),
     CsvColumn("source", "Source", frozenset({"lead_source"}), sample="Referral"),
+    # Assign a lead owner by their user email. The importer resolves it to a user
+    # in your workspace; unknown emails error the row. Blank = unassigned.
+    CsvColumn("owner_email", "Owner email", frozenset({"owner", "assigned to", "assigned email"}), sample=""),
     CsvColumn("value", "Value", frozenset({"amount", "deal_value"}), kind="decimal", sample="150000"),
     CsvColumn("currency", "Currency", frozenset({"currency_code"}), kind="currency", sample="INR"),
     CsvColumn("probability", "Probability (%)", frozenset({"prob"}), kind="int", sample="60"),

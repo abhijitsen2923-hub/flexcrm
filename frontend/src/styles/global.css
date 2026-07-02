@@ -666,6 +666,13 @@ p {
   box-shadow: var(--shadow-sm);
 }
 
+/* Leads list has many columns (owner select, budget, last comment, …). Give the
+   table a min-width so cells keep their natural size and the wrap scrolls
+   horizontally instead of crushing/clipping the rightmost columns. */
+.table-wrap--leads .table {
+  min-width: 1180px;
+}
+
 /* ============================================================ Pagination */
 
 .pagination {

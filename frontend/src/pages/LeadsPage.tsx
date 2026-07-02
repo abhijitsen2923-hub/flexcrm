@@ -24,7 +24,8 @@ import { useRealtimeEvent } from "../realtime";
 import { exportsService } from "../services/exports";
 import { leadsService, type LeadDuplicate, type LeadImportResult } from "../services/leads";
 import { organizationsService } from "../services/organizations";
-import type { Lead, LeadIndustry, Organization, PipelineStage } from "../types";
+import { usersService } from "../services/users";
+import type { Lead, LeadIndustry, Organization, PipelineStage, User } from "../types";
 import { extractErrorMessage } from "../utils/errors";
 import { formatCurrency, formatRelative } from "../utils/format";
 import { industryInterestLabel, leadIndustryOptions, pipelineCategoryTone, titleCase } from "../utils/options";
@@ -197,6 +198,28 @@ export default function LeadsPage() {
   // Warn-but-allow duplicate detection (by email or phone, per-tenant).
   const [duplicates, setDuplicates] = useState<LeadDuplicate[]>([]);
   const [dupChecked, setDupChecked] = useState(false);
+
+  // Users in this workspace, for the inline owner-assign dropdown.
+  const [assignableUsers, setAssignableUsers] = useState<User[]>([]);
+  useEffect(() => {
+    if (!canManage) return;
+    let cancelled = false;
+    void usersService
+      .list({ page_size: 200 })
+      .then((res) => { if (!cancelled) setAssignableUsers(res.items); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [canManage]);
+
+  async function handleAssign(lead: Lead, userId: string | null) {
+    try {
+      await leadsService.update(lead.id, { assigned_to_id: userId });
+      await refresh();
+      toast.success("Owner updated", userId ? "Lead assigned." : "Lead unassigned.");
+    } catch (err) {
+      toast.error("Assign failed", extractErrorMessage(err));
+    }
+  }
 
   function openCreate() {
     setForm(makeEmptyForm(user?.business_type ?? "education", allowedCurrencies[0] ?? "INR"));
@@ -410,7 +433,7 @@ export default function LeadsPage() {
     },
     {
       key: "interest",
-      header: "Course / Destination",
+      header: industryInterestLabel((industryFilter || user?.business_type || "education") as LeadIndustry),
       render: (lead) => (
         <span title={lead.interest ?? ""}>
           <span className="muted text-xs">{industryInterestLabel(lead.industry)}: </span>
@@ -422,7 +445,27 @@ export default function LeadsPage() {
       key: "owner",
       header: "Owner",
       render: (lead) =>
-        lead.assigned_to ? `${lead.assigned_to.first_name} ${lead.assigned_to.last_name}` : <span className="muted">Unassigned</span>
+        canManage ? (
+          <select
+            className="stage-select stage-select--neutral"
+            value={lead.assigned_to_id ?? ""}
+            onClick={(event) => event.stopPropagation()}
+            onChange={(event) => void handleAssign(lead, event.target.value || null)}
+            aria-label={`Owner for lead ${lead.lead_number}`}
+            title="Assign this lead to a user"
+          >
+            <option value="">Unassigned</option>
+            {assignableUsers.map((u) => (
+              <option key={u.id} value={u.id}>
+                {u.first_name} {u.last_name}
+              </option>
+            ))}
+          </select>
+        ) : lead.assigned_to ? (
+          `${lead.assigned_to.first_name} ${lead.assigned_to.last_name}`
+        ) : (
+          <span className="muted">Unassigned</span>
+        )
     },
     {
       key: "last_comment",
@@ -595,7 +638,7 @@ export default function LeadsPage() {
 
         {view === "list" ? (
           <>
-            <div className="table-wrap" style={{ border: "none", borderRadius: 0, boxShadow: "none" }}>
+            <div className="table-wrap table-wrap--leads" style={{ border: "none", borderRadius: 0, boxShadow: "none" }}>
               {loading && leads.length === 0 ? (
                 <LoadingBlock label="Loading leads…" />
               ) : (
