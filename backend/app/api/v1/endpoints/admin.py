@@ -25,9 +25,22 @@ from app.schemas.organization import (
     get_modules,
 )
 from app.services.tenant_provisioner import _SAFE_SCHEMA
+from app.services.tenant_repair import repair_tenant_enums
 
 
 router = APIRouter()
+
+
+@router.post("/tenant-enums/repair")
+async def repair_tenant_enums_endpoint(
+    dry_run: bool = Query(True, description="Preview only; set false to apply."),
+    _=Depends(require_platform_admin()),
+):
+    """Idempotently repair tenant schemas whose enum columns were created as
+    tenant-local shadows of the public enum types (older tenants). dry_run=true
+    (default) reports what would change without writing. Safe to re-run."""
+    results = await repair_tenant_enums(dry_run=dry_run)
+    return {"dry_run": dry_run, "results": results}
 
 
 def _to_read(org: Organization) -> OrganizationRead:
