@@ -26,7 +26,9 @@ from contextlib import contextmanager
 from typing import Iterator
 from uuid import UUID
 
+from sqlalchemy import event
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import ORMExecuteState, Session
 
 
 async def set_tenant_schema(session: AsyncSession, schema_name: str) -> None:
@@ -101,10 +103,32 @@ def bypass(session: AsyncSession) -> Iterator[None]:
         session.info["bypass_tenancy"] = previous
 
 
-def register_listeners() -> None:
-    """No-op. Retained for import compatibility with main.py.
+_LISTENERS_REGISTERED = False
 
-    Tenant isolation is now via schema_translate_map (set by set_tenant_schema)
-    rather than ORM event listeners. The listeners were removed when
-    OrgScopedMixin and the associated row-level filter were deleted.
+
+def register_listeners() -> None:
+    """Route every ORM query to the active tenant schema.
+
+    set_tenant_schema() sets schema_translate_map on the *current* connection,
+    but commit() releases that connection — so the next ORM query (e.g. the
+    reload after create_lead) would hit the literal "tenant" schema and fail
+    with UndefinedTable. This listener re-applies the map from
+    session.info["schema_name"] to every ORM statement, so routing survives
+    commits regardless of which pooled connection runs the query. Idempotent.
     """
+    global _LISTENERS_REGISTERED
+    if _LISTENERS_REGISTERED:
+        return
+    _LISTENERS_REGISTERED = True
+
+    @event.listens_for(Session, "do_orm_execute")
+    def _route_tenant_schema(state: ORMExecuteState) -> None:
+        schema = state.session.info.get("schema_name")
+        if not schema:
+            return
+        current = state.execution_options.get("schema_translate_map") or {}
+        if current.get("tenant") == schema:
+            return
+        state.update_execution_options(
+            schema_translate_map={**current, "tenant": schema}
+        )
