@@ -132,3 +132,14 @@ def register_listeners() -> None:
         state.update_execution_options(
             schema_translate_map={**current, "tenant": schema}
         )
+
+    @event.listens_for(Session, "after_begin")
+    def _route_tenant_schema_on_begin(session, transaction, connection) -> None:
+        # do_orm_execute only covers ORM SELECT/UPDATE/DELETE, not flush INSERTs.
+        # After a commit releases the set_tenant_schema connection, the next
+        # transaction gets a fresh connection with no map — so a subsequent flush
+        # (e.g. each row of a CSV import creating a lead) hits the literal
+        # "tenant" schema. Re-apply the map to every new transaction's connection.
+        schema = session.info.get("schema_name")
+        if schema:
+            connection.execution_options(schema_translate_map={"tenant": schema})
