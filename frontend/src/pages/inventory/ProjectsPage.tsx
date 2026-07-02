@@ -1,11 +1,29 @@
-import { useState } from "react";
+import { useState, type FormEvent } from "react";
 import { Building2, Image, Plus } from "lucide-react";
-import { Button, Card, DataTable, EmptyState, Modal } from "../../components";
+import { Button, Card, DataTable, EmptyState, Modal, TextField, useToast } from "../../components";
 import type { DataTableColumn } from "../../components";
 import { useInventory } from "../../hooks/useInventory";
+import { inventoryService } from "../../services/inventory";
 import type { Project } from "../../types/realestate";
 import { LoadingBlock } from "../../components/ui/Spinner";
+import { extractErrorMessage } from "../../utils/errors";
 import "./ProjectsPage.css";
+
+interface ProjectFormState {
+  name: string;
+  builder_name: string;
+  location: string;
+  city: string;
+  rera_number: string;
+}
+
+const EMPTY_PROJECT_FORM: ProjectFormState = {
+  name: "",
+  builder_name: "",
+  location: "",
+  city: "",
+  rera_number: "",
+};
 
 function MediaGallery({ project }: { project: Project }) {
   if (project.media.length === 0) {
@@ -47,8 +65,41 @@ const COLUMNS: DataTableColumn<Project>[] = [
 ];
 
 export default function ProjectsPage() {
-  const { projects, loading } = useInventory();
+  const { projects, loading, refresh } = useInventory();
+  const toast = useToast();
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
+  const [createOpen, setCreateOpen] = useState(false);
+  const [form, setForm] = useState<ProjectFormState>(EMPTY_PROJECT_FORM);
+  const [saving, setSaving] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
+
+  function openCreate() {
+    setForm(EMPTY_PROJECT_FORM);
+    setFormError(null);
+    setCreateOpen(true);
+  }
+
+  async function handleCreate(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setSaving(true);
+    setFormError(null);
+    try {
+      await inventoryService.createProject({
+        name: form.name.trim(),
+        builder_name: form.builder_name.trim(),
+        location: form.location.trim(),
+        city: form.city.trim(),
+        rera_number: form.rera_number.trim() || null,
+      });
+      toast.success("Project created", form.name.trim());
+      setCreateOpen(false);
+      await refresh();
+    } catch (err) {
+      setFormError(extractErrorMessage(err));
+    } finally {
+      setSaving(false);
+    }
+  }
 
   if (loading) return <LoadingBlock label="Loading projects…" />;
 
@@ -56,7 +107,7 @@ export default function ProjectsPage() {
     <div className="projects-page">
       <div className="page-header">
         <h1 className="page-title">Projects</h1>
-        <Button variant="primary" icon={<Plus size={16} />}>
+        <Button variant="primary" icon={<Plus size={16} />} onClick={openCreate}>
           Add Project
         </Button>
       </div>
@@ -77,6 +128,67 @@ export default function ProjectsPage() {
           />
         </Card>
       )}
+
+      <Modal
+        open={createOpen}
+        title="Add project"
+        onClose={() => setCreateOpen(false)}
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setCreateOpen(false)} disabled={saving}>
+              Cancel
+            </Button>
+            <Button type="submit" form="create-project-form" loading={saving}>
+              Create project
+            </Button>
+          </>
+        }
+      >
+        <form id="create-project-form" className="stack" onSubmit={handleCreate}>
+          <TextField
+            id="project-name"
+            label="Project name"
+            value={form.name}
+            onChange={(event) => setForm({ ...form, name: event.target.value })}
+            required
+            placeholder="e.g. Prestige Lakeside Habitat"
+          />
+          <TextField
+            id="project-builder"
+            label="Builder"
+            value={form.builder_name}
+            onChange={(event) => setForm({ ...form, builder_name: event.target.value })}
+            required
+            placeholder="e.g. Prestige Group"
+          />
+          <div className="form-grid">
+            <TextField
+              id="project-location"
+              label="Location / Area"
+              value={form.location}
+              onChange={(event) => setForm({ ...form, location: event.target.value })}
+              required
+              placeholder="e.g. Whitefield"
+            />
+            <TextField
+              id="project-city"
+              label="City"
+              value={form.city}
+              onChange={(event) => setForm({ ...form, city: event.target.value })}
+              required
+              placeholder="e.g. Bengaluru"
+            />
+          </div>
+          <TextField
+            id="project-rera"
+            label="RERA number"
+            value={form.rera_number}
+            onChange={(event) => setForm({ ...form, rera_number: event.target.value })}
+            placeholder="Optional"
+          />
+          {formError && <div className="error-banner">{formError}</div>}
+        </form>
+      </Modal>
 
       {selectedProject && (
         <Modal

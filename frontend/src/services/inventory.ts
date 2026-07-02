@@ -1,24 +1,118 @@
 import { apiClient } from "./http";
-import type { Project, Unit, UnitStatus } from "../types/realestate";
+import type { Project, Tower, Unit, UnitStatus } from "../types/realestate";
+
+// The API speaks snake_case and returns no computed inventory counts / media.
+// The app models are camelCase with totalUnits/availableUnits/media derived from
+// towers→units. Map at this boundary so pages/hooks work with a single shape.
+interface ApiUnit {
+  id: string;
+  project_id: string;
+  tower_id: string;
+  floor: number;
+  unit_number: string;
+  area: number | string;
+  area_unit: string;
+  facing: string | null;
+  view: string | null;
+  base_price: number | string;
+  status: UnitStatus;
+  updated_at: string;
+}
+
+interface ApiTower {
+  id: string;
+  project_id: string;
+  name: string;
+  total_floors: number;
+  units?: ApiUnit[];
+}
+
+interface ApiProject {
+  id: string;
+  name: string;
+  builder_name: string;
+  location: string;
+  city: string;
+  rera_number: string | null;
+  created_at: string;
+  updated_at: string;
+  towers?: ApiTower[];
+}
+
+function mapUnit(u: ApiUnit): Unit {
+  return {
+    id: u.id,
+    projectId: u.project_id,
+    towerId: u.tower_id,
+    floor: u.floor,
+    unitNumber: u.unit_number,
+    area: Number(u.area),
+    areaUnit: u.area_unit as Unit["areaUnit"],
+    facing: u.facing as Unit["facing"],
+    view: u.view,
+    basePrice: Number(u.base_price),
+    status: u.status,
+    updatedAt: u.updated_at,
+  };
+}
+
+function mapTower(t: ApiTower): Tower {
+  return {
+    id: t.id,
+    projectId: t.project_id,
+    name: t.name,
+    totalFloors: t.total_floors,
+    units: (t.units ?? []).map(mapUnit),
+  };
+}
+
+function mapProject(p: ApiProject): Project {
+  const towers = (p.towers ?? []).map(mapTower);
+  const allUnits = towers.flatMap((t) => t.units);
+  return {
+    id: p.id,
+    name: p.name,
+    builderName: p.builder_name,
+    location: p.location,
+    city: p.city,
+    reraNumber: p.rera_number,
+    towers,
+    media: [],
+    totalUnits: allUnits.length,
+    availableUnits: allUnits.filter((u) => u.status === "available").length,
+    createdAt: p.created_at,
+    updatedAt: p.updated_at,
+  };
+}
+
+export interface ProjectCreatePayload {
+  name: string;
+  builder_name: string;
+  location: string;
+  city: string;
+  rera_number?: string | null;
+}
 
 export const inventoryService = {
   listProjects(): Promise<Project[]> {
-    return apiClient.get<Project[]>("/inventory/projects").then((r) => r.data);
+    return apiClient.get<ApiProject[]>("/inventory/projects").then((r) => r.data.map(mapProject));
   },
 
   getProject(id: string): Promise<Project> {
-    return apiClient.get<Project>(`/inventory/projects/${id}`).then((r) => r.data);
+    return apiClient.get<ApiProject>(`/inventory/projects/${id}`).then((r) => mapProject(r.data));
   },
 
-  createProject(payload: Partial<Project>): Promise<Project> {
-    return apiClient.post<Project>("/inventory/projects", payload).then((r) => r.data);
+  createProject(payload: ProjectCreatePayload): Promise<Project> {
+    return apiClient.post<ApiProject>("/inventory/projects", payload).then((r) => mapProject(r.data));
   },
 
   updateUnitStatus(unitId: string, status: UnitStatus): Promise<Unit> {
-    return apiClient.patch<Unit>(`/inventory/units/${unitId}/status`, { status }).then((r) => r.data);
+    return apiClient
+      .patch<ApiUnit>(`/inventory/units/${unitId}/status`, { status })
+      .then((r) => mapUnit(r.data));
   },
 
   getUnit(unitId: string): Promise<Unit> {
-    return apiClient.get<Unit>(`/inventory/units/${unitId}`).then((r) => r.data);
+    return apiClient.get<ApiUnit>(`/inventory/units/${unitId}`).then((r) => mapUnit(r.data));
   },
 };
