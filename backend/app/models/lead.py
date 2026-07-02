@@ -66,6 +66,9 @@ class Lead(TenantBase, UUIDPrimaryKeyMixin, TimestampMixin, TenantAuditMixin, Te
     contact_name: Mapped[str] = mapped_column(String(255), nullable=False)
     contact_email: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
     contact_phone: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    # Optional secondary phone. Nullable in the DB (older rows predate it and
+    # it's optional on capture); the API/UI make the primary phone mandatory.
+    contact_phone_alt: Mapped[str | None] = mapped_column(String(32), nullable=True)
     company_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     last_comment_preview: Mapped[str | None] = mapped_column(Text, nullable=True)

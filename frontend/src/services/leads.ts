@@ -27,6 +27,7 @@ export interface LeadCreatePayload {
   contact_name: string;
   contact_email?: string | null;
   contact_phone?: string | null;
+  contact_phone_alt?: string | null;
   company_name?: string | null;
   customer_id?: string | null;
   value?: string | number;
@@ -69,10 +70,21 @@ export interface StageTransitionPayload {
   mentions?: string[];
 }
 
+export interface LeadImportDuplicate {
+  row: number;
+  contact_name: string | null;
+  contact_email: string | null;
+  contact_phone: string | null;
+  matched: string;        // existing lead numbers, e.g. "#89004, #89003"
+  skipped: boolean;       // true = dropped by "skip duplicates"; false = imported anyway
+}
+
 export interface LeadImportResult {
   created: number;
   promoted: number;
+  skipped: number;
   errors: { row: number; error: string }[];
+  duplicates: LeadImportDuplicate[];
 }
 
 export interface LeadDuplicate {
@@ -129,14 +141,18 @@ export const leadsService = {
     return data;
   },
 
-  async importCsv(file: File): Promise<LeadImportResult> {
+  async importCsv(file: File, skipDuplicates = false): Promise<LeadImportResult> {
     const formData = new FormData();
     formData.append("file", file);
-    const { data } = await apiClient.post<LeadImportResult>("/leads/import", formData, {
-      // Let axios infer the multipart boundary — overriding the default
-      // `Content-Type: application/json` header set on the client.
-      headers: { "Content-Type": "multipart/form-data" }
-    });
+    const { data } = await apiClient.post<LeadImportResult>(
+      `/leads/import${buildQueryString({ skip_duplicates: skipDuplicates })}`,
+      formData,
+      {
+        // Let axios infer the multipart boundary — overriding the default
+        // `Content-Type: application/json` header set on the client.
+        headers: { "Content-Type": "multipart/form-data" }
+      }
+    );
     return data;
   },
 

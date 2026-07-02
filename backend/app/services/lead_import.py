@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import csv
 import io
+import re
 from dataclasses import dataclass, field
 from decimal import Decimal, InvalidOperation
 from typing import Any
@@ -52,10 +53,23 @@ class ImportRowError:
 
 
 @dataclass
+class ImportDuplicate:
+    """A row that matched an existing lead by email or phone."""
+    row: int
+    contact_name: str | None
+    contact_email: str | None
+    contact_phone: str | None
+    matched: str          # existing lead numbers, e.g. "#89004, #89003"
+    skipped: bool         # True when skip_duplicates dropped it; False = imported anyway
+
+
+@dataclass
 class ImportSummary:
     created: int = 0
     promoted: int = 0
+    skipped: int = 0
     errors: list[ImportRowError] = field(default_factory=list)
+    duplicates: list[ImportDuplicate] = field(default_factory=list)
 
 
 class LeadImportService(ServiceBase):
@@ -75,6 +89,7 @@ class LeadImportService(ServiceBase):
         actor_id: UUID,
         actor_role: UserRole,
         actor_business_type: LeadIndustry | None,
+        skip_duplicates: bool = False,
     ) -> ImportSummary:
         try:
             text = file_bytes.decode("utf-8-sig")  # tolerate BOM from Excel exports
@@ -111,6 +126,29 @@ class LeadImportService(ServiceBase):
         # cross-reference with their spreadsheet.
         for offset, raw in enumerate(reader, start=2):
             row = {col.key: self._read_field(raw, header_map.get(col.key)) for col in columns}
+
+            # Duplicate detection: does this row's email or phone already match
+            # an active lead in this tenant? Record it either way so the caller
+            # can list duplicates; only skip creation when skip_duplicates is on.
+            email_norm = (row.get("contact_email") or "").strip().lower() or None
+            phone_digits = re.sub(r"\D", "", row.get("contact_phone") or "") or None
+            if email_norm or phone_digits:
+                dups = await self.lead_repository.find_duplicates(email_norm, phone_digits)
+                if dups:
+                    summary.duplicates.append(
+                        ImportDuplicate(
+                            row=offset,
+                            contact_name=(row.get("contact_name") or "").strip() or None,
+                            contact_email=(row.get("contact_email") or "").strip() or None,
+                            contact_phone=(row.get("contact_phone") or "").strip() or None,
+                            matched=", ".join(f"#{d.lead_number}" for d in dups),
+                            skipped=skip_duplicates,
+                        )
+                    )
+                    if skip_duplicates:
+                        summary.skipped += 1
+                        continue
+
             try:
                 created_lead_id, was_promoted = await self._import_row(
                     row,
@@ -160,6 +198,12 @@ class LeadImportService(ServiceBase):
         contact_name = (row.get("contact_name") or "").strip()
         if not contact_name:
             raise ValidationError("contact_name is required.")
+        # Email + primary phone are mandatory (all verticals). Check here for
+        # clear per-row messages instead of a raw pydantic error.
+        if not (row.get("contact_email") or "").strip():
+            raise ValidationError("Email is required.")
+        if not (row.get("contact_phone") or "").strip():
+            raise ValidationError("Phone is required.")
 
         currency = (row.get("currency") or DEFAULT_CURRENCY).strip().upper() or DEFAULT_CURRENCY
         if currency not in allowed_currencies:

@@ -21,8 +21,12 @@ class LeadCreate(ORMModel):
     # field; the others are optional and populate the auto-created Customer
     # on Sold.
     contact_name: str = Field(min_length=1, max_length=255)
-    contact_email: EmailStr | None = None
-    contact_phone: str | None = Field(default=None, max_length=32)
+    # Email + primary phone are mandatory on capture (all verticals); a second
+    # phone is optional. Enforced here so both the New Lead form and the CSV
+    # importer reject rows missing them.
+    contact_email: EmailStr
+    contact_phone: str = Field(min_length=1, max_length=32)
+    contact_phone_alt: str | None = Field(default=None, max_length=32)
     company_name: str | None = Field(default=None, max_length=255)
     # Legacy attach-to-existing-customer flow is still supported by passing
     # an existing customer_id. If null, a new Customer is materialized on Sold.
@@ -58,6 +62,7 @@ class LeadUpdate(ORMModel):
     contact_name: str | None = Field(default=None, min_length=1, max_length=255)
     contact_email: EmailStr | None = None
     contact_phone: str | None = Field(default=None, max_length=32)
+    contact_phone_alt: str | None = Field(default=None, max_length=32)
     company_name: str | None = Field(default=None, max_length=255)
     value: Decimal | None = Field(default=None, ge=0)
     probability: int | None = Field(default=None, ge=0, le=100)
@@ -83,6 +88,7 @@ class LeadRead(ORMModel):
     contact_name: str
     contact_email: EmailStr | None = None
     contact_phone: str | None = None
+    contact_phone_alt: str | None = None
     company_name: str | None = None
     value: Decimal
     currency: str = "INR"

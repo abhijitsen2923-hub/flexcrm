@@ -266,6 +266,7 @@ export interface Lead {
   contact_name: string;
   contact_email: string | null;
   contact_phone: string | null;
+  contact_phone_alt: string | null;
   company_name: string | null;
   value: string;
   currency: string;
@@ -276,6 +277,13 @@ export interface Lead {
   last_comment_preview: string | null;
   last_comment_at: string | null;
   assigned_to_id: string | null;
+  // Real-estate specific (null for other verticals). Numeric fields arrive as
+  // strings over JSON, same as `value`.
+  property_type: string | null;
+  budget_min: string | null;
+  budget_max: string | null;
+  preferred_location: string | null;
+  possession_preference: string | null;
   created_by_id: string | null;
   updated_by_id: string | null;
   created_at: string;

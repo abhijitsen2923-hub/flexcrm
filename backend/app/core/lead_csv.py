@@ -30,7 +30,13 @@ _COMMON: list[CsvColumn] = [
     CsvColumn("title", "Title", frozenset({"subject", "lead_title"}), sample="New enquiry"),
     CsvColumn("contact_name", "Contact name", frozenset({"name", "lead_name", "contact"}), sample="Priya Nair"),
     CsvColumn("contact_email", "Email", frozenset({"contact_email"}), sample="priya.nair@gmail.com"),
-    CsvColumn("contact_phone", "Phone", frozenset({"mobile"}), sample="+91 99876 54321"),
+    CsvColumn("contact_phone", "Phone", frozenset({"mobile", "phone number"}), sample="+91 99876 54321"),
+    CsvColumn(
+        "contact_phone_alt",
+        "Alternate phone",
+        frozenset({"phone 2", "phone2", "secondary phone", "alt phone", "alternate phone number"}),
+        sample="",
+    ),
     CsvColumn("company_name", "Company / Organization", frozenset({"company", "organization", "org"}), sample=""),
     CsvColumn("source", "Source", frozenset({"lead_source"}), sample="Referral"),
     CsvColumn("value", "Value", frozenset({"amount", "deal_value"}), kind="decimal", sample="150000"),
@@ -85,9 +91,18 @@ def _industry_or_default(industry: LeadIndustry | None) -> LeadIndustry:
     return industry if industry in _VERTICAL else LeadIndustry.education
 
 
+# Real estate captures a budget range (Budget min/max) instead of a single deal
+# Value, so Value/Currency are dropped from its template, importer and export.
+_REAL_ESTATE_DROP = frozenset({"value", "currency"})
+
+
 def columns_for(industry: LeadIndustry | None) -> list[CsvColumn]:
     """Ordered CSV columns for a vertical: shared columns + vertical-specific."""
-    return _COMMON + _VERTICAL[_industry_or_default(industry)]
+    ind = _industry_or_default(industry)
+    cols = _COMMON + _VERTICAL[ind]
+    if ind is LeadIndustry.real_estate:
+        cols = [c for c in cols if c.key not in _REAL_ESTATE_DROP]
+    return cols
 
 
 def import_columns_for(industry: LeadIndustry | None) -> list[CsvColumn]:

@@ -147,6 +147,7 @@ class LeadService(ServiceBase):
                 "contact_name": payload.contact_name,
                 "contact_email": payload.contact_email,
                 "contact_phone": payload.contact_phone,
+                "contact_phone_alt": payload.contact_phone_alt,
                 "company_name": payload.company_name,
                 "value": payload.value,
                 "currency": requested_currency,

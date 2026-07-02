@@ -136,6 +136,8 @@ export function PlatformAdminPage() {
   const toast = useToast();
   const [repairing, setRepairing] = useState(false);
   const [repairConfirm, setRepairConfirm] = useState(false);
+  const [upgrading, setUpgrading] = useState(false);
+  const [upgradeConfirm, setUpgradeConfirm] = useState(false);
   const [orgs, setOrgs] = useState<Organization[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState<Record<string, boolean>>({});
@@ -290,6 +292,26 @@ export function PlatformAdminPage() {
     }
   };
 
+  const handleUpgrade = async () => {
+    setUpgrading(true);
+    try {
+      const { results } = await adminService.upgradeTenantSchemas();
+      const upgraded = results.filter((r) => r.status === "upgraded");
+      const errored = results.filter((r) => r.error);
+      if (errored.length) {
+        toast.error("Upgrade finished with errors", `${errored.length} tenant(s) failed — check server logs.`);
+      } else {
+        toast.success("Schemas upgraded", `Migrated ${upgraded.length} tenant schema(s) to the latest version.`);
+      }
+      await load(includeArchived);
+    } catch (err) {
+      toast.error("Upgrade failed", extractErrorMessage(err));
+    } finally {
+      setUpgrading(false);
+      setUpgradeConfirm(false);
+    }
+  };
+
   return (
     <>
       <div className="page-header">
@@ -317,6 +339,15 @@ export function PlatformAdminPage() {
             title="Fix older tenant database schemas (enum types). Safe to run anytime."
           >
             Repair schemas
+          </Button>
+          <Button
+            variant="secondary"
+            size="sm"
+            loading={upgrading}
+            onClick={() => setUpgradeConfirm(true)}
+            title="Apply the latest tenant database migrations (new columns/tables) to all existing tenants. Safe to run anytime."
+          >
+            Upgrade schemas
           </Button>
         </div>
       </div>
@@ -443,6 +474,17 @@ export function PlatformAdminPage() {
         loading={repairing}
         onCancel={() => setRepairConfirm(false)}
         onConfirm={() => void handleRepair()}
+      />
+
+      <ConfirmDialog
+        open={upgradeConfirm}
+        title="Upgrade tenant schemas"
+        description="Applies the latest tenant database migrations (new columns/tables, e.g. the secondary phone field) to every existing tenant. Idempotent and safe to run anytime — tenants already up to date are skipped."
+        confirmLabel="Run upgrade"
+        cancelLabel="Cancel"
+        loading={upgrading}
+        onCancel={() => setUpgradeConfirm(false)}
+        onConfirm={() => void handleUpgrade()}
       />
 
       <Modal

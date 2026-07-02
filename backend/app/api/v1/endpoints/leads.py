@@ -145,6 +145,7 @@ async def download_import_template(
 @router.post("/import")
 async def import_leads_csv(
     file: UploadFile = File(..., description="CSV file. UTF-8, header row required."),
+    skip_duplicates: bool = False,
     current_user=Depends(require_permissions(PermissionCode.LEAD_IMPORT)),
     session: AsyncSession = Depends(get_db_session),
 ):
@@ -155,6 +156,11 @@ async def import_leads_csv(
     to that stage via the regular service so the Sold auto-promotion fires
     where applicable. Per-row errors are returned in the response — they
     don't abort the rest of the upload.
+
+    Duplicate handling: a row whose email or phone matches an existing lead is
+    always reported under `duplicates`. When `skip_duplicates=true` those rows
+    are skipped (only fresh leads created); otherwise they are imported and
+    flagged so the UI can show them with the "!" marker.
     """
     if not file.filename or not file.filename.lower().endswith(".csv"):
         raise ValidationError("Upload must be a .csv file.")
@@ -167,11 +173,24 @@ async def import_leads_csv(
         actor_id=current_user.id,
         actor_role=current_user.role,
         actor_business_type=current_user.business_type,
+        skip_duplicates=skip_duplicates,
     )
     return {
         "created": summary.created,
         "promoted": summary.promoted,
+        "skipped": summary.skipped,
         "errors": [{"row": e.row, "error": e.error} for e in summary.errors],
+        "duplicates": [
+            {
+                "row": d.row,
+                "contact_name": d.contact_name,
+                "contact_email": d.contact_email,
+                "contact_phone": d.contact_phone,
+                "matched": d.matched,
+                "skipped": d.skipped,
+            }
+            for d in summary.duplicates
+        ],
     }
 
 

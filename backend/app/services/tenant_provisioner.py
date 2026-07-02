@@ -112,6 +112,47 @@ async def provision_tenant(org: Organization) -> None:
     logger.info("provision_tenant: schema %r is ready (%s tables)", schema, table_count)
 
 
+async def upgrade_all_tenant_schemas() -> list[dict]:
+    """Run tenant Alembic migrations (upgrade head) for every active org schema.
+
+    Idempotent: a schema already at head is a no-op. Use this to roll a newly
+    added tenant migration (e.g. a new leads column) out to EXISTING tenants —
+    new tenants pick it up automatically at provision time. Each schema is
+    upgraded independently so one failure doesn't stop the rest; returns a
+    per-tenant status report.
+    """
+    async with db_manager.engine.connect() as conn:
+        rows = (
+            await conn.execute(
+                text("SELECT name, schema_name FROM organizations WHERE schema_name IS NOT NULL")
+            )
+        ).all()
+
+    reports: list[dict] = []
+    for name, schema in rows:
+        if not schema or not _SAFE_SCHEMA.match(schema):
+            reports.append({"org": name, "schema": schema, "error": "unsafe/empty schema name — skipped"})
+            continue
+        async with db_manager.engine.connect() as conn:
+            exists = (
+                await conn.execute(
+                    text("SELECT 1 FROM information_schema.schemata WHERE schema_name = :s"),
+                    {"s": schema},
+                )
+            ).scalar()
+        if not exists:
+            reports.append({"org": name, "schema": schema, "skipped": "schema does not exist"})
+            continue
+        try:
+            await asyncio.to_thread(_run_tenant_migrations, schema)
+            reports.append({"org": name, "schema": schema, "status": "upgraded"})
+            logger.info("upgrade_all_tenant_schemas: %s -> head", schema)
+        except Exception as exc:  # noqa: BLE001 — report per-tenant, keep going
+            logger.exception("upgrade_all_tenant_schemas failed for schema %s", schema)
+            reports.append({"org": name, "schema": schema, "error": str(exc)})
+    return reports
+
+
 def _run_tenant_migrations(schema_name: str) -> None:
     """Synchronous helper that runs Alembic inside a thread pool worker."""
     env = os.environ.copy()

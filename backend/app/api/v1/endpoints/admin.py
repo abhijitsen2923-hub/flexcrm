@@ -24,11 +24,22 @@ from app.schemas.organization import (
     UpdateModulesRequest,
     get_modules,
 )
-from app.services.tenant_provisioner import _SAFE_SCHEMA
+from app.services.tenant_provisioner import _SAFE_SCHEMA, upgrade_all_tenant_schemas
 from app.services.tenant_repair import repair_tenant_enums
 
 
 router = APIRouter()
+
+
+@router.post("/tenant-schemas/upgrade")
+async def upgrade_tenant_schemas_endpoint(
+    _=Depends(require_platform_admin()),
+):
+    """Run tenant Alembic migrations (upgrade head) on every existing tenant
+    schema. Idempotent — use after deploying a new tenant migration so existing
+    tenants get the change (new tenants get it at provision time)."""
+    results = await upgrade_all_tenant_schemas()
+    return {"results": results}
 
 
 @router.post("/tenant-enums/repair")

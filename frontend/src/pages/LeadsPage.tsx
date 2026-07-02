@@ -67,6 +67,7 @@ interface CreateFormState {
   contact_name: string;
   contact_email: string;
   contact_phone: string;
+  contact_phone_alt: string;
   company_name: string;
   value: string;
   currency: string;
@@ -93,6 +94,7 @@ function makeEmptyForm(
     contact_name: "",
     contact_email: "",
     contact_phone: "",
+    contact_phone_alt: "",
     company_name: "",
     value: "0",
     currency: defaultCurrency,
@@ -245,6 +247,7 @@ export default function LeadsPage() {
         contact_name: form.contact_name.trim(),
         contact_email: form.contact_email.trim() || null,
         contact_phone: form.contact_phone.trim() || null,
+        contact_phone_alt: form.contact_phone_alt.trim() || null,
         company_name: form.company_name.trim() || null,
         value: form.value || "0",
         currency: form.currency || "INR",
@@ -284,10 +287,14 @@ export default function LeadsPage() {
   // --- CSV import -------------------------------------------------------
   const importInputRef = useRef<HTMLInputElement | null>(null);
   const [importing, setImporting] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
+  // Default to skipping duplicates so a re-uploaded sheet only adds fresh leads.
+  const [skipDuplicates, setSkipDuplicates] = useState(true);
   const [importResult, setImportResult] = useState<LeadImportResult | null>(null);
 
-  function openImportPicker() {
-    importInputRef.current?.click();
+  function openImportDialog() {
+    setSkipDuplicates(true);
+    setImportOpen(true);
   }
 
   async function handleImportFile(event: ChangeEvent<HTMLInputElement>) {
@@ -297,12 +304,17 @@ export default function LeadsPage() {
     if (!file) return;
     setImporting(true);
     try {
-      const result = await leadsService.importCsv(file);
+      const result = await leadsService.importCsv(file, skipDuplicates);
+      setImportOpen(false);
       setImportResult(result);
+      const dupNote = skipDuplicates
+        ? (result.skipped > 0 ? `, ${result.skipped} duplicate${result.skipped === 1 ? "" : "s"} skipped` : "")
+        : (result.duplicates.length > 0 ? `, ${result.duplicates.length} duplicate${result.duplicates.length === 1 ? "" : "s"} flagged` : "");
       toast.success(
         "Import done",
         `${result.created} lead${result.created === 1 ? "" : "s"} created` +
           (result.promoted > 0 ? `, ${result.promoted} promoted to customer` : "") +
+          dupNote +
           (result.errors.length > 0 ? `, ${result.errors.length} row error${result.errors.length === 1 ? "" : "s"}` : "")
       );
       await refresh();
@@ -427,9 +439,19 @@ export default function LeadsPage() {
     },
     {
       key: "value",
-      header: "Value",
+      header: "Value / Budget",
       align: "right",
-      render: (lead) => formatCurrency(lead.value, lead.currency || "INR")
+      render: (lead) => {
+        // Real estate has no single Value — show the Budget min–max range.
+        if (lead.industry === "real_estate") {
+          const cur = lead.currency || "INR";
+          const min = lead.budget_min != null ? formatCurrency(lead.budget_min, cur) : null;
+          const max = lead.budget_max != null ? formatCurrency(lead.budget_max, cur) : null;
+          if (!min && !max) return <span className="muted">—</span>;
+          return <span>{min ?? "—"} – {max ?? "—"}</span>;
+        }
+        return formatCurrency(lead.value, lead.currency || "INR");
+      }
     }
   ];
 
@@ -498,7 +520,7 @@ export default function LeadsPage() {
                 variant="secondary"
                 size="sm"
                 icon={<Upload size={14} />}
-                onClick={openImportPicker}
+                onClick={openImportDialog}
                 loading={importing}
               >
                 Upload CSV
@@ -657,16 +679,25 @@ export default function LeadsPage() {
               type="email"
               value={form.contact_email}
               onChange={(event) => { setForm({ ...form, contact_email: event.target.value }); resetDupCheck(); }}
-              placeholder="Optional"
+              required
+              placeholder="name@example.com"
             />
             <TextField
               id="lead-contact-phone"
               label="Phone"
               value={form.contact_phone}
               onChange={(event) => { setForm({ ...form, contact_phone: event.target.value }); resetDupCheck(); }}
-              placeholder="Optional"
+              required
+              placeholder="+91 99876 54321"
             />
           </div>
+          <TextField
+            id="lead-contact-phone-alt"
+            label="Alternate phone"
+            value={form.contact_phone_alt}
+            onChange={(event) => setForm({ ...form, contact_phone_alt: event.target.value })}
+            placeholder="Optional — a second number to reach this contact"
+          />
           {duplicates.length > 0 && (
             <div className="notice-banner" role="status">
               <strong>Possible duplicate{duplicates.length > 1 ? "s" : ""}.</strong> A lead with this
@@ -772,29 +803,33 @@ export default function LeadsPage() {
             onChange={(event) => setForm({ ...form, source: event.target.value })}
             placeholder="Instagram, Referral, Walk-in…"
           />
-          <div className="form-grid">
-            <TextField
-              id="lead-value"
-              label="Value"
-              type="number"
-              min={0}
-              step="0.01"
-              value={form.value}
-              onChange={(event) => setForm({ ...form, value: event.target.value })}
-            />
-            <SelectField
-              id="lead-currency"
-              label="Currency"
-              value={form.currency}
-              onChange={(event) => setForm({ ...form, currency: event.target.value })}
-              options={allowedCurrencies.map((code) => ({ value: code, label: code }))}
-              hint={
-                allowedCurrencies.length > 1
-                  ? `Available for your account: ${allowedCurrencies.join(" / ")}`
-                  : undefined
-              }
-            />
-          </div>
+          {/* Real estate captures a Budget min–max range (above) instead of a
+              single Value, so Value/Currency are hidden for that vertical. */}
+          {form.industry !== "real_estate" && (
+            <div className="form-grid">
+              <TextField
+                id="lead-value"
+                label="Value"
+                type="number"
+                min={0}
+                step="0.01"
+                value={form.value}
+                onChange={(event) => setForm({ ...form, value: event.target.value })}
+              />
+              <SelectField
+                id="lead-currency"
+                label="Currency"
+                value={form.currency}
+                onChange={(event) => setForm({ ...form, currency: event.target.value })}
+                options={allowedCurrencies.map((code) => ({ value: code, label: code }))}
+                hint={
+                  allowedCurrencies.length > 1
+                    ? `Available for your account: ${allowedCurrencies.join(" / ")}`
+                    : undefined
+                }
+              />
+            </div>
+          )}
           <div className="form-grid">
             <TextField
               id="lead-probability"
@@ -841,13 +876,56 @@ export default function LeadsPage() {
         refreshKey={drawerKey}
       />
 
-      {/* CSV import result — only surface the modal when there are row-level
-          errors. A clean import is summarised by the toast and the refreshed
-          list; no modal needed. */}
+      {/* Upload CSV — pick skip-duplicates before choosing the file. */}
       <Modal
-        open={Boolean(importResult && importResult.errors.length > 0)}
+        open={importOpen}
+        onClose={() => setImportOpen(false)}
+        title="Import leads from CSV"
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setImportOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              icon={<Upload size={14} />}
+              loading={importing}
+              onClick={() => importInputRef.current?.click()}
+            >
+              Choose CSV file
+            </Button>
+          </>
+        }
+      >
+        <div className="stack">
+          <p className="muted text-sm">
+            Upload a CSV matching your business type — use the <strong>Template</strong> button for the
+            correct columns. Email and phone are required; rows missing them are reported as errors.
+          </p>
+          <label style={{ display: "flex", gap: 8, alignItems: "flex-start", cursor: "pointer" }}>
+            <input
+              type="checkbox"
+              checked={skipDuplicates}
+              onChange={(event) => setSkipDuplicates(event.target.checked)}
+              style={{ marginTop: 3 }}
+            />
+            <span>
+              <strong>Skip duplicate leads</strong> — only import fresh leads (rows whose email or
+              phone already matches an existing lead are skipped).
+              <br />
+              <span className="muted text-xs">
+                Uncheck to import all rows; duplicates are still created and flagged with a red “!”.
+              </span>
+            </span>
+          </label>
+        </div>
+      </Modal>
+
+      {/* CSV import result — surfaced when there are duplicates or row errors.
+          A clean import is summarised by the toast and the refreshed list. */}
+      <Modal
+        open={Boolean(importResult && (importResult.errors.length > 0 || importResult.duplicates.length > 0))}
         onClose={() => setImportResult(null)}
-        title="Import finished with row errors"
+        title="Import summary"
         footer={
           <Button onClick={() => setImportResult(null)}>
             Close
@@ -861,28 +939,75 @@ export default function LeadsPage() {
               {importResult.created === 1 ? "" : "s"} created
               {importResult.promoted > 0 && (
                 <> · <strong>{importResult.promoted}</strong> auto-promoted to customer</>
-              )}{" "}
-              · <strong>{importResult.errors.length}</strong> skipped.
+              )}
+              {importResult.skipped > 0 && (
+                <> · <strong>{importResult.skipped}</strong> duplicate{importResult.skipped === 1 ? "" : "s"} skipped</>
+              )}
+              {importResult.errors.length > 0 && (
+                <> · <strong>{importResult.errors.length}</strong> row error{importResult.errors.length === 1 ? "" : "s"}</>
+              )}
             </div>
-            <div className="muted text-sm">
-              Fix the rows below in your sheet and re-upload — already-created leads aren't duplicated.
-            </div>
-            <table className="table">
-              <thead>
-                <tr>
-                  <th style={{ width: 80, textAlign: "left" }}>Row</th>
-                  <th style={{ textAlign: "left" }}>Error</th>
-                </tr>
-              </thead>
-              <tbody>
-                {importResult.errors.map((err) => (
-                  <tr key={err.row}>
-                    <td>{err.row}</td>
-                    <td>{err.error}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+
+            {importResult.duplicates.length > 0 && (
+              <>
+                <div className="muted text-sm">
+                  {importResult.duplicates.some((d) => d.skipped)
+                    ? "These rows matched an existing lead and were skipped:"
+                    : "These rows matched an existing lead and were imported (flagged with a red “!”):"}
+                </div>
+                <table className="table">
+                  <thead>
+                    <tr>
+                      <th style={{ width: 56, textAlign: "left" }}>Row</th>
+                      <th style={{ textAlign: "left" }}>Contact</th>
+                      <th style={{ textAlign: "left" }}>Matches</th>
+                      <th style={{ width: 90, textAlign: "left" }}>Action</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {importResult.duplicates.map((d) => (
+                      <tr key={`dup-${d.row}`}>
+                        <td>{d.row}</td>
+                        <td>
+                          {d.contact_name ?? "—"}
+                          {(d.contact_email || d.contact_phone) && (
+                            <div className="muted text-xs">
+                              {[d.contact_email, d.contact_phone].filter(Boolean).join(" · ")}
+                            </div>
+                          )}
+                        </td>
+                        <td>{d.matched}</td>
+                        <td>{d.skipped ? "Skipped" : "Imported"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </>
+            )}
+
+            {importResult.errors.length > 0 && (
+              <>
+                <div className="muted text-sm">
+                  Fix these rows in your sheet and re-upload — already-created leads aren't duplicated.
+                </div>
+                <table className="table">
+                  <thead>
+                    <tr>
+                      <th style={{ width: 56, textAlign: "left" }}>Row</th>
+                      <th style={{ textAlign: "left" }}>Error</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {importResult.errors.map((err) => (
+                      <tr key={`err-${err.row}`}>
+                        <td>{err.row}</td>
+                        <td>{err.error}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </>
+            )}
           </div>
         )}
       </Modal>

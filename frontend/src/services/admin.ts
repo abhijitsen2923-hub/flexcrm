@@ -53,7 +53,22 @@ export const adminService = {
     });
     return data;
   },
+
+  // Run tenant Alembic migrations (upgrade head) on every existing tenant schema.
+  // Idempotent — applies newly deployed tenant columns/tables to existing tenants.
+  async upgradeTenantSchemas(): Promise<{ results: TenantUpgradeResult[] }> {
+    const { data } = await apiClient.post("/admin/tenant-schemas/upgrade");
+    return data;
+  },
 };
+
+export interface TenantUpgradeResult {
+  org?: string;
+  schema?: string;
+  status?: string;
+  skipped?: string;
+  error?: string;
+}
 
 export interface TenantRepairResult {
   org?: string;
