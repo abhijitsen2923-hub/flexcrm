@@ -9,10 +9,11 @@ from app.api.v1.api import api_router
 from app.core.cache import cache_client
 from app.core.config import get_settings
 from app.core.exceptions import register_exception_handlers
-from app.core.logging import configure_logging
+from app.core.logging import configure_logging, get_logger
 from app.core.platform_admin import ensure_platform_admin
 from app.core.tenancy import register_listeners as register_tenancy_listeners
 from app.database.session import db_manager
+from app.services.tenant_provisioner import upgrade_all_tenant_schemas
 from app.middleware import RateLimitMiddleware, RequestContextMiddleware
 # Import model packages so SQLAlchemy registers mappers for both SharedBase
 # and TenantBase before the application starts accepting requests.
@@ -25,6 +26,7 @@ import app.models.custom_role  # noqa: F401
 
 
 configure_logging()
+logger = get_logger(__name__)
 # Wire the do_orm_execute + before_flush listeners. Idempotent.
 register_tenancy_listeners()
 
@@ -34,6 +36,15 @@ async def lifespan(_: FastAPI):
     db_manager.configure()
     await cache_client.connect()
     await ensure_platform_admin()
+    # Best-effort: bring existing tenant schemas up to head before serving, so
+    # their tables match the ORM models (e.g. a newly added leads column). New
+    # tenants already get migrations at provision time; this closes the gap for
+    # existing ones and avoids a window where queries hit a missing column.
+    # Idempotent (schemas at head are no-ops); failures are logged, never fatal.
+    try:
+        await upgrade_all_tenant_schemas()
+    except Exception:  # noqa: BLE001 — never block startup on best-effort migration
+        logger.exception("startup tenant-schema upgrade failed (continuing)")
     try:
         yield
     finally:
