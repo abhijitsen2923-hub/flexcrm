@@ -27,7 +27,7 @@ import { organizationsService } from "../services/organizations";
 import { usersService } from "../services/users";
 import type { Lead, LeadIndustry, Organization, PipelineStage, User } from "../types";
 import { extractErrorMessage } from "../utils/errors";
-import { formatCurrency, formatRelative } from "../utils/format";
+import { formatCurrency } from "../utils/format";
 import { industryInterestLabel, leadIndustryOptions, pipelineCategoryTone, titleCase } from "../utils/options";
 
 
@@ -365,31 +365,37 @@ export default function LeadsPage() {
     {
       key: "lead",
       header: "Lead",
+      width: "16%",
       render: (lead) => (
-        <button type="button" className="link" onClick={() => setDrawerLead(lead)} style={{ textAlign: "left" }}>
-          <div style={{ fontWeight: 600, display: "flex", alignItems: "center", gap: 6 }}>
+        <button type="button" className="link" onClick={() => setDrawerLead(lead)} style={{ textAlign: "left", maxWidth: "100%" }}>
+          <div style={{ fontWeight: 600, display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
             {lead.is_duplicate && <DuplicateMark />}
-            <span>{lead.contact_name || lead.customer?.contact_name || lead.title}</span>
+            <span className="cell-truncate">{lead.contact_name || lead.customer?.contact_name || lead.title}</span>
           </div>
-          <div className="muted text-xs">{lead.title}</div>
+          <div className="muted text-xs cell-truncate">{lead.title}</div>
         </button>
       )
     },
     {
       key: "lead_number",
       header: "Lead #",
+      width: "7%",
       render: (lead) => <span className="muted">{lead.lead_number}</span>
     },
     {
       key: "email",
       header: "Email",
+      width: "18%",
       render: (lead) => (
-        <span className="text-sm">{lead.contact_email ?? lead.customer?.email ?? "—"}</span>
+        <span className="text-sm cell-truncate" title={lead.contact_email ?? lead.customer?.email ?? ""}>
+          {lead.contact_email ?? lead.customer?.email ?? "—"}
+        </span>
       )
     },
     {
       key: "stage",
       header: "Stage",
+      width: "16%",
       render: (lead) => {
         const stage = getStage(lead.industry, lead.stage_code);
         const tone = stage ? pipelineCategoryTone(stage.category) : "neutral";
@@ -429,21 +435,21 @@ export default function LeadsPage() {
     {
       key: "source",
       header: "Source",
-      render: (lead) => lead.source ?? "—"
+      width: "9%",
+      render: (lead) => <span className="cell-truncate" title={lead.source ?? ""}>{lead.source ?? "—"}</span>
     },
     {
       key: "interest",
       header: industryInterestLabel((industryFilter || user?.business_type || "education") as LeadIndustry),
+      width: "12%",
       render: (lead) => (
-        <span title={lead.interest ?? ""}>
-          <span className="muted text-xs">{industryInterestLabel(lead.industry)}: </span>
-          {lead.interest ?? "—"}
-        </span>
+        <span className="cell-truncate" title={lead.interest ?? ""}>{lead.interest ?? "—"}</span>
       )
     },
     {
       key: "owner",
       header: "Owner",
+      width: "12%",
       render: (lead) =>
         canManage ? (
           <select
@@ -468,32 +474,27 @@ export default function LeadsPage() {
         )
     },
     {
-      key: "last_comment",
-      header: "Last Comment",
-      render: (lead) =>
-        lead.last_comment_preview ? (
-          <span title={lead.last_comment_preview} className="text-truncate">
-            {lead.last_comment_preview}
-            <span className="muted text-xs"> · {formatRelative(lead.last_comment_at)}</span>
-          </span>
-        ) : (
-          <span className="muted">—</span>
-        )
-    },
-    {
       key: "value",
       header: "Value / Budget",
       align: "right",
+      width: "10%",
       render: (lead) => {
-        // Real estate has no single Value — show the Budget min–max range.
+        // Real estate has no single Value — show the Budget min–max range,
+        // stacked (min over max) so it never clips in a narrow column.
         if (lead.industry === "real_estate") {
           const cur = lead.currency || "INR";
           const min = lead.budget_min != null ? formatCurrency(lead.budget_min, cur) : null;
           const max = lead.budget_max != null ? formatCurrency(lead.budget_max, cur) : null;
           if (!min && !max) return <span className="muted">—</span>;
-          return <span>{min ?? "—"} – {max ?? "—"}</span>;
+          return (
+            <span className="cell-nowrap" style={{ lineHeight: 1.3 }}>
+              {min ?? "—"}
+              <br />
+              <span className="muted">{max ?? "—"}</span>
+            </span>
+          );
         }
-        return formatCurrency(lead.value, lead.currency || "INR");
+        return <span className="cell-nowrap">{formatCurrency(lead.value, lead.currency || "INR")}</span>;
       }
     }
   ];

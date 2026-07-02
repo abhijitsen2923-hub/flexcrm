@@ -666,11 +666,21 @@ p {
   box-shadow: var(--shadow-sm);
 }
 
-/* Leads list has many columns (owner select, budget, last comment, …). Give the
-   table a min-width so cells keep their natural size and the wrap scrolls
-   horizontally instead of crushing/clipping the rightmost columns. */
+/* Leads list is tuned to fit one screen without horizontal scroll: fluid table,
+   truncating text cells, and no-wrap numeric cells so budgets never clip. */
 .table-wrap--leads .table {
-  min-width: 1180px;
+  table-layout: fixed;
+  width: 100%;
+}
+.table-wrap--leads .cell-truncate {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.table-wrap--leads .cell-nowrap {
+  white-space: nowrap;
 }
 
 /* ============================================================ Pagination */
