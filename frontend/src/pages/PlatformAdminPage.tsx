@@ -134,6 +134,8 @@ function ModuleGroup({
 export function PlatformAdminPage() {
   const { user } = useAuth();
   const toast = useToast();
+  const [repairing, setRepairing] = useState(false);
+  const [repairConfirm, setRepairConfirm] = useState(false);
   const [orgs, setOrgs] = useState<Organization[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState<Record<string, boolean>>({});
@@ -265,6 +267,29 @@ export function PlatformAdminPage() {
     }
   };
 
+  const handleRepair = async () => {
+    setRepairing(true);
+    try {
+      const { results } = await adminService.repairTenantEnums(false);
+      const fixed = results.filter((r) => (r.repaired?.length ?? 0) > 0);
+      const errored = results.filter((r) => r.error);
+      const cols = fixed.reduce((n, r) => n + (r.repaired?.length ?? 0), 0);
+      if (errored.length) {
+        toast.error("Repair finished with errors", `${errored.length} tenant(s) failed — check server logs.`);
+      } else if (cols > 0) {
+        toast.success("Schemas repaired", `Fixed ${cols} column(s) across ${fixed.length} tenant(s).`);
+      } else {
+        toast.success("Nothing to repair", "All tenant schemas are already correct.");
+      }
+      await load(includeArchived);
+    } catch (err) {
+      toast.error("Repair failed", extractErrorMessage(err));
+    } finally {
+      setRepairing(false);
+      setRepairConfirm(false);
+    }
+  };
+
   return (
     <>
       <div className="page-header">
@@ -283,6 +308,15 @@ export function PlatformAdminPage() {
           </label>
           <Button variant="secondary" size="sm" icon={<RefreshCw size={14} />} onClick={() => void load(includeArchived)}>
             Refresh
+          </Button>
+          <Button
+            variant="secondary"
+            size="sm"
+            loading={repairing}
+            onClick={() => setRepairConfirm(true)}
+            title="Fix older tenant database schemas (enum types). Safe to run anytime."
+          >
+            Repair schemas
           </Button>
         </div>
       </div>
@@ -398,6 +432,17 @@ export function PlatformAdminPage() {
         loading={confirmOrg ? !!saving[confirmOrg.id] : false}
         onCancel={() => setConfirmOrg(null)}
         onConfirm={() => void handleArchiveConfirmed()}
+      />
+
+      <ConfirmDialog
+        open={repairConfirm}
+        title="Repair tenant schemas"
+        description="Fixes older tenants whose database enum types were created incorrectly (the cause of create/dashboard errors). Idempotent and safe to run anytime — tenants already correct are skipped."
+        confirmLabel="Run repair"
+        cancelLabel="Cancel"
+        loading={repairing}
+        onCancel={() => setRepairConfirm(false)}
+        onConfirm={() => void handleRepair()}
       />
 
       <Modal

@@ -44,4 +44,22 @@ export const adminService = {
   async purgeOrganization(orgId: string): Promise<void> {
     await apiClient.delete(`/admin/organizations/${orgId}/permanent`);
   },
+
+  // Idempotent repair of tenant schemas whose enum columns are tenant-local
+  // shadows of the public enum types (older tenants). Returns a per-tenant report.
+  async repairTenantEnums(dryRun = false): Promise<{ dry_run: boolean; results: TenantRepairResult[] }> {
+    const { data } = await apiClient.post("/admin/tenant-enums/repair", null, {
+      params: { dry_run: dryRun },
+    });
+    return data;
+  },
 };
+
+export interface TenantRepairResult {
+  org?: string;
+  schema?: string;
+  repaired?: string[];
+  dropped_types?: string[];
+  skipped?: string[] | string;
+  error?: string;
+}
