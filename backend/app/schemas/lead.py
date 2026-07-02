@@ -105,6 +105,10 @@ class LeadRead(ORMModel):
     updated_at: datetime
     customer: CustomerCompact | None = None
     assigned_to: UserSummary | None = None
+    # True when another active lead in the tenant shares this lead's email or
+    # phone — surfaced as a "!" marker in the list so duplicates are visible.
+    # Computed at list time (not stored); defaults False for single-lead reads.
+    is_duplicate: bool = False
 
 
 class LeadDuplicate(ORMModel):

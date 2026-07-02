@@ -282,6 +282,9 @@ export interface Lead {
   updated_at: string;
   customer?: Pick<Customer, "id" | "company_name" | "contact_name" | "email" | "status"> | null;
   assigned_to?: UserSummary | null;
+  // Set by the list endpoint when another active lead shares this lead's email
+  // or phone. Drives the "!" duplicate marker in the UI.
+  is_duplicate?: boolean;
 }
 
 export interface Deal {

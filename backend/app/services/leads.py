@@ -48,7 +48,7 @@ class LeadService(ServiceBase):
 
     async def list_leads(self, pagination: PaginationParams, filters: LeadFilterParams):
         sort_by = validate_sort_field(filters.sort_by, self.allowed_sort_fields)
-        return await self.repository.list(
+        items, total = await self.repository.list(
             pagination=pagination,
             filters={
                 "customer_id": filters.customer_id,
@@ -63,6 +63,18 @@ class LeadService(ServiceBase):
             sort_order=filters.sort_order,
             options=self.repository.default_options,
         )
+        # Flag leads that share an email/phone with another active lead so the
+        # UI can show a duplicate ("!") marker. Two aggregate queries, then a
+        # transient attribute LeadRead reads via from_attributes.
+        dup_emails, dup_phones = await self.repository.duplicate_contact_keys()
+        for lead in items:
+            email_key = lead.contact_email.lower() if lead.contact_email else None
+            phone_key = re.sub(r"\D", "", lead.contact_phone) if lead.contact_phone else ""
+            lead.is_duplicate = bool(
+                (email_key and email_key in dup_emails)
+                or (phone_key and phone_key in dup_phones)
+            )
+        return items, total
 
     async def get_lead(self, lead_id: UUID):
         lead = await self.repository.get(lead_id, options=self.repository.default_options)

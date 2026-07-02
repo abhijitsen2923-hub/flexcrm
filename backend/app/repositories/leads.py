@@ -43,6 +43,36 @@ class LeadRepository(BaseRepository[Lead]):
         )
         return list(rows.scalars().all())
 
+    async def duplicate_contact_keys(self) -> tuple[set[str], set[str]]:
+        """Normalized email + digits-only phone values shared by >1 active lead.
+
+        Two tenant-scoped aggregate queries (independent of page size) used to
+        flag which leads in a list page are duplicates. Blank/empty keys are
+        excluded so leads without an email or phone are never flagged.
+        """
+        email_expr = func.lower(Lead.contact_email)
+        email_rows = await self.session.execute(
+            select(email_expr)
+            .where(Lead.is_deleted.is_(False), Lead.contact_email.is_not(None))
+            .group_by(email_expr)
+            .having(func.count() > 1)
+        )
+        phone_expr = func.regexp_replace(Lead.contact_phone, r"[^0-9]", "", "g")
+        phone_rows = await self.session.execute(
+            select(phone_expr)
+            .where(
+                Lead.is_deleted.is_(False),
+                Lead.contact_phone.is_not(None),
+                phone_expr != "",
+            )
+            .group_by(phone_expr)
+            .having(func.count() > 1)
+        )
+        return (
+            {r for (r,) in email_rows if r},
+            {r for (r,) in phone_rows if r},
+        )
+
     async def next_lead_number(self) -> int:
         # The DB has a unique constraint on lead_number; this MAX+1 lookup is
         # safe for a single-writer dev/demo workload. Replace with a Postgres
