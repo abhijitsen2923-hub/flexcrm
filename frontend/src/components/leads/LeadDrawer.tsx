@@ -70,11 +70,10 @@ export function LeadDrawer({ open, lead, onClose, onTransitionRequest, refreshKe
   const interestLabel = industryInterestLabel(lead.industry);
 
   return createPortal(
-    <div className="modal-backdrop" role="dialog" aria-modal="true" onClick={onClose}>
-      <div
-        className="drawer"
-        onClick={(event) => event.stopPropagation()}
-      >
+    // No backdrop-tap close: the drawer holds editable content (comments,
+    // transitions) — close only via the ✕ button.
+    <div className="modal-backdrop" role="dialog" aria-modal="true">
+      <div className="drawer">
         <header className="drawer__header">
           <div>
             <div className="muted text-xs">Lead #{lead.lead_number}</div>

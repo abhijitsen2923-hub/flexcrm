@@ -36,11 +36,10 @@ export function Modal({ open, title, footer, onClose, size = "md", children }: M
   }
 
   return createPortal(
-    <div className="modal-backdrop" role="dialog" aria-modal="true" onClick={onClose}>
-      <div
-        className={["modal", size === "lg" ? "modal--lg" : null].filter(Boolean).join(" ")}
-        onClick={(event) => event.stopPropagation()}
-      >
+    // Intentionally NO onClick-to-close on the backdrop: form modals must not be
+    // dismissed by an accidental tap outside (data loss). Close via ✕ / Cancel / Esc.
+    <div className="modal-backdrop" role="dialog" aria-modal="true">
+      <div className={["modal", size === "lg" ? "modal--lg" : null].filter(Boolean).join(" ")}>
         {title !== undefined && (
           <header className="modal__header">
             <h2 style={{ fontSize: "1.05rem" }}>{title}</h2>
