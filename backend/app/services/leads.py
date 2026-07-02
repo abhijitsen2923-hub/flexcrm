@@ -156,6 +156,14 @@ class LeadService(ServiceBase):
                 "source": payload.source,
                 "interest": payload.interest,
                 "assigned_to_id": payload.assigned_to_id,
+                # Real-estate fields were previously dropped on create — persist
+                # them so Budget (which replaces Value for real estate) is saved.
+                "property_type": payload.property_type,
+                "budget_min": payload.budget_min,
+                "budget_max": payload.budget_max,
+                "preferred_location": payload.preferred_location,
+                "possession_preference": payload.possession_preference,
+                "notes": payload.notes,
                 "created_by_id": actor_id,
                 "updated_by_id": actor_id,
             }
