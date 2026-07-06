@@ -671,6 +671,21 @@ p {
 .table-wrap--leads .table {
   table-layout: fixed;
   width: 100%;
+  font-size: 0.82rem;
+}
+/* Stage + Owner chips are <select>s that carry .stage-select's 200px min-width.
+   In a fixed-layout table that floor overflows the cell and overlaps the next
+   column, so pin them to their cell width (label truncates before the chevron). */
+.table-wrap--leads .stage-select {
+  min-width: 0;
+  max-width: 100%;
+  width: 100%;
+}
+/* Belt-and-suspenders: clip any residual overflow so nothing bleeds across
+   columns. Native <select> popups are unaffected by cell overflow. */
+.table-wrap--leads .table td,
+.table-wrap--leads .table th {
+  overflow: hidden;
 }
 .table-wrap--leads .cell-truncate {
   display: block;

@@ -365,7 +365,7 @@ export default function LeadsPage() {
     {
       key: "lead",
       header: "Lead",
-      width: "16%",
+      width: "15%",
       render: (lead) => (
         <button type="button" className="link" onClick={() => setDrawerLead(lead)} style={{ textAlign: "left", maxWidth: "100%" }}>
           <div style={{ fontWeight: 600, display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
@@ -379,13 +379,13 @@ export default function LeadsPage() {
     {
       key: "lead_number",
       header: "Lead #",
-      width: "7%",
+      width: "6%",
       render: (lead) => <span className="muted">{lead.lead_number}</span>
     },
     {
       key: "email",
       header: "Email",
-      width: "18%",
+      width: "16%",
       render: (lead) => (
         <span className="text-sm cell-truncate" title={lead.contact_email ?? lead.customer?.email ?? ""}>
           {lead.contact_email ?? lead.customer?.email ?? "—"}
@@ -395,7 +395,7 @@ export default function LeadsPage() {
     {
       key: "stage",
       header: "Stage",
-      width: "16%",
+      width: "18%",
       render: (lead) => {
         const stage = getStage(lead.industry, lead.stage_code);
         const tone = stage ? pipelineCategoryTone(stage.category) : "neutral";
@@ -449,7 +449,7 @@ export default function LeadsPage() {
     {
       key: "owner",
       header: "Owner",
-      width: "12%",
+      width: "13%",
       render: (lead) =>
         canManage ? (
           <select
@@ -477,7 +477,7 @@ export default function LeadsPage() {
       key: "value",
       header: "Value / Budget",
       align: "right",
-      width: "10%",
+      width: "12%",
       render: (lead) => {
         // Real estate has no single Value — show the Budget min–max range,
         // stacked (min over max) so it never clips in a narrow column.
