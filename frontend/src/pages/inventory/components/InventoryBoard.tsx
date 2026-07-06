@@ -1,15 +1,23 @@
 import { useState } from "react";
 import { useRealtimeEvent } from "../../../realtime";
 import { formatInr } from "../../../utils/format";
-import type { Project, Tower, Unit, UnitStatus } from "../../../types/realestate";
+import type { Project, Tower, Unit, UnitStatus, UnitType } from "../../../types/realestate";
 import { UnitDetailPanel } from "./UnitDetailPanel";
 import "./InventoryBoard.css";
 
 const STATUS_LABEL: Record<UnitStatus, string> = {
   available: "Available",
-  reserved: "Reserved",
+  hold: "Hold",
   booked: "Booked",
+  registered: "Registered",
   sold: "Sold",
+};
+
+const UNIT_TYPE_LABEL: Record<UnitType, string> = {
+  residential: "Residential",
+  parking: "Parking",
+  shop: "Shop",
+  godown: "Godown",
 };
 
 interface UnitCellProps {
@@ -22,8 +30,8 @@ function UnitCell({ unit, onClick }: UnitCellProps) {
     <button
       className={`inv-cell inv-cell--${unit.status}`}
       onClick={onClick}
-      title={`Unit ${unit.unitNumber} · ${formatInr(unit.basePrice)} · ${STATUS_LABEL[unit.status]}`}
-      aria-label={`Unit ${unit.unitNumber}, ${STATUS_LABEL[unit.status]}`}
+      title={`Unit ${unit.unitNumber} · ${UNIT_TYPE_LABEL[unit.unitType]} · ${formatInr(unit.basePrice)} · ${STATUS_LABEL[unit.status]}`}
+      aria-label={`Unit ${unit.unitNumber}, ${UNIT_TYPE_LABEL[unit.unitType]}, ${STATUS_LABEL[unit.status]}`}
     >
       {unit.unitNumber}
     </button>
@@ -53,16 +61,19 @@ interface TowerGridProps {
   tower: Tower;
   projectName: string;
   filterFloor: number | null;
+  typeFilter: UnitType | "all";
   onUnitClick: (unit: Unit & { towerName: string; projectName: string }) => void;
 }
 
-function TowerGrid({ tower, projectName, filterFloor, onUnitClick }: TowerGridProps) {
+function TowerGrid({ tower, projectName, filterFloor, typeFilter, onUnitClick }: TowerGridProps) {
   const floorMap = new Map<number, Unit[]>();
   for (const unit of tower.units) {
+    if (typeFilter !== "all" && unit.unitType !== typeFilter) continue;
     const existing = floorMap.get(unit.floor) ?? [];
     existing.push(unit);
     floorMap.set(unit.floor, existing);
   }
+  if (floorMap.size === 0) return null;
   const floors = Array.from(floorMap.keys())
     .filter((f) => filterFloor == null || f === filterFloor)
     .sort((a, b) => b - a);
@@ -94,6 +105,7 @@ interface Props {
 
 export function InventoryBoard({ projects, onStatusChange, onRefresh, filterFloor = null, onStartBooking }: Props) {
   const [selectedUnit, setSelectedUnit] = useState<(Unit & { towerName: string; projectName: string }) | null>(null);
+  const [typeFilter, setTypeFilter] = useState<UnitType | "all">("all");
 
   useRealtimeEvent((event) => {
     if (event.event === "unit.status_changed") {
@@ -117,6 +129,15 @@ export function InventoryBoard({ projects, onStatusChange, onRefresh, filterFloo
             {STATUS_LABEL[s]}
           </span>
         ))}
+        <label className="inv-type-filter">
+          Type:{" "}
+          <select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value as UnitType | "all")}>
+            <option value="all">All</option>
+            {(Object.keys(UNIT_TYPE_LABEL) as UnitType[]).map((t) => (
+              <option key={t} value={t}>{UNIT_TYPE_LABEL[t]}</option>
+            ))}
+          </select>
+        </label>
       </div>
 
       {projects.map((project) => (
@@ -132,6 +153,7 @@ export function InventoryBoard({ projects, onStatusChange, onRefresh, filterFloo
                 tower={tower}
                 projectName={project.name}
                 filterFloor={filterFloor}
+                typeFilter={typeFilter}
                 onUnitClick={setSelectedUnit}
               />
             ))}

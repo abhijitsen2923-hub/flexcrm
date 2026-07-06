@@ -37,10 +37,27 @@
   border-radius: var(--radius-sm);
   display: inline-block;
 }
-.inv-legend__item--available::before { background: var(--status-available); }
-.inv-legend__item--reserved::before  { background: var(--status-reserved); }
-.inv-legend__item--booked::before    { background: var(--status-booked); }
-.inv-legend__item--sold::before      { background: var(--status-sold); }
+.inv-legend__item--available::before  { background: var(--status-available); }
+.inv-legend__item--hold::before       { background: var(--status-hold); }
+.inv-legend__item--booked::before     { background: var(--status-booked); }
+.inv-legend__item--registered::before { background: var(--status-registered); }
+.inv-legend__item--sold::before       { background: var(--status-sold); }
+
+.inv-type-filter {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: 0.75rem;
+  color: var(--color-text-muted);
+}
+.inv-type-filter select {
+  padding: 0.2rem 0.4rem;
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  font-size: 0.75rem;
+}
 
 /* Project section */
 .inv-project {
@@ -128,10 +145,11 @@
 .inv-cell:hover { opacity: 0.85; transform: scale(1.08); }
 .inv-cell:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
 
-.inv-cell--available { background: var(--status-available); }
-.inv-cell--reserved  { background: var(--status-reserved); }
-.inv-cell--booked    { background: var(--status-booked); }
-.inv-cell--sold      { background: var(--status-sold); }
+.inv-cell--available  { background: var(--status-available); }
+.inv-cell--hold       { background: var(--status-hold); }
+.inv-cell--booked     { background: var(--status-booked); }
+.inv-cell--registered { background: var(--status-registered); }
+.inv-cell--sold       { background: var(--status-sold); }
 
 /* Backdrop for the panel */
 .drawer-backdrop {

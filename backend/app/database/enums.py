@@ -108,9 +108,17 @@ class LeadIndustry(StrEnum):
 
 class UnitStatus(StrEnum):
     available = "available"
-    reserved = "reserved"
+    hold = "hold"
     booked = "booked"
+    registered = "registered"
     sold = "sold"
+
+
+class UnitType(StrEnum):
+    residential = "residential"
+    parking = "parking"
+    shop = "shop"
+    godown = "godown"
 
 
 class BookingStatus(StrEnum):

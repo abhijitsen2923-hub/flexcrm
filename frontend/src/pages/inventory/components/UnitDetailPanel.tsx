@@ -3,21 +3,30 @@ import { X } from "lucide-react";
 import { Badge, Button, SelectField } from "../../../components";
 import { usePermissions } from "../../../hooks/usePermissions";
 import { formatInr } from "../../../utils/format";
-import type { Unit, UnitStatus } from "../../../types/realestate";
+import type { Unit, UnitStatus, UnitType } from "../../../types/realestate";
 import "./UnitDetailPanel.css";
 
 const STATUS_OPTIONS: { value: UnitStatus; label: string }[] = [
   { value: "available", label: "Available" },
-  { value: "reserved", label: "Reserved" },
+  { value: "hold", label: "Hold" },
   { value: "booked", label: "Booked" },
+  { value: "registered", label: "Registered" },
   { value: "sold", label: "Sold" },
 ];
 
-const STATUS_TONE: Record<UnitStatus, "success" | "warning" | "primary" | "neutral"> = {
+const STATUS_TONE: Record<UnitStatus, "success" | "warning" | "primary" | "info" | "neutral"> = {
   available: "success",
-  reserved: "warning",
+  hold: "warning",
   booked: "primary",
+  registered: "info",
   sold: "neutral",
+};
+
+const UNIT_TYPE_LABEL: Record<UnitType, string> = {
+  residential: "Residential",
+  parking: "Parking",
+  shop: "Shop",
+  godown: "Godown",
 };
 
 interface Props {
@@ -69,6 +78,10 @@ export function UnitDetailPanel({ unit, onClose, onStatusChange, onStartBooking 
         </div>
 
         <div className="unit-panel__grid">
+          <div className="unit-panel__field">
+            <span className="unit-panel__label">Type</span>
+            <span>{UNIT_TYPE_LABEL[unit.unitType]}</span>
+          </div>
           <div className="unit-panel__field">
             <span className="unit-panel__label">Area</span>
             <span>{unit.area} {unit.areaUnit}</span>

@@ -60,13 +60,15 @@
   --sidebar-width: 248px;
   --topbar-height: 62px;
 
-  /* Inventory unit lifecycle status */
+  /* Inventory unit lifecycle status: available · hold · booked · registered · sold */
   --status-available: #16a34a;
   --status-available-soft: #e7f6ec;
-  --status-reserved: #f59e0b;
-  --status-reserved-soft: #fef3e2;
+  --status-hold: #f59e0b;
+  --status-hold-soft: #fef3e2;
   --status-booked: #2563eb;
   --status-booked-soft: #e8eefd;
+  --status-registered: #7c3aed;
+  --status-registered-soft: #f1e9fe;
   --status-sold: #6b7280;
   --status-sold-soft: #eef1f5;
 

@@ -1,5 +1,5 @@
 import { apiClient } from "./http";
-import type { Project, Tower, Unit, UnitStatus } from "../types/realestate";
+import type { Project, Tower, Unit, UnitStatus, UnitType } from "../types/realestate";
 
 // The API speaks snake_case and returns no computed inventory counts / media.
 // The app models are camelCase with totalUnits/availableUnits/media derived from
@@ -10,6 +10,7 @@ interface ApiUnit {
   tower_id: string;
   floor: number;
   unit_number: string;
+  unit_type: string;
   area: number | string;
   area_unit: string;
   facing: string | null;
@@ -46,6 +47,7 @@ function mapUnit(u: ApiUnit): Unit {
     towerId: u.tower_id,
     floor: u.floor,
     unitNumber: u.unit_number,
+    unitType: (u.unit_type as Unit["unitType"]) ?? "residential",
     area: Number(u.area),
     areaUnit: u.area_unit as Unit["areaUnit"],
     facing: u.facing as Unit["facing"],
@@ -93,6 +95,21 @@ export interface ProjectCreatePayload {
   rera_number?: string | null;
 }
 
+export interface TowerCreatePayload {
+  name: string;
+  total_floors: number;
+}
+
+export interface UnitBatchPayload {
+  unit_type: UnitType;
+  floors: { floor: number; count: number }[];
+  area: number;
+  base_price: number;
+  area_unit?: string;
+  facing?: string | null;
+  unit_prefix?: string | null;
+}
+
 export const inventoryService = {
   listProjects(): Promise<Project[]> {
     return apiClient.get<ApiProject[]>("/inventory/projects").then((r) => r.data.map(mapProject));
@@ -104,6 +121,18 @@ export const inventoryService = {
 
   createProject(payload: ProjectCreatePayload): Promise<Project> {
     return apiClient.post<ApiProject>("/inventory/projects", payload).then((r) => mapProject(r.data));
+  },
+
+  createTower(projectId: string, payload: TowerCreatePayload): Promise<Tower> {
+    return apiClient
+      .post<ApiTower>(`/inventory/projects/${projectId}/towers`, payload)
+      .then((r) => mapTower(r.data));
+  },
+
+  createUnitsBatch(towerId: string, payload: UnitBatchPayload): Promise<Unit[]> {
+    return apiClient
+      .post<ApiUnit[]>(`/inventory/towers/${towerId}/units/batch`, payload)
+      .then((r) => r.data.map(mapUnit));
   },
 
   updateUnitStatus(unitId: string, status: UnitStatus): Promise<Unit> {

@@ -1,4 +1,5 @@
-export type UnitStatus = "available" | "reserved" | "booked" | "sold";
+export type UnitStatus = "available" | "hold" | "booked" | "registered" | "sold";
+export type UnitType = "residential" | "parking" | "shop" | "godown";
 export type UnitFacing = "north" | "south" | "east" | "west" | "north_east" | "north_west" | "south_east" | "south_west";
 export type SiteVisitFeedback = "hot" | "warm" | "cold";
 export type BookingStep = 1 | 2 | 3 | 4;
@@ -12,6 +13,7 @@ export interface Unit {
   towerId: string;
   floor: number;
   unitNumber: string;
+  unitType: UnitType;
   area: number;
   areaUnit: "sqft" | "sqmt";
   facing: UnitFacing | null;

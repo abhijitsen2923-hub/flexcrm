@@ -9,6 +9,7 @@ from sqlalchemy.orm import selectinload
 from app.api.deps import require_permissions
 from app.core.exceptions import NotFoundError
 from app.core.permissions import PermissionCode
+from app.database.enums import UnitStatus, UnitType
 from app.database.session import get_db_session
 from app.real_estate.models import (
     Booking,
@@ -34,6 +35,9 @@ from app.real_estate.schemas import (
     SiteVisitCreate,
     SiteVisitRead,
     SiteVisitUpdate,
+    TowerCreate,
+    TowerRead,
+    UnitBatchCreate,
     UnitRead,
     UnitStatusUpdate,
 )
@@ -89,6 +93,83 @@ async def get_project(
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
     return project
+
+
+# ---------------------------------------------------------------------------
+# Inventory — towers + units (creation)
+# ---------------------------------------------------------------------------
+
+# Default unit-number prefix per type when the caller doesn't supply one.
+_TYPE_PREFIX = {
+    UnitType.residential: "R",
+    UnitType.parking: "P",
+    UnitType.shop: "S",
+    UnitType.godown: "G",
+}
+
+
+@router.post(
+    "/inventory/projects/{project_id}/towers",
+    response_model=TowerRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_tower(
+    project_id: UUID,
+    payload: TowerCreate,
+    _: object = Depends(require_permissions(PermissionCode.LEAD_MANAGE)),
+    session: AsyncSession = Depends(get_db_session),
+):
+    project = await session.get(Project, project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    tower = Tower(project_id=project_id, name=payload.name, total_floors=payload.total_floors)
+    session.add(tower)
+    await session.commit()
+    # Re-load with its (empty) units so TowerRead serializes without a lazy load.
+    stmt = select(Tower).where(Tower.id == tower.id).options(selectinload(Tower.units))
+    return (await session.execute(stmt)).scalar_one()
+
+
+@router.post(
+    "/inventory/towers/{tower_id}/units/batch",
+    response_model=list[UnitRead],
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_units_batch(
+    tower_id: UUID,
+    payload: UnitBatchCreate,
+    _: object = Depends(require_permissions(PermissionCode.LEAD_MANAGE)),
+    session: AsyncSession = Depends(get_db_session),
+):
+    tower = await session.get(Tower, tower_id)
+    if not tower:
+        raise HTTPException(status_code=404, detail="Tower not found")
+
+    prefix = (payload.unit_prefix or _TYPE_PREFIX.get(payload.unit_type, "U")).strip()
+    for fu in payload.floors:
+        for n in range(1, fu.count + 1):
+            session.add(
+                Unit(
+                    project_id=tower.project_id,
+                    tower_id=tower.id,
+                    floor=fu.floor,
+                    unit_number=f"{prefix}{fu.floor}{n:02d}",
+                    unit_type=payload.unit_type.value,
+                    area=payload.area,
+                    base_price=payload.base_price,
+                    area_unit=payload.area_unit,
+                    facing=payload.facing,
+                    status=UnitStatus.available,
+                )
+            )
+    await session.commit()
+    # Return the tower's units freshly loaded (avoids per-object refresh after commit).
+    stmt = (
+        select(Unit)
+        .where(Unit.tower_id == tower_id)
+        .order_by(Unit.floor.desc(), Unit.unit_number)
+    )
+    return list((await session.execute(stmt)).scalars().all())
 
 
 @router.get("/inventory/units/{unit_id}", response_model=UnitRead)

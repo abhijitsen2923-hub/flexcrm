@@ -5,7 +5,7 @@ from uuid import UUID
 
 from pydantic import Field
 
-from app.database.enums import BookingStatus, SiteVisitFeedback, UnitStatus
+from app.database.enums import BookingStatus, SiteVisitFeedback, UnitStatus, UnitType
 from app.schemas.common import ORMModel
 
 
@@ -15,6 +15,7 @@ class UnitRead(ORMModel):
     tower_id: UUID
     floor: int
     unit_number: str
+    unit_type: str = "residential"
     area: Decimal
     area_unit: str
     facing: str | None = None
@@ -60,6 +61,29 @@ class ProjectCreate(ORMModel):
     location: str = Field(min_length=1, max_length=255)
     city: str = Field(min_length=1, max_length=100)
     rera_number: str | None = Field(default=None, max_length=64)
+
+
+class TowerCreate(ORMModel):
+    name: str = Field(min_length=1, max_length=100)
+    total_floors: int = Field(ge=1, le=200)
+
+
+class FloorUnits(ORMModel):
+    """How many units to create on one floor."""
+    floor: int = Field(ge=0)
+    count: int = Field(ge=1, le=200)
+
+
+class UnitBatchCreate(ORMModel):
+    """Create a batch of same-type units across floors. The client expands a
+    'same on every floor' choice into the explicit `floors` list."""
+    unit_type: UnitType = UnitType.residential
+    floors: list[FloorUnits] = Field(min_length=1)
+    area: Decimal = Field(gt=0)
+    base_price: Decimal = Field(ge=0)
+    area_unit: str = Field(default="sqft", max_length=20)
+    facing: str | None = Field(default=None, max_length=50)
+    unit_prefix: str | None = Field(default=None, max_length=8)
 
 
 class SiteVisitRead(ORMModel):
