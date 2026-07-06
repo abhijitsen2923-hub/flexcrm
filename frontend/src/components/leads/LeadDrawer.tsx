@@ -27,6 +27,7 @@ export function LeadDrawer({ open, lead, onClose, onTransitionRequest, refreshKe
   const [tab, setTab] = useState<TabKey>("overview");
   const [history, setHistory] = useState<StageTransition[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyError, setHistoryError] = useState(false);
 
   // Escape key + lock body scroll while drawer is open.
   useEffect(() => {
@@ -50,10 +51,13 @@ export function LeadDrawer({ open, lead, onClose, onTransitionRequest, refreshKe
     }
     let cancelled = false;
     setHistoryLoading(true);
+    setHistoryError(false);
     void (async () => {
       try {
         const rows = await leadsService.transitions(lead.id);
         if (!cancelled) setHistory(rows);
+      } catch {
+        if (!cancelled) setHistoryError(true);
       } finally {
         if (!cancelled) setHistoryLoading(false);
       }
@@ -175,6 +179,8 @@ export function LeadDrawer({ open, lead, onClose, onTransitionRequest, refreshKe
             <div className="stack">
               {historyLoading && history.length === 0 ? (
                 <LoadingBlock label="Loading history…" />
+              ) : historyError ? (
+                <EmptyState title="Couldn't load stage history" description="Please reopen the lead or try again." />
               ) : history.length === 0 ? (
                 <EmptyState title="No transitions yet" description="Move this lead to start a history trail." />
               ) : (
