@@ -171,6 +171,9 @@ export default function LeadsPage() {
   const canManage = hasPerm("LEAD_MANAGE");
   const canImport = hasPerm("LEAD_IMPORT");
   const canExport = hasPerm("EXPORT_DATA");
+  // Assigning a lead owner is an admin/manager capability: it needs to see the
+  // team, so gate it on USER_VIEW (owner/admin/manager have it; sales reps don't).
+  const canAssign = hasPerm("USER_VIEW");
   const toast = useToast();
 
   // Auto-refresh when any lead.* envelope arrives — covers create, update,
@@ -202,14 +205,15 @@ export default function LeadsPage() {
   // Users in this workspace, for the inline owner-assign dropdown.
   const [assignableUsers, setAssignableUsers] = useState<User[]>([]);
   useEffect(() => {
-    if (!canManage) return;
+    if (!canAssign) return;
     let cancelled = false;
+    // page_size is capped at 100 server-side (422 above that).
     void usersService
-      .list({ page_size: 200 })
+      .list({ page_size: 100 })
       .then((res) => { if (!cancelled) setAssignableUsers(res.items); })
-      .catch(() => {});
+      .catch((err) => { if (!cancelled) toast.error("Couldn't load users", extractErrorMessage(err)); });
     return () => { cancelled = true; };
-  }, [canManage]);
+  }, [canAssign]);
 
   async function handleAssign(lead: Lead, userId: string | null) {
     try {
@@ -451,7 +455,7 @@ export default function LeadsPage() {
       header: "Owner",
       width: "13%",
       render: (lead) =>
-        canManage ? (
+        canAssign ? (
           <select
             className="stage-select stage-select--neutral"
             value={lead.assigned_to_id ?? ""}
