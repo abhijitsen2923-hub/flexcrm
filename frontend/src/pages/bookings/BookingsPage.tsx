@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useLocation, useSearchParams } from "react-router-dom";
 import { ClipboardCheck, Plus } from "lucide-react";
 import { Badge, Button, Card, DataTable, EmptyState } from "../../components";
 import type { DataTableColumn } from "../../components";
@@ -53,6 +53,8 @@ const COLUMNS: DataTableColumn<Booking>[] = [
 
 export default function BookingsPage() {
   const [searchParams] = useSearchParams();
+  const location = useLocation();
+  const navState = location.state as { projectName?: string; towerName?: string } | null;
   const preselectedUnitId = searchParams.get("unitId");
   const { bookings, loading, refresh, create } = useBookings();
   const [wizardUnit, setWizardUnit] = useState<
@@ -63,14 +65,13 @@ export default function BookingsPage() {
   useEffect(() => {
     if (!preselectedUnitId) return;
     inventoryService.getUnit(preselectedUnitId).then((unit) => {
-      // Find tower/project name from unit data — in practice the unit endpoint returns enriched data
       setWizardUnit({
         ...unit,
-        towerName: "Tower",
-        projectName: "Project",
+        towerName: navState?.towerName ?? "Tower",
+        projectName: navState?.projectName ?? "Project",
       });
     }).catch(() => {});
-  }, [preselectedUnitId]);
+  }, [preselectedUnitId, navState?.towerName, navState?.projectName]);
 
   if (loading) return <LoadingBlock label="Loading bookings…" />;
 

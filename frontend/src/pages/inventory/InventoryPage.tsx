@@ -32,7 +32,12 @@ export default function InventoryPage() {
   };
 
   const handleStartBooking = (unit: Unit) => {
-    navigate(`/bookings?unitId=${unit.id}`);
+    // The board passes an enriched unit carrying its tower/project names; forward
+    // them via router state so the booking wizard shows real names (not "Tower").
+    const enriched = unit as Unit & { towerName?: string; projectName?: string };
+    navigate(`/bookings?unitId=${unit.id}`, {
+      state: { projectName: enriched.projectName, towerName: enriched.towerName },
+    });
   };
 
   return (

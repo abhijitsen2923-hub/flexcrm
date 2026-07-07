@@ -91,7 +91,7 @@ export function BookingWizard({ unit, onClose, onComplete }: Props) {
     if (!booking) return;
     setSaving(true);
     try {
-      const updated = await bookingsService.advanceStep(booking.id, 4, { scheduledDate });
+      const updated = await bookingsService.advanceStep(booking.id, 4, { scheduled_date: scheduledDate || null });
       toast.success("Booking confirmed!");
       onComplete(updated);
     } catch {
