@@ -14,12 +14,17 @@ interface Props {
   unit: Pick<Unit, "id" | "unitNumber" | "floor" | "area" | "basePrice"> & { towerName: string; projectName: string };
   onClose: () => void;
   onComplete: (booking: Booking) => void;
+  // When resuming an existing (e.g. draft) booking, pass it here — the wizard
+  // opens at its current step instead of creating a new booking.
+  initialBooking?: Booking | null;
 }
 
-export function BookingWizard({ unit, onClose, onComplete }: Props) {
+export function BookingWizard({ unit, onClose, onComplete, initialBooking = null }: Props) {
   const toast = useToast();
-  const [step, setStep] = useState(1);
-  const [booking, setBooking] = useState<Booking | null>(null);
+  const [step, setStep] = useState(
+    initialBooking && initialBooking.step >= 1 && initialBooking.step <= 4 ? initialBooking.step : 1
+  );
+  const [booking, setBooking] = useState<Booking | null>(initialBooking);
   const [saving, setSaving] = useState(false);
   const [pricing, setPricing] = useState<PricingSnapshot | null>(null);
   const [docUrl, setDocUrl] = useState<string | null>(null);
@@ -63,6 +68,11 @@ export function BookingWizard({ unit, onClose, onComplete }: Props) {
   const [scheduledDate, setScheduledDate] = useState("");
 
   const handleCreateBooking = async () => {
+    // Resuming an existing booking — don't create a second one.
+    if (booking) {
+      setStep(2);
+      return;
+    }
     setSaving(true);
     try {
       const created = await bookingsService.create({ unitId: unit.id });
