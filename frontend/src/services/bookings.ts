@@ -84,10 +84,13 @@ export const bookingsService = {
       .then((r) => r.data.url);
   },
 
-  uploadKyc(id: string, file: File, docType: string): Promise<Booking> {
-    const form = new FormData();
-    form.append("file", file);
-    form.append("doc_type", docType);
-    return apiClient.post<ApiBooking>(`/bookings/${id}/kyc`, form).then((r) => mapBooking(r.data));
+  // The /kyc endpoint records a KYC doc (doc_type + file name) and returns the
+  // doc — NOT the booking. Server-side file storage isn't wired yet, so we send
+  // the filename as file_path. Returns void so callers don't mistake the doc for
+  // the booking (which would corrupt booking.id for the next step).
+  uploadKyc(id: string, file: File, docType: string): Promise<void> {
+    return apiClient
+      .post(`/bookings/${id}/kyc`, { doc_type: docType, file_path: file.name })
+      .then(() => undefined);
   },
 };

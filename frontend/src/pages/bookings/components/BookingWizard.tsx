@@ -1,9 +1,11 @@
 import { useRef, useState } from "react";
 import { Button, Modal, TextField, useToast } from "../../../components";
 import { bookingsService } from "../../../services/bookings";
+import { customersService } from "../../../services/customers";
 import { PriceCalculator } from "../../inventory/components/PriceCalculator";
 import { DocumentPreview } from "./DocumentPreview";
 import type { Booking, PricingSnapshot, Unit } from "../../../types/realestate";
+import type { Customer } from "../../../types";
 import "./BookingWizard.css";
 
 const STEPS = ["Unit", "Customer & KYC", "Pricing", "Schedule & Documents"] as const;
@@ -25,9 +27,37 @@ export function BookingWizard({ unit, onClose, onComplete }: Props) {
 
   // Step 2 state
   const [customerId, setCustomerId] = useState("");
+  const [customerName, setCustomerName] = useState("");
+  const [customerQuery, setCustomerQuery] = useState("");
+  const [customerResults, setCustomerResults] = useState<Customer[]>([]);
+  const [searchingCust, setSearchingCust] = useState(false);
   const [kycFile, setKycFile] = useState<File | null>(null);
   const [kycDocType, setKycDocType] = useState<string>("aadhaar");
   const fileRef = useRef<HTMLInputElement>(null);
+
+  async function searchCustomers(q: string) {
+    setCustomerQuery(q);
+    if (q.trim().length < 2) {
+      setCustomerResults([]);
+      return;
+    }
+    setSearchingCust(true);
+    try {
+      const res = await customersService.list({ search: q.trim(), page_size: 8 });
+      setCustomerResults(res.items);
+    } catch {
+      setCustomerResults([]);
+    } finally {
+      setSearchingCust(false);
+    }
+  }
+
+  function selectCustomer(c: Customer) {
+    setCustomerId(c.id);
+    setCustomerName([c.contact_name, c.company_name].filter(Boolean).join(" · "));
+    setCustomerQuery("");
+    setCustomerResults([]);
+  }
 
   // Step 4 state
   const [scheduledDate, setScheduledDate] = useState("");
@@ -49,8 +79,13 @@ export function BookingWizard({ unit, onClose, onComplete }: Props) {
     if (!booking || !kycFile) return;
     setSaving(true);
     try {
-      const updated = await bookingsService.uploadKyc(booking.id, kycFile, kycDocType);
-      setBooking(updated);
+      await bookingsService.uploadKyc(booking.id, kycFile, kycDocType);
+      // Keep the existing booking (the /kyc endpoint returns the doc, not the
+      // booking) — attach the selected customer as we advance.
+      if (customerId) {
+        const updated = await bookingsService.advanceStep(booking.id, 2, { customer_id: customerId });
+        setBooking(updated);
+      }
       setStep(3);
     } catch {
       toast.error("KYC upload failed");
@@ -149,13 +184,64 @@ export function BookingWizard({ unit, onClose, onComplete }: Props) {
           {/* Step 2 — Customer + KYC */}
           {step === 2 && (
             <div className="bw-body">
-              <TextField
-                label="Customer ID or search"
-                placeholder="Enter customer ID…"
-                value={customerId}
-                onChange={(e) => setCustomerId(e.target.value)}
-                hint="Lookup by email or enter customer ID"
-              />
+              {customerId ? (
+                <div className="row row--between" style={{ alignItems: "center", padding: "0.4rem 0" }}>
+                  <span><strong>Customer:</strong> {customerName || "Selected"}</span>
+                  <Button variant="ghost" size="sm" onClick={() => { setCustomerId(""); setCustomerName(""); }}>
+                    Change
+                  </Button>
+                </div>
+              ) : (
+                <div style={{ position: "relative" }}>
+                  <TextField
+                    label="Customer (search by name or email)"
+                    placeholder="Type at least 2 characters…"
+                    value={customerQuery}
+                    onChange={(e) => void searchCustomers(e.target.value)}
+                    hint="Optional — link this booking to a customer"
+                  />
+                  {searchingCust && <p className="muted text-xs">Searching…</p>}
+                  {customerResults.length > 0 && (
+                    <ul
+                      style={{
+                        listStyle: "none",
+                        margin: "0.25rem 0 0",
+                        padding: 0,
+                        border: "1px solid var(--color-border)",
+                        borderRadius: "var(--radius-md)",
+                        maxHeight: 200,
+                        overflowY: "auto",
+                        background: "var(--color-surface)",
+                      }}
+                    >
+                      {customerResults.map((c) => (
+                        <li key={c.id}>
+                          <button
+                            type="button"
+                            onClick={() => selectCustomer(c)}
+                            style={{
+                              display: "block",
+                              width: "100%",
+                              textAlign: "left",
+                              padding: "0.5rem 0.75rem",
+                              border: "none",
+                              background: "none",
+                              cursor: "pointer",
+                            }}
+                          >
+                            <strong>{c.contact_name}</strong>
+                            {c.company_name ? ` · ${c.company_name}` : ""}
+                            {c.email ? <span className="muted text-xs"> · {c.email}</span> : null}
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                  {customerQuery.trim().length >= 2 && !searchingCust && customerResults.length === 0 && (
+                    <p className="muted text-xs">No customers found. Add them in Customers first.</p>
+                  )}
+                </div>
+              )}
               <div className="bw-kyc">
                 <label className="bw-kyc__label">KYC Document</label>
                 <select
