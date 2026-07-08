@@ -48,9 +48,9 @@ export default function RegistrationTrackerPage() {
               <Card key={booking.id}>
                 <div className="tracker-card">
                   <div className="tracker-card__info">
-                    <div className="tracker-card__id">#{booking.id.slice(0, 8)}</div>
+                    <div className="tracker-card__id">{booking.customer?.contactName ?? `#${booking.id.slice(0, 8)}`}</div>
                     <div className="muted text-xs" style={{ marginTop: 2 }}>
-                      {unitLabel(booking.unitId)}
+                      #{booking.id.slice(0, 8)} · {unitLabel(booking.unitId)}
                     </div>
                     <div style={{ marginTop: 4 }}>
                       <Badge tone={isConfirmed ? "success" : booking.status === "cancelled" ? "neutral" : "warning"}>

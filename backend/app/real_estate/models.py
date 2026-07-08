@@ -142,6 +142,8 @@ class Booking(TenantBase, UUIDPrimaryKeyMixin, TimestampMixin, TenantAuditMixin,
     scheduled_date: Mapped[date | None] = mapped_column(Date, nullable=True)
 
     unit: Mapped["Unit"] = relationship("Unit", back_populates="bookings")
+    # Read-only link to the customer for display (name on lists/trackers/docs).
+    customer = relationship("Customer", foreign_keys=[customer_id], viewonly=True)
     kyc_documents: Mapped[list["BookingKycDoc"]] = relationship(
         "BookingKycDoc", back_populates="booking", cascade="all, delete-orphan"
     )

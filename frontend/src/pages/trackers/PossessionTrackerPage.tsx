@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Badge, Button, Card, EmptyState, LoadingBlock, Modal } from "../../components";
 import { useBookings } from "../../hooks/useBookings";
+import { useInventory } from "../../hooks/useInventory";
 import "./PossessionTrackerPage.css";
 
 const CHECKLIST = [
@@ -21,10 +22,22 @@ function makeBlank(): boolean[] {
 
 export default function PossessionTrackerPage() {
   const { bookings, loading } = useBookings();
+  const { projects } = useInventory();
   const [checked, setChecked] = useState<CheckedMap>({});
   const [activeId, setActiveId] = useState<string | null>(null);
 
-  const step4 = bookings.filter((b) => b.step === 4);
+  function unitLabel(unitId: string): string {
+    for (const p of projects) {
+      for (const t of p.towers) {
+        const u = t.units.find((x) => x.id === unitId);
+        if (u) return `${p.name} · ${t.name} · ${u.unitNumber}`;
+      }
+    }
+    return `Unit ${unitId.slice(0, 8)}`;
+  }
+
+  // Confirmed bookings are the ones at the possession/handover stage.
+  const step4 = bookings.filter((b) => b.status === "confirmed" || b.step === 4);
 
   function getList(id: string): boolean[] {
     return checked[id] ?? makeBlank();
@@ -69,9 +82,9 @@ export default function PossessionTrackerPage() {
               <Card key={booking.id}>
                 <div className="possession-card">
                   <div className="possession-card__info">
-                    <div className="possession-card__id">#{booking.id.slice(0, 8)}</div>
+                    <div className="possession-card__id">{booking.customer?.contactName ?? `#${booking.id.slice(0, 8)}`}</div>
                     <div className="muted text-xs" style={{ marginTop: 2 }}>
-                      Unit {booking.unitId.slice(0, 8)}
+                      #{booking.id.slice(0, 8)} · {unitLabel(booking.unitId)}
                     </div>
                   </div>
 

@@ -30,7 +30,7 @@ export default function BookingsPage() {
   const navState = location.state as { projectName?: string; towerName?: string } | null;
   const preselectedUnitId = searchParams.get("unitId");
   const { bookings, loading, refresh } = useBookings();
-  const { projects, updateUnitStatus } = useInventory();
+  const { projects, updateUnitStatus, refresh: refreshInventory } = useInventory();
   const toast = useToast();
   const [wizardUnit, setWizardUnit] = useState<WizardUnit | null>(null);
   const [wizardBooking, setWizardBooking] = useState<Booking | null>(null);
@@ -74,6 +74,21 @@ export default function BookingsPage() {
     }).catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [preselectedUnitId, navState?.towerName, navState?.projectName]);
+
+  // If a deep-linked unit resolved to placeholder names (projects hadn't loaded
+  // yet), patch them once inventory arrives. Guarded against re-render loops.
+  useEffect(() => {
+    setWizardUnit((prev) => {
+      if (!prev || (prev.towerName !== "Tower" && prev.projectName !== "Project")) return prev;
+      const ctx = unitContext(prev.id);
+      if (!ctx) return prev;
+      const towerName = navState?.towerName ?? ctx.towerName;
+      const projectName = navState?.projectName ?? ctx.projectName;
+      if (towerName === prev.towerName && projectName === prev.projectName) return prev;
+      return { ...prev, towerName, projectName };
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projects]);
 
   function pickUnit(u: WizardUnit) {
     setWizardBooking(null);
@@ -128,7 +143,16 @@ export default function BookingsPage() {
   }
 
   const columns: DataTableColumn<Booking>[] = [
-    { key: "id", header: "Booking", render: (b) => <span className="mono">{b.id.slice(0, 8)}…</span> },
+    {
+      key: "id",
+      header: "Booking",
+      render: (b) => (
+        <div>
+          <div style={{ fontWeight: 600 }}>{b.customer?.contactName ?? "—"}</div>
+          <div className="mono muted text-xs">{b.id.slice(0, 8)}…</div>
+        </div>
+      ),
+    },
     {
       key: "unit",
       header: "Unit",
@@ -265,6 +289,9 @@ export default function BookingsPage() {
           onClose={closeWizard}
           onComplete={() => {
             refresh();
+            // Confirm booked the unit server-side — re-fetch inventory so the
+            // staged actions appear and the unit leaves the available picker.
+            void refreshInventory();
             closeWizard();
           }}
         />

@@ -6,6 +6,7 @@ import { PriceCalculator } from "../../inventory/components/PriceCalculator";
 import { DocumentPreview } from "./DocumentPreview";
 import type { Booking, PricingSnapshot, Unit } from "../../../types/realestate";
 import type { Customer } from "../../../types";
+import { extractErrorMessage } from "../../../utils/errors";
 import "./BookingWizard.css";
 
 const STEPS = ["Unit", "Customer & KYC", "Pricing", "Schedule & Documents"] as const;
@@ -21,8 +22,12 @@ interface Props {
 
 export function BookingWizard({ unit, onClose, onComplete, initialBooking = null }: Props) {
   const toast = useToast();
+  // Backend booking.step is the LAST completed panel; resume opens the NEXT one
+  // (clamped to 4) so a KYC-complete booking lands on Pricing, not back on KYC.
   const [step, setStep] = useState(
-    initialBooking && initialBooking.step >= 1 && initialBooking.step <= 4 ? initialBooking.step : 1
+    initialBooking && initialBooking.step >= 1 && initialBooking.step <= 4
+      ? Math.min(initialBooking.step + 1, 4)
+      : 1
   );
   const [booking, setBooking] = useState<Booking | null>(initialBooking);
   const [saving, setSaving] = useState(false);
@@ -133,11 +138,11 @@ export function BookingWizard({ unit, onClose, onComplete, initialBooking = null
     }
     setSaving(true);
     try {
-      // Persist the registration date so it appears on the document. The backend
-      // won't re-confirm an already-confirmed booking (guarded), so this only
-      // updates the date.
+      // Persist the registration date so it appears on the document — WITHOUT
+      // confirming (confirm defaults false, and we stay on the current step so a
+      // preview never books the unit).
       if (booking.scheduledDate !== scheduledDate) {
-        const updated = await bookingsService.advanceStep(booking.id, 4, { scheduled_date: scheduledDate });
+        const updated = await bookingsService.advanceStep(booking.id, booking.step, { scheduled_date: scheduledDate });
         setBooking(updated);
       }
       const { html, title } = await bookingsService.getDocumentHtml(booking.id, docType);
@@ -158,11 +163,16 @@ export function BookingWizard({ unit, onClose, onComplete, initialBooking = null
     }
     setSaving(true);
     try {
-      const updated = await bookingsService.advanceStep(booking.id, 4, { scheduled_date: scheduledDate });
+      // Explicit confirm — this is the only call that sets confirm:true, so only
+      // this books the unit.
+      const updated = await bookingsService.advanceStep(booking.id, 4, {
+        scheduled_date: scheduledDate,
+        confirm: true,
+      });
       toast.success(isConfirmed ? "Registration date saved" : "Booking confirmed!");
       onComplete(updated);
-    } catch {
-      toast.error("Failed to confirm booking");
+    } catch (err) {
+      toast.error("Failed to confirm booking", extractErrorMessage(err));
     } finally {
       setSaving(false);
     }

@@ -1,4 +1,5 @@
 """Customer portal API routes — payments, documents, service requests, referrals."""
+from datetime import date
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -53,7 +54,22 @@ async def get_payments(
         .where(Booking.customer_id == customer.id, Booking.is_deleted.is_(False))
         .order_by(PaymentSchedule.due_date)
     )
-    return list((await session.execute(stmt)).scalars().all())
+    rows = list((await session.execute(stmt)).scalars().all())
+    today = date.today()
+    return [
+        PaymentScheduleEntryOut(
+            id=ps.id,
+            booking_id=ps.booking_id,
+            installment_name=ps.installment_name,
+            due_date=ps.due_date,
+            demand_amount=ps.demand_amount,
+            paid_amount=ps.paid_amount,
+            outstanding=ps.outstanding,
+            # Derived at read time — the stored column is never written.
+            is_overdue=(ps.outstanding > 0 and ps.due_date < today),
+        )
+        for ps in rows
+    ]
 
 
 @router.get("/documents", response_model=list[CustomerDocumentOut])

@@ -1,4 +1,5 @@
 """Real estate API routes — inventory, site visits, bookings."""
+from datetime import date
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -280,6 +281,7 @@ async def collection_ledger(
         .order_by(PaymentSchedule.due_date)
     )
     rows = (await session.execute(stmt)).all()
+    today = date.today()
     return [
         CollectionLedgerEntry(
             payment_schedule_id=ps.id,
@@ -289,7 +291,9 @@ async def collection_ledger(
             demand_amount=ps.demand_amount,
             paid_amount=ps.paid_amount,
             outstanding=ps.outstanding,
-            is_overdue=ps.is_overdue,
+            # Overdue is time-dependent — derive at read time rather than trusting
+            # the stored column (which is written nowhere and stays False).
+            is_overdue=(ps.outstanding > 0 and ps.due_date < today),
             project_name=project_name,
             unit_number=unit_number,
             status=b_status,
@@ -309,6 +313,7 @@ async def list_bookings(
     stmt = (
         select(Booking)
         .options(
+            selectinload(Booking.customer),
             selectinload(Booking.kyc_documents),
             selectinload(Booking.payment_schedules),
         )
@@ -339,7 +344,7 @@ async def create_booking(
     stmt = (
         select(Booking)
         .where(Booking.id == booking.id)
-        .options(selectinload(Booking.kyc_documents), selectinload(Booking.payment_schedules))
+        .options(selectinload(Booking.customer), selectinload(Booking.kyc_documents), selectinload(Booking.payment_schedules))
     )
     return (await session.execute(stmt)).scalar_one()
 
@@ -353,7 +358,7 @@ async def get_booking(
     stmt = (
         select(Booking)
         .where(Booking.id == booking_id, Booking.is_deleted.is_(False))
-        .options(selectinload(Booking.kyc_documents), selectinload(Booking.payment_schedules))
+        .options(selectinload(Booking.customer), selectinload(Booking.kyc_documents), selectinload(Booking.payment_schedules))
     )
     booking = (await session.execute(stmt)).scalar_one_or_none()
     if not booking:
@@ -386,16 +391,24 @@ async def advance_booking_step(
         ps.outstanding = ps.demand_amount - ps.paid_amount
         session.add(ps)
 
-    # Final step confirms the booking and marks the unit as Booked (unless it's
-    # already further along, e.g. registered/sold). Capture ids before commit so
-    # the post-commit broadcast doesn't trigger a lazy load on an expired object.
+    # An EXPLICIT confirm (step 4 + confirm flag) finalizes the booking and marks
+    # the unit Booked. Saving the registration date for a document preview passes
+    # confirm=False and must not confirm/book. Reject confirmation if the unit is
+    # no longer available (prevents overselling the same unit twice). Capture ids
+    # before commit so the post-commit broadcast doesn't lazy-load an expired obj.
     booked_unit: tuple[str, str] | None = None
-    if step == 4 and booking.status != BookingStatus.confirmed:
-        booking.status = BookingStatus.confirmed
+    if step == 4 and payload.confirm and booking.status != BookingStatus.confirmed:
         unit = await session.get(Unit, booking.unit_id)
-        if unit is not None and unit.status in (UnitStatus.available, UnitStatus.hold):
-            unit.status = UnitStatus.booked
-            booked_unit = (str(unit.id), str(unit.project_id))
+        if unit is None:
+            raise HTTPException(status_code=404, detail="Unit not found")
+        if unit.status not in (UnitStatus.available, UnitStatus.hold):
+            raise HTTPException(
+                status_code=409,
+                detail=f"Unit is already {unit.status.value}; it cannot be booked again.",
+            )
+        booking.status = BookingStatus.confirmed
+        unit.status = UnitStatus.booked
+        booked_unit = (str(unit.id), str(unit.project_id))
     await session.commit()
     if booked_unit is not None:
         await realtime_manager.broadcast(
@@ -409,7 +422,7 @@ async def advance_booking_step(
     stmt = (
         select(Booking)
         .where(Booking.id == booking_id)
-        .options(selectinload(Booking.kyc_documents), selectinload(Booking.payment_schedules))
+        .options(selectinload(Booking.customer), selectinload(Booking.kyc_documents), selectinload(Booking.payment_schedules))
     )
     return (await session.execute(stmt)).scalar_one()
 
@@ -429,7 +442,7 @@ async def update_booking_pricing(
     stmt = (
         select(Booking)
         .where(Booking.id == booking_id)
-        .options(selectinload(Booking.kyc_documents), selectinload(Booking.payment_schedules))
+        .options(selectinload(Booking.customer), selectinload(Booking.kyc_documents), selectinload(Booking.payment_schedules))
     )
     return (await session.execute(stmt)).scalar_one()
 
@@ -441,6 +454,8 @@ async def get_booking_document_url(
     _: object = Depends(require_permissions(PermissionCode.LEAD_VIEW)),
     session: AsyncSession = Depends(get_db_session),
 ):
+    if doc_type not in {"allotment_letter", "booking_form", "receipt"}:
+        raise HTTPException(status_code=404, detail="Unknown document type")
     booking = await session.get(Booking, booking_id)
     if not booking or booking.is_deleted:
         raise HTTPException(status_code=404, detail="Booking not found")

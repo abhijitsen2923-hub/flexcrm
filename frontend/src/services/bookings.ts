@@ -20,6 +20,7 @@ interface ApiBooking {
   scheduled_date: string | null;
   created_at: string;
   updated_at: string;
+  customer?: { id: string; contact_name: string; company_name: string; email: string | null } | null;
   kyc_documents?: { doc_type?: string; type?: string; file_path?: string | null; created_at?: string }[];
 }
 
@@ -31,6 +32,14 @@ function mapBooking(b: ApiBooking): Booking {
     customerId: b.customer_id,
     step: b.step as BookingStep,
     status: b.status,
+    customer: b.customer
+      ? {
+          id: b.customer.id,
+          contactName: b.customer.contact_name,
+          companyName: b.customer.company_name,
+          email: b.customer.email ?? null,
+        }
+      : null,
     kycDocuments: (b.kyc_documents ?? []).map((d) => ({
       type: (d.type ?? d.doc_type ?? "other") as "aadhaar" | "pan" | "photo" | "other",
       fileName: d.file_path ?? "",

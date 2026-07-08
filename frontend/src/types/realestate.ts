@@ -89,11 +89,19 @@ export interface KycDocument {
   uploadedAt: string;
 }
 
+export interface BookingCustomer {
+  id: string;
+  contactName: string;
+  companyName: string;
+  email: string | null;
+}
+
 export interface Booking {
   id: string;
   unitId: string;
   leadId: string | null;
   customerId: string | null;
+  customer: BookingCustomer | null;
   step: BookingStep;
   status: BookingStatus;
   kycDocuments: KycDocument[];

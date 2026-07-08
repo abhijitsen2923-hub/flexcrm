@@ -7,6 +7,7 @@ from pydantic import Field
 
 from app.database.enums import BookingStatus, SiteVisitFeedback, UnitStatus, UnitType
 from app.schemas.common import ORMModel
+from app.schemas.customer import CustomerCompact
 
 
 class UnitRead(ORMModel):
@@ -156,6 +157,7 @@ class BookingRead(ORMModel):
     scheduled_date: date | None = None
     created_at: datetime
     updated_at: datetime
+    customer: CustomerCompact | None = None
     kyc_documents: list[BookingKycDocRead] = []
     payment_schedules: list[PaymentScheduleRead] = []
 
@@ -171,6 +173,9 @@ class BookingStepAdvance(ORMModel):
     pricing_snapshot: dict | None = None
     scheduled_date: date | None = None
     payment_schedules: list[PaymentScheduleCreate] = []
+    # Only an explicit confirm (step 4) finalizes the booking + books the unit.
+    # Saving the date for a document preview passes confirm=False.
+    confirm: bool = False
 
 
 class PricingUpdate(ORMModel):
