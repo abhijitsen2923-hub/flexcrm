@@ -27,7 +27,7 @@ export function BookingWizard({ unit, onClose, onComplete, initialBooking = null
   const [booking, setBooking] = useState<Booking | null>(initialBooking);
   const [saving, setSaving] = useState(false);
   const [pricing, setPricing] = useState<PricingSnapshot | null>(null);
-  const [docUrl, setDocUrl] = useState<string | null>(null);
+  const [docHtml, setDocHtml] = useState<string | null>(null);
   const [docTitle, setDocTitle] = useState<string>("");
 
   // Step 2 state
@@ -122,9 +122,9 @@ export function BookingWizard({ unit, onClose, onComplete, initialBooking = null
     if (!booking) return;
     setSaving(true);
     try {
-      const url = await bookingsService.getDocumentUrl(booking.id, docType);
-      setDocUrl(url);
-      setDocTitle(docType === "booking_form" ? "Booking Form" : "Allotment Letter");
+      const { html, title } = await bookingsService.getDocumentHtml(booking.id, docType);
+      setDocHtml(html);
+      setDocTitle(title);
     } catch {
       toast.error("Document generation failed");
     } finally {
@@ -345,9 +345,9 @@ export function BookingWizard({ unit, onClose, onComplete, initialBooking = null
         </div>
       </Modal>
 
-      {docUrl && (
-        <Modal open title={docTitle} size="lg" onClose={() => setDocUrl(null)}>
-          <DocumentPreview url={docUrl} title={docTitle} onClose={() => setDocUrl(null)} />
+      {docHtml && (
+        <Modal open title={docTitle} size="lg" onClose={() => setDocHtml(null)}>
+          <DocumentPreview html={docHtml} title={docTitle} onClose={() => setDocHtml(null)} />
         </Modal>
       )}
     </>

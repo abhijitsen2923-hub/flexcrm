@@ -78,10 +78,13 @@ export const bookingsService = {
       .then((r) => mapBooking(r.data));
   },
 
-  getDocumentUrl(id: string, docType: "booking_form" | "allotment_letter" | "receipt"): Promise<string> {
+  getDocumentHtml(
+    id: string,
+    docType: "booking_form" | "allotment_letter" | "receipt"
+  ): Promise<{ html: string; title: string }> {
     return apiClient
-      .get<{ url: string }>(`/bookings/${id}/documents/${docType}`)
-      .then((r) => r.data.url);
+      .get<{ html: string; title: string }>(`/bookings/${id}/documents/${docType}`)
+      .then((r) => r.data);
   },
 
   // The /kyc endpoint records a KYC doc (doc_type + file name) and returns the

@@ -11,6 +11,8 @@ from app.core.exceptions import NotFoundError
 from app.core.permissions import PermissionCode
 from app.database.enums import BookingStatus, UnitStatus, UnitType
 from app.database.session import get_db_session
+from app.models.customer import Customer
+from app.real_estate.documents import render_booking_document
 from app.real_estate.models import (
     Booking,
     BookingKycDoc,
@@ -442,8 +444,14 @@ async def get_booking_document_url(
     booking = await session.get(Booking, booking_id)
     if not booking or booking.is_deleted:
         raise HTTPException(status_code=404, detail="Booking not found")
-    # Document storage is not yet wired; return a placeholder URL.
-    return {"url": f"/files/bookings/{booking_id}/{doc_type}.pdf"}
+    unit = await session.get(Unit, booking.unit_id)
+    project = await session.get(Project, unit.project_id) if unit else None
+    tower = await session.get(Tower, unit.tower_id) if unit else None
+    customer = (
+        await session.get(Customer, booking.customer_id) if booking.customer_id else None
+    )
+    html, title = render_booking_document(doc_type, booking, unit, project, tower, customer)
+    return {"html": html, "title": title}
 
 
 @router.post(
