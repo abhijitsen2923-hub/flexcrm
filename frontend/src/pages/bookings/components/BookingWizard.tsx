@@ -90,12 +90,13 @@ export function BookingWizard({ unit, onClose, onComplete, initialBooking = null
     setSaving(true);
     try {
       await bookingsService.uploadKyc(booking.id, kycFile, kycDocType);
-      // Keep the existing booking (the /kyc endpoint returns the doc, not the
-      // booking) — attach the selected customer as we advance.
-      if (customerId) {
-        const updated = await bookingsService.advanceStep(booking.id, 2, { customer_id: customerId });
-        setBooking(updated);
-      }
+      // Always advance to step 2 (records the customer if one was picked) so the
+      // Registration Tracker reflects real progress. The /kyc endpoint returns
+      // the doc — not the booking — so we advance separately.
+      const updated = await bookingsService.advanceStep(booking.id, 2, {
+        customer_id: customerId || null,
+      });
+      setBooking(updated);
       setStep(3);
     } catch {
       toast.error("KYC upload failed");
@@ -108,7 +109,11 @@ export function BookingWizard({ unit, onClose, onComplete, initialBooking = null
     if (!booking || !pricing) return;
     setSaving(true);
     try {
-      const updated = await bookingsService.setPricing(booking.id, pricing);
+      // advanceStep(3) both saves the pricing snapshot and moves the booking to
+      // step 3, so the Registration Tracker shows Pricing as done.
+      const updated = await bookingsService.advanceStep(booking.id, 3, {
+        pricing_snapshot: pricing,
+      });
       setBooking(updated);
       setStep(4);
     } catch {
