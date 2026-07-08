@@ -52,8 +52,16 @@ class ProjectRead(ORMModel):
     updated_at: datetime
 
 
+class ProjectMediaRead(ORMModel):
+    id: UUID
+    type: str          # ← ProjectMedia.media_type (via model property)
+    url: str           # ← presigned GET URL (via model property); "" if storage unconfigured
+    label: str | None = None
+
+
 class ProjectWithTowersRead(ProjectRead):
     towers: list[TowerRead] = []
+    media: list[ProjectMediaRead] = []
 
 
 class ProjectCreate(ORMModel):

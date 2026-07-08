@@ -1,5 +1,5 @@
 import { apiClient } from "./http";
-import type { Project, Tower, Unit, UnitStatus, UnitType } from "../types/realestate";
+import type { Project, ProjectMedia, Tower, Unit, UnitStatus, UnitType } from "../types/realestate";
 
 // The API speaks snake_case and returns no computed inventory counts / media.
 // The app models are camelCase with totalUnits/availableUnits/media derived from
@@ -28,6 +28,13 @@ interface ApiTower {
   units?: ApiUnit[];
 }
 
+interface ApiProjectMedia {
+  id: string;
+  type: string;
+  url: string;
+  label: string | null;
+}
+
 interface ApiProject {
   id: string;
   name: string;
@@ -38,6 +45,7 @@ interface ApiProject {
   created_at: string;
   updated_at: string;
   towers?: ApiTower[];
+  media?: ApiProjectMedia[];
 }
 
 function mapUnit(u: ApiUnit): Unit {
@@ -79,7 +87,12 @@ function mapProject(p: ApiProject): Project {
     city: p.city,
     reraNumber: p.rera_number,
     towers,
-    media: [],
+    media: (p.media ?? []).map((m) => ({
+      id: m.id,
+      type: m.type as ProjectMedia["type"],
+      url: m.url,
+      label: m.label,
+    })),
     totalUnits: allUnits.length,
     availableUnits: allUnits.filter((u) => u.status === "available").length,
     createdAt: p.created_at,
@@ -143,5 +156,32 @@ export const inventoryService = {
 
   getUnit(unitId: string): Promise<Unit> {
     return apiClient.get<ApiUnit>(`/inventory/units/${unitId}`).then((r) => mapUnit(r.data));
+  },
+
+  uploadProjectMedia(
+    projectId: string,
+    file: File,
+    mediaType: ProjectMedia["type"],
+    label?: string | null
+  ): Promise<ProjectMedia> {
+    const form = new FormData();
+    form.append("file", file);
+    form.append("media_type", mediaType);
+    if (label) form.append("label", label);
+    return apiClient
+      // Let axios infer the multipart boundary (overrides the JSON default).
+      .post<ApiProjectMedia>(`/inventory/projects/${projectId}/media`, form, {
+        headers: { "Content-Type": "multipart/form-data" },
+      })
+      .then((r) => ({
+        id: r.data.id,
+        type: r.data.type as ProjectMedia["type"],
+        url: r.data.url,
+        label: r.data.label,
+      }));
+  },
+
+  deleteProjectMedia(mediaId: string): Promise<void> {
+    return apiClient.delete(`/inventory/projects/media/${mediaId}`).then(() => undefined);
   },
 };

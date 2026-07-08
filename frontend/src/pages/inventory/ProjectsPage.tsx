@@ -1,10 +1,10 @@
-import { useEffect, useState, type FormEvent } from "react";
-import { Building2, Image, Plus } from "lucide-react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
+import { Building2, Image, Plus, Trash2, Upload } from "lucide-react";
 import { Button, Card, DataTable, EmptyState, Modal, SelectField, TextField, useToast } from "../../components";
 import type { DataTableColumn } from "../../components";
 import { useInventory } from "../../hooks/useInventory";
 import { inventoryService } from "../../services/inventory";
-import type { Project, Tower, UnitType } from "../../types/realestate";
+import type { Project, ProjectMedia, Tower, UnitType } from "../../types/realestate";
 import { LoadingBlock } from "../../components/ui/Spinner";
 import { extractErrorMessage } from "../../utils/errors";
 import "./ProjectsPage.css";
@@ -32,24 +32,105 @@ const EMPTY_PROJECT_FORM: ProjectFormState = {
   rera_number: "",
 };
 
-function MediaGallery({ project }: { project: Project }) {
-  if (project.media.length === 0) {
-    return <p className="media-gallery__empty">No media uploaded yet.</p>;
+const MEDIA_TYPE_OPTIONS: { value: ProjectMedia["type"]; label: string }[] = [
+  { value: "brochure", label: "Brochure" },
+  { value: "floor_plan", label: "Floor plan" },
+  { value: "image", label: "Image" },
+  { value: "video", label: "Video" },
+  { value: "virtual_tour", label: "Virtual tour" },
+];
+
+function MediaGallery({ project, onChanged }: { project: Project; onChanged: () => Promise<void> | void }) {
+  const toast = useToast();
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [mediaType, setMediaType] = useState<ProjectMedia["type"]>("brochure");
+  const [label, setLabel] = useState("");
+  const [uploading, setUploading] = useState(false);
+
+  async function upload() {
+    const file = fileRef.current?.files?.[0];
+    if (!file) {
+      toast.error("Choose a file to upload");
+      return;
+    }
+    setUploading(true);
+    try {
+      await inventoryService.uploadProjectMedia(project.id, file, mediaType, label.trim() || null);
+      toast.success("Media uploaded", file.name);
+      setLabel("");
+      if (fileRef.current) fileRef.current.value = "";
+      await onChanged();
+    } catch (e) {
+      toast.error("Upload failed", extractErrorMessage(e));
+    } finally {
+      setUploading(false);
+    }
   }
+
+  async function remove(id: string) {
+    try {
+      await inventoryService.deleteProjectMedia(id);
+      await onChanged();
+    } catch (e) {
+      toast.error("Delete failed", extractErrorMessage(e));
+    }
+  }
+
   return (
-    <div className="media-gallery">
-      {project.media.map((m) => (
-        <a key={m.id} href={m.url} target="_blank" rel="noreferrer" className="media-gallery__item">
-          {m.type === "image" ? (
-            <img src={m.url} alt={m.label ?? m.type} className="media-gallery__img" />
-          ) : (
-            <div className="media-gallery__doc">
-              <Image size={20} />
-              <span>{m.label ?? m.type}</span>
+    <div className="stack" style={{ gap: "0.75rem" }}>
+      <div className="card" style={{ padding: "0.75rem 1rem" }}>
+        <div className="form-grid">
+          <SelectField
+            id="media-type"
+            label="Type"
+            value={mediaType}
+            onChange={(e) => setMediaType(e.target.value as ProjectMedia["type"])}
+            options={MEDIA_TYPE_OPTIONS}
+          />
+          <TextField
+            id="media-label"
+            label="Label (optional)"
+            value={label}
+            onChange={(e) => setLabel(e.target.value)}
+            placeholder="e.g. 2BHK floor plan"
+          />
+        </div>
+        <div className="row" style={{ gap: "0.75rem", alignItems: "center", marginTop: "0.5rem", flexWrap: "wrap" }}>
+          <input ref={fileRef} type="file" accept="image/*,application/pdf,video/*" />
+          <Button size="sm" icon={<Upload size={14} />} loading={uploading} onClick={() => void upload()}>
+            Upload
+          </Button>
+        </div>
+      </div>
+
+      {project.media.length === 0 ? (
+        <p className="media-gallery__empty">No media uploaded yet.</p>
+      ) : (
+        <div className="media-gallery">
+          {project.media.map((m) => (
+            <div key={m.id} className="media-gallery__item">
+              <a href={m.url} target="_blank" rel="noreferrer" className="media-gallery__link">
+                {m.type === "image" ? (
+                  <img src={m.url} alt={m.label ?? m.type} className="media-gallery__img" />
+                ) : (
+                  <div className="media-gallery__doc">
+                    <Image size={20} />
+                    <span>{m.label ?? m.type}</span>
+                  </div>
+                )}
+              </a>
+              <button
+                type="button"
+                className="media-gallery__delete"
+                onClick={() => void remove(m.id)}
+                aria-label="Delete media"
+              >
+                <Trash2 size={14} />
+              </button>
             </div>
-          )}
-        </a>
-      ))}
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -227,7 +308,7 @@ export default function ProjectsPage() {
             <TowerManager project={selectedProject} onChanged={refresh} />
 
             <h3 className="project-detail__section-title">Media Repository</h3>
-            <MediaGallery project={selectedProject} />
+            <MediaGallery project={selectedProject} onChanged={refresh} />
           </div>
         </Modal>
       )}

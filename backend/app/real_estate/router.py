@@ -2,13 +2,15 @@
 from datetime import date
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.api.deps import require_permissions
+from app.core import storage
 from app.core.exceptions import NotFoundError
+from app.core.pdf import html_to_pdf
 from app.core.permissions import PermissionCode
 from app.database.enums import BookingStatus, UnitStatus, UnitType
 from app.database.session import get_db_session
@@ -19,13 +21,13 @@ from app.real_estate.models import (
     BookingKycDoc,
     PaymentSchedule,
     Project,
+    ProjectMedia,
     SiteVisit,
     Tower,
     Unit,
 )
 from app.real_estate.schemas import (
     BookingCreate,
-    BookingKycDocCreate,
     BookingKycDocRead,
     BookingRead,
     BookingStepAdvance,
@@ -34,6 +36,7 @@ from app.real_estate.schemas import (
     PossessionChecklistUpdate,
     PricingUpdate,
     ProjectCreate,
+    ProjectMediaRead,
     ProjectRead,
     ProjectWithTowersRead,
     SiteVisitCreate,
@@ -62,7 +65,8 @@ async def list_projects(
     stmt = (
         select(Project)
         .options(
-            selectinload(Project.towers).selectinload(Tower.units)
+            selectinload(Project.towers).selectinload(Tower.units),
+            selectinload(Project.media),
         )
         .order_by(Project.created_at.desc())
     )
@@ -91,12 +95,72 @@ async def get_project(
     stmt = (
         select(Project)
         .where(Project.id == project_id)
-        .options(selectinload(Project.towers).selectinload(Tower.units))
+        .options(
+            selectinload(Project.towers).selectinload(Tower.units),
+            selectinload(Project.media),
+        )
     )
     project = (await session.execute(stmt)).scalar_one_or_none()
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
     return project
+
+
+# ---------------------------------------------------------------------------
+# Inventory — project media (brochures / floor plans / images)
+# ---------------------------------------------------------------------------
+
+@router.post(
+    "/inventory/projects/{project_id}/media",
+    response_model=ProjectMediaRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def upload_project_media(
+    project_id: UUID,
+    file: UploadFile = File(...),
+    media_type: str = Form(...),
+    label: str | None = Form(default=None),
+    current_user=Depends(require_permissions(PermissionCode.LEAD_MANAGE)),
+    session: AsyncSession = Depends(get_db_session),
+):
+    project = await session.get(Project, project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    data = await file.read()
+    # Create the row first (flush → id), then upload under a key derived from
+    # that id, then persist the key. If the upload 503s (storage unconfigured),
+    # the uncommitted row rolls back with the request — no orphan.
+    media = ProjectMedia(project_id=project_id, media_type=media_type, file_path="", label=label)
+    session.add(media)
+    await session.flush()
+    key = storage.put_object(
+        storage.media_key(current_user.organization_id, project_id, media.id, file.filename or "file"),
+        data,
+        file.content_type,
+    )
+    media.file_path = key
+    await session.commit()
+    await session.refresh(media)
+    return media
+
+
+@router.delete("/inventory/projects/media/{media_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_project_media(
+    media_id: UUID,
+    _: object = Depends(require_permissions(PermissionCode.LEAD_MANAGE)),
+    session: AsyncSession = Depends(get_db_session),
+):
+    media = await session.get(ProjectMedia, media_id)
+    if not media:
+        raise HTTPException(status_code=404, detail="Media not found")
+    key = media.file_path
+    await session.delete(media)
+    await session.commit()
+    if key:
+        try:
+            storage.delete_object(key)
+        except Exception:  # noqa: BLE001 — row is already gone; object cleanup is best-effort
+            pass
 
 
 # ---------------------------------------------------------------------------
@@ -502,6 +566,35 @@ async def get_booking_document_url(
     return {"html": html, "title": title}
 
 
+@router.get("/bookings/{booking_id}/documents/{doc_type}/pdf")
+async def get_booking_document_pdf(
+    booking_id: UUID,
+    doc_type: str,
+    current_user=Depends(require_permissions(PermissionCode.LEAD_VIEW)),
+    session: AsyncSession = Depends(get_db_session),
+):
+    """Render the document to a real PDF, store it, and return a presigned URL."""
+    if doc_type not in {"allotment_letter", "booking_form", "receipt"}:
+        raise HTTPException(status_code=404, detail="Unknown document type")
+    booking = await session.get(Booking, booking_id)
+    if not booking or booking.is_deleted:
+        raise HTTPException(status_code=404, detail="Booking not found")
+    unit = await session.get(Unit, booking.unit_id)
+    project = await session.get(Project, unit.project_id) if unit else None
+    tower = await session.get(Tower, unit.tower_id) if unit else None
+    customer = (
+        await session.get(Customer, booking.customer_id) if booking.customer_id else None
+    )
+    html, _title = render_booking_document(doc_type, booking, unit, project, tower, customer)
+    pdf = html_to_pdf(html)
+    key = storage.put_object(
+        storage.doc_key(current_user.organization_id, booking_id, doc_type),
+        pdf,
+        "application/pdf",
+    )
+    return {"url": storage.presigned_get_url(key)}
+
+
 @router.post(
     "/bookings/{booking_id}/kyc",
     response_model=BookingKycDocRead,
@@ -509,15 +602,38 @@ async def get_booking_document_url(
 )
 async def upload_booking_kyc(
     booking_id: UUID,
-    payload: BookingKycDocCreate,
-    _: object = Depends(require_permissions(PermissionCode.LEAD_MANAGE)),
+    file: UploadFile = File(...),
+    doc_type: str = Form(...),
+    current_user=Depends(require_permissions(PermissionCode.LEAD_MANAGE)),
     session: AsyncSession = Depends(get_db_session),
 ):
+    """Upload a real KYC file to object storage; store its key on the doc row."""
     booking = await session.get(Booking, booking_id)
     if not booking or booking.is_deleted:
         raise HTTPException(status_code=404, detail="Booking not found")
-    doc = BookingKycDoc(booking_id=booking_id, **payload.model_dump())
+    data = await file.read()
+    doc = BookingKycDoc(booking_id=booking_id, doc_type=doc_type)
     session.add(doc)
+    await session.flush()  # assign doc.id for the object key
+    key = storage.put_object(
+        storage.kyc_key(current_user.organization_id, booking_id, doc.id, file.filename or "file"),
+        data,
+        file.content_type,
+    )
+    doc.file_path = key
     await session.commit()
     await session.refresh(doc)
     return doc
+
+
+@router.get("/bookings/{booking_id}/kyc/{doc_id}/download")
+async def download_booking_kyc(
+    booking_id: UUID,
+    doc_id: UUID,
+    _: object = Depends(require_permissions(PermissionCode.LEAD_VIEW)),
+    session: AsyncSession = Depends(get_db_session),
+):
+    doc = await session.get(BookingKycDoc, doc_id)
+    if not doc or doc.booking_id != booking_id or not doc.file_path:
+        raise HTTPException(status_code=404, detail="KYC document not found")
+    return {"url": storage.presigned_get_url(doc.file_path)}

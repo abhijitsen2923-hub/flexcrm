@@ -67,6 +67,17 @@ class Settings(BaseSettings):
     smtp_sender: str = "noreply@flexcrm.local"
     smtp_use_tls: bool = True
 
+    # --- Object storage (S3-compatible: Backblaze B2 / Cloudflare R2 / AWS S3) ---
+    # When these are unset, file upload/download endpoints return a clean 503
+    # ("File storage is not configured") instead of 500ing — so local/dev and
+    # not-yet-provisioned deploys stay functional for everything else.
+    s3_endpoint_url: str | None = None
+    s3_region: str | None = None
+    s3_bucket: str | None = None
+    s3_access_key_id: str | None = None
+    s3_secret_access_key: str | None = None
+    s3_presign_ttl_seconds: int = 3600
+
     websocket_ping_interval_seconds: int = 20
     websocket_event_buffer_size: int = 200
 

@@ -38,6 +38,39 @@ class Project(TenantBase, UUIDPrimaryKeyMixin, TimestampMixin, TenantAuditMixin)
     towers: Mapped[list["Tower"]] = relationship(
         "Tower", back_populates="project", cascade="all, delete-orphan"
     )
+    media: Mapped[list["ProjectMedia"]] = relationship(
+        "ProjectMedia", back_populates="project", cascade="all, delete-orphan"
+    )
+
+
+class ProjectMedia(TenantBase, UUIDPrimaryKeyMixin, TimestampMixin):
+    __tablename__ = "project_media"
+    __table_args__ = ({"schema": "tenant"},)
+
+    project_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    # brochure / floor_plan / image / video / virtual_tour — validated app-side.
+    media_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    # Object storage key (not a public URL) — served via presigned GET URLs.
+    file_path: Mapped[str] = mapped_column(String(512), nullable=False)
+    label: Mapped[str | None] = mapped_column(String(255), nullable=True)
+
+    project: Mapped["Project"] = relationship("Project", back_populates="media")
+
+    # Convenience accessors so the read schema (ProjectMediaRead) maps directly
+    # via from_attributes: `type` aliases the column, `url` signs the key. Guarded
+    # so a project GET never 503s when storage is unconfigured (media list is then
+    # empty anyway, so this is only hit when a key genuinely exists).
+    @property
+    def type(self) -> str:
+        return self.media_type
+
+    @property
+    def url(self) -> str:
+        from app.core import storage
+
+        return storage.presigned_get_url(self.file_path) if storage.is_configured() else ""
 
 
 class Tower(TenantBase, UUIDPrimaryKeyMixin, TimestampMixin):

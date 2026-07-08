@@ -42,6 +42,7 @@ export function CustomerDrawer({ open, customer, onClose }: Props) {
   const [loading, setLoading] = useState(false);
   const [docHtml, setDocHtml] = useState<string | null>(null);
   const [docTitle, setDocTitle] = useState("");
+  const [docPdf, setDocPdf] = useState<{ bookingId: string; docType: "booking_form" | "allotment_letter" } | null>(null);
 
   useEffect(() => {
     if (!open) return;
@@ -97,6 +98,7 @@ export function CustomerDrawer({ open, customer, onClose }: Props) {
       const { html, title } = await bookingsService.getDocumentHtml(bookingId, docType);
       setDocHtml(html);
       setDocTitle(title);
+      setDocPdf({ bookingId, docType });
     } catch {
       /* preview failure is non-critical */
     }
@@ -273,7 +275,7 @@ export function CustomerDrawer({ open, customer, onClose }: Props) {
 
       {docHtml && (
         <Modal open title={docTitle} size="lg" onClose={() => setDocHtml(null)}>
-          <DocumentPreview html={docHtml} title={docTitle} onClose={() => setDocHtml(null)} />
+          <DocumentPreview html={docHtml} title={docTitle} pdf={docPdf ?? undefined} onClose={() => setDocHtml(null)} />
         </Modal>
       )}
     </>

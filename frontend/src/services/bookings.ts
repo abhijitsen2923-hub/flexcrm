@@ -148,13 +148,35 @@ export const bookingsService = {
       .then((r) => r.data);
   },
 
-  // The /kyc endpoint records a KYC doc (doc_type + file name) and returns the
-  // doc — NOT the booking. Server-side file storage isn't wired yet, so we send
-  // the filename as file_path. Returns void so callers don't mistake the doc for
-  // the booking (which would corrupt booking.id for the next step).
-  uploadKyc(id: string, file: File, docType: string): Promise<void> {
+  // Render the document to a real PDF (server-side), store it, and get back a
+  // short-lived presigned download URL.
+  getDocumentPdfUrl(
+    id: string,
+    docType: "booking_form" | "allotment_letter" | "receipt"
+  ): Promise<{ url: string }> {
     return apiClient
-      .post(`/bookings/${id}/kyc`, { doc_type: docType, file_path: file.name })
+      .get<{ url: string }>(`/bookings/${id}/documents/${docType}/pdf`)
+      .then((r) => r.data);
+  },
+
+  // The /kyc endpoint stores the real file in object storage and records the
+  // doc (doc_type + object key). Returns void so callers don't mistake the doc
+  // for the booking (which would corrupt booking.id for the next step).
+  uploadKyc(id: string, file: File, docType: string): Promise<void> {
+    const form = new FormData();
+    form.append("file", file);
+    form.append("doc_type", docType);
+    return apiClient
+      // Let axios infer the multipart boundary — overriding the client default
+      // `Content-Type: application/json` (same pattern as leads CSV import).
+      .post(`/bookings/${id}/kyc`, form, { headers: { "Content-Type": "multipart/form-data" } })
       .then(() => undefined);
+  },
+
+  // Presigned URL to download a previously-uploaded KYC file.
+  getKycDownloadUrl(bookingId: string, docId: string): Promise<{ url: string }> {
+    return apiClient
+      .get<{ url: string }>(`/bookings/${bookingId}/kyc/${docId}/download`)
+      .then((r) => r.data);
   },
 };
