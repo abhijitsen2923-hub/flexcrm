@@ -1,14 +1,15 @@
 import { useEffect, useState } from "react";
 import { useLocation, useSearchParams } from "react-router-dom";
 import { ClipboardCheck, Plus } from "lucide-react";
-import { Badge, Button, Card, DataTable, EmptyState, Modal } from "../../components";
+import { Badge, Button, Card, ConfirmDialog, DataTable, EmptyState, Modal, useToast } from "../../components";
 import type { DataTableColumn } from "../../components";
 import { useBookings } from "../../hooks/useBookings";
 import { useInventory } from "../../hooks/useInventory";
 import { inventoryService } from "../../services/inventory";
 import { LoadingBlock } from "../../components/ui/Spinner";
 import { BookingWizard } from "./components/BookingWizard";
-import type { Booking, Unit } from "../../types/realestate";
+import type { Booking, Unit, UnitStatus } from "../../types/realestate";
+import { extractErrorMessage } from "../../utils/errors";
 import { formatDate, formatInr } from "../../utils/format";
 import "./BookingsPage.css";
 
@@ -18,7 +19,7 @@ const STATUS_TONE = {
   cancelled: "neutral",
 } as const;
 
-type WizardUnit = Pick<Unit, "id" | "unitNumber" | "floor" | "area" | "basePrice"> & {
+type WizardUnit = Pick<Unit, "id" | "unitNumber" | "floor" | "area" | "basePrice" | "status"> & {
   towerName: string;
   projectName: string;
 };
@@ -29,10 +30,14 @@ export default function BookingsPage() {
   const navState = location.state as { projectName?: string; towerName?: string } | null;
   const preselectedUnitId = searchParams.get("unitId");
   const { bookings, loading, refresh } = useBookings();
-  const { projects } = useInventory();
+  const { projects, updateUnitStatus } = useInventory();
+  const toast = useToast();
   const [wizardUnit, setWizardUnit] = useState<WizardUnit | null>(null);
   const [wizardBooking, setWizardBooking] = useState<Booking | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
+  // Staged unit-lifecycle action (Booked → Registered → Sold) from the list.
+  const [markAction, setMarkAction] = useState<{ unitId: string; label: string; target: UnitStatus } | null>(null);
+  const [marking, setMarking] = useState(false);
 
   // Available units across all projects, tagged with their tower/project names.
   const availableUnits = projects.flatMap((p) =>
@@ -96,6 +101,32 @@ export default function BookingsPage() {
     setWizardBooking(null);
   }
 
+  // Staged unit-lifecycle actions from the booking list: Booked → Registered → Sold.
+  function askMark(ctx: WizardUnit, target: UnitStatus) {
+    setMarkAction({
+      unitId: ctx.id,
+      label: `${ctx.projectName} · ${ctx.towerName} · ${ctx.unitNumber}`,
+      target,
+    });
+  }
+
+  async function confirmMark() {
+    if (!markAction) return;
+    setMarking(true);
+    try {
+      await updateUnitStatus(markAction.unitId, markAction.target);
+      toast.success(
+        markAction.target === "registered" ? "Marked Registered" : "Marked Sold",
+        markAction.label
+      );
+      setMarkAction(null);
+    } catch (err) {
+      toast.error("Update failed", extractErrorMessage(err));
+    } finally {
+      setMarking(false);
+    }
+  }
+
   const columns: DataTableColumn<Booking>[] = [
     { key: "id", header: "Booking", render: (b) => <span className="mono">{b.id.slice(0, 8)}…</span> },
     {
@@ -115,6 +146,37 @@ export default function BookingsPage() {
           {b.status.charAt(0).toUpperCase() + b.status.slice(1)}
         </Badge>
       ),
+    },
+    {
+      key: "stage",
+      header: "Registration / Sale",
+      render: (b) => {
+        const ctx = unitContext(b.unitId);
+        // Only a confirmed booking has a booked unit; nothing to progress before then.
+        if (!ctx || ctx.status === "available" || ctx.status === "hold") {
+          return <span className="muted text-xs">—</span>;
+        }
+        if (ctx.status === "sold") return <Badge tone="neutral">Sold</Badge>;
+        const target: UnitStatus = ctx.status === "booked" ? "registered" : "sold";
+        const label = ctx.status === "booked" ? "Mark Registered" : "Mark Sold";
+        return (
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <Badge tone={ctx.status === "booked" ? "info" : "primary"}>
+              {ctx.status === "booked" ? "Booked" : "Registered"}
+            </Badge>
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={(e) => {
+                e.stopPropagation();
+                askMark(ctx, target);
+              }}
+            >
+              {label}
+            </Button>
+          </div>
+        );
+      },
     },
     {
       key: "scheduledDate",
@@ -207,6 +269,21 @@ export default function BookingsPage() {
           }}
         />
       )}
+
+      <ConfirmDialog
+        open={markAction !== null}
+        title={markAction?.target === "registered" ? "Mark unit Registered?" : "Mark unit Sold?"}
+        description={
+          markAction
+            ? `${markAction.label} will be set to ${markAction.target === "registered" ? "Registered" : "Sold"}. This updates the Inventory board too.`
+            : ""
+        }
+        confirmLabel={markAction?.target === "registered" ? "Mark Registered" : "Mark Sold"}
+        cancelLabel="Cancel"
+        loading={marking}
+        onCancel={() => setMarkAction(null)}
+        onConfirm={() => void confirmMark()}
+      />
     </div>
   );
 }
