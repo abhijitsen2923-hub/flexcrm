@@ -76,9 +76,32 @@ class ProjectCreate(ORMModel):
     rera_number: str | None = Field(default=None, max_length=64)
 
 
+class ProjectUpdate(ORMModel):
+    name: str | None = Field(default=None, min_length=1, max_length=255)
+    builder_name: str | None = Field(default=None, min_length=1, max_length=255)
+    location: str | None = Field(default=None, min_length=1, max_length=255)
+    city: str | None = Field(default=None, min_length=1, max_length=100)
+    rera_number: str | None = Field(default=None, max_length=64)
+
+
 class TowerCreate(ORMModel):
     name: str = Field(min_length=1, max_length=100)
     total_floors: int = Field(ge=1, le=200)
+
+
+class TowerUpdate(ORMModel):
+    name: str | None = Field(default=None, min_length=1, max_length=100)
+    total_floors: int | None = Field(default=None, ge=1, le=200)
+
+
+class UnitUpdate(ORMModel):
+    unit_number: str | None = Field(default=None, min_length=1, max_length=20)
+    unit_type: UnitType | None = None
+    area: Decimal | None = Field(default=None, gt=0)
+    area_unit: str | None = Field(default=None, max_length=20)
+    facing: str | None = Field(default=None, max_length=50)
+    view: str | None = Field(default=None, max_length=100)
+    base_price: Decimal | None = Field(default=None, ge=0)
 
 
 class FloorUnits(ORMModel):

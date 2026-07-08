@@ -25,7 +25,7 @@ from app.database.enums import BookingStatus, SiteVisitFeedback, UnitStatus
 from app.models.base import TenantAuditMixin, TenantSoftDeleteMixin, TimestampMixin, UUIDPrimaryKeyMixin
 
 
-class Project(TenantBase, UUIDPrimaryKeyMixin, TimestampMixin, TenantAuditMixin):
+class Project(TenantBase, UUIDPrimaryKeyMixin, TimestampMixin, TenantAuditMixin, TenantSoftDeleteMixin):
     __tablename__ = "projects"
     __table_args__ = ({"schema": "tenant"},)
 
@@ -73,7 +73,7 @@ class ProjectMedia(TenantBase, UUIDPrimaryKeyMixin, TimestampMixin):
         return storage.presigned_get_url(self.file_path) if storage.is_configured() else ""
 
 
-class Tower(TenantBase, UUIDPrimaryKeyMixin, TimestampMixin):
+class Tower(TenantBase, UUIDPrimaryKeyMixin, TimestampMixin, TenantSoftDeleteMixin):
     __tablename__ = "towers"
     __table_args__ = ({"schema": "tenant"},)
 
@@ -89,7 +89,7 @@ class Tower(TenantBase, UUIDPrimaryKeyMixin, TimestampMixin):
     )
 
 
-class Unit(TenantBase, UUIDPrimaryKeyMixin, TimestampMixin):
+class Unit(TenantBase, UUIDPrimaryKeyMixin, TimestampMixin, TenantSoftDeleteMixin):
     __tablename__ = "units"
     __table_args__ = (
         Index("ix_units_project_status", "project_id", "status"),

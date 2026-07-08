@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
-import { Building2, Image, Plus, Trash2, Upload } from "lucide-react";
-import { Button, Card, DataTable, EmptyState, Modal, SelectField, TextField, useToast } from "../../components";
+import { Archive, Building2, Image, Pencil, Plus, Trash2, Upload } from "lucide-react";
+import { Button, Card, ConfirmDialog, DataTable, EmptyState, Modal, SelectField, TextField, useToast } from "../../components";
 import type { DataTableColumn } from "../../components";
 import { useInventory } from "../../hooks/useInventory";
 import { inventoryService } from "../../services/inventory";
-import type { Project, ProjectMedia, Tower, UnitType } from "../../types/realestate";
+import type { Project, ProjectMedia, Tower, Unit, UnitType } from "../../types/realestate";
 import { LoadingBlock } from "../../components/ui/Spinner";
 import { extractErrorMessage } from "../../utils/errors";
+import { formatInr } from "../../utils/format";
 import "./ProjectsPage.css";
 
 const UNIT_TYPE_OPTIONS: { value: UnitType; label: string }[] = [
@@ -156,10 +157,13 @@ export default function ProjectsPage() {
   const { projects, loading, refresh } = useInventory();
   const toast = useToast();
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
-  const [createOpen, setCreateOpen] = useState(false);
+  const [formOpen, setFormOpen] = useState(false);
+  const [editingProject, setEditingProject] = useState<Project | null>(null);
   const [form, setForm] = useState<ProjectFormState>(EMPTY_PROJECT_FORM);
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
+  const [archiveProject, setArchiveProject] = useState<Project | null>(null);
+  const [archiving, setArchiving] = useState(false);
 
   // Keep the open detail modal in sync with refreshed data (after adding
   // towers/units) — selectedProject is a snapshot; re-point it at the fresh row.
@@ -170,25 +174,45 @@ export default function ProjectsPage() {
   }, [projects, selectedProject]);
 
   function openCreate() {
+    setEditingProject(null);
     setForm(EMPTY_PROJECT_FORM);
     setFormError(null);
-    setCreateOpen(true);
+    setFormOpen(true);
   }
 
-  async function handleCreate(event: FormEvent<HTMLFormElement>) {
+  function openEdit(project: Project) {
+    setEditingProject(project);
+    setForm({
+      name: project.name,
+      builder_name: project.builderName,
+      location: project.location,
+      city: project.city,
+      rera_number: project.reraNumber ?? "",
+    });
+    setFormError(null);
+    setFormOpen(true);
+  }
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setSaving(true);
     setFormError(null);
+    const payload = {
+      name: form.name.trim(),
+      builder_name: form.builder_name.trim(),
+      location: form.location.trim(),
+      city: form.city.trim(),
+      rera_number: form.rera_number.trim() || null,
+    };
     try {
-      await inventoryService.createProject({
-        name: form.name.trim(),
-        builder_name: form.builder_name.trim(),
-        location: form.location.trim(),
-        city: form.city.trim(),
-        rera_number: form.rera_number.trim() || null,
-      });
-      toast.success("Project created", form.name.trim());
-      setCreateOpen(false);
+      if (editingProject) {
+        await inventoryService.updateProject(editingProject.id, payload);
+        toast.success("Project updated", payload.name);
+      } else {
+        await inventoryService.createProject(payload);
+        toast.success("Project created", payload.name);
+      }
+      setFormOpen(false);
       await refresh();
     } catch (err) {
       setFormError(extractErrorMessage(err));
@@ -196,6 +220,56 @@ export default function ProjectsPage() {
       setSaving(false);
     }
   }
+
+  async function confirmArchiveProject() {
+    if (!archiveProject) return;
+    setArchiving(true);
+    try {
+      await inventoryService.archiveProject(archiveProject.id);
+      toast.success("Project archived", archiveProject.name);
+      if (selectedProject?.id === archiveProject.id) setSelectedProject(null);
+      setArchiveProject(null);
+      await refresh();
+    } catch (err) {
+      toast.error("Could not archive", extractErrorMessage(err));
+    } finally {
+      setArchiving(false);
+    }
+  }
+
+  const columns: DataTableColumn<Project>[] = [
+    ...COLUMNS,
+    {
+      key: "actions",
+      header: "",
+      render: (p) => (
+        <div style={{ display: "flex", gap: 4, justifyContent: "flex-end" }}>
+          <button
+            type="button"
+            className="btn btn--ghost btn--icon"
+            onClick={(e) => {
+              e.stopPropagation();
+              openEdit(p);
+            }}
+            aria-label="Edit project"
+          >
+            <Pencil size={14} />
+          </button>
+          <button
+            type="button"
+            className="btn btn--ghost btn--icon"
+            onClick={(e) => {
+              e.stopPropagation();
+              setArchiveProject(p);
+            }}
+            aria-label="Archive project"
+          >
+            <Archive size={14} />
+          </button>
+        </div>
+      ),
+    },
+  ];
 
   if (loading) return <LoadingBlock label="Loading projects…" />;
 
@@ -217,7 +291,7 @@ export default function ProjectsPage() {
       ) : (
         <Card>
           <DataTable
-            columns={COLUMNS}
+            columns={columns}
             rows={projects}
             rowKey={(p) => p.id}
             onRowClick={(p) => setSelectedProject(p)}
@@ -226,21 +300,21 @@ export default function ProjectsPage() {
       )}
 
       <Modal
-        open={createOpen}
-        title="Add project"
-        onClose={() => setCreateOpen(false)}
+        open={formOpen}
+        title={editingProject ? "Edit project" : "Add project"}
+        onClose={() => setFormOpen(false)}
         footer={
           <>
-            <Button variant="secondary" onClick={() => setCreateOpen(false)} disabled={saving}>
+            <Button variant="secondary" onClick={() => setFormOpen(false)} disabled={saving}>
               Cancel
             </Button>
-            <Button type="submit" form="create-project-form" loading={saving}>
-              Create project
+            <Button type="submit" form="project-form" loading={saving}>
+              {editingProject ? "Save changes" : "Create project"}
             </Button>
           </>
         }
       >
-        <form id="create-project-form" className="stack" onSubmit={handleCreate}>
+        <form id="project-form" className="stack" onSubmit={handleSubmit}>
           <TextField
             id="project-name"
             label="Project name"
@@ -312,6 +386,21 @@ export default function ProjectsPage() {
           </div>
         </Modal>
       )}
+
+      <ConfirmDialog
+        open={archiveProject !== null}
+        title="Archive project?"
+        description={
+          archiveProject
+            ? `${archiveProject.name} and its towers/units will be hidden from inventory. Blocked if any unit is booked, registered or sold.`
+            : ""
+        }
+        confirmLabel="Archive"
+        cancelLabel="Cancel"
+        loading={archiving}
+        onCancel={() => setArchiveProject(null)}
+        onConfirm={() => void confirmArchiveProject()}
+      />
     </div>
   );
 }
@@ -337,6 +426,24 @@ function TowerManager({ project, onChanged }: { project: Project; onChanged: () 
   const [basePrice, setBasePrice] = useState("5000000");
   const [prefix, setPrefix] = useState("");
   const [savingUnits, setSavingUnits] = useState(false);
+
+  // Tower edit + per-tower unit list / unit edit + archive confirmation.
+  const [editTowerId, setEditTowerId] = useState<string | null>(null);
+  const [editTowerName, setEditTowerName] = useState("");
+  const [editTowerFloors, setEditTowerFloors] = useState("");
+  const [savingTower, setSavingTower] = useState(false);
+  const [viewUnitsTowerId, setViewUnitsTowerId] = useState<string | null>(null);
+  const [editUnitId, setEditUnitId] = useState<string | null>(null);
+  const [unitForm, setUnitForm] = useState({
+    unit_number: "",
+    unit_type: "residential" as UnitType,
+    area: "",
+    base_price: "",
+    facing: "",
+  });
+  const [savingUnit, setSavingUnit] = useState(false);
+  const [archiveItem, setArchiveItem] = useState<{ kind: "tower" | "unit"; id: string; label: string } | null>(null);
+  const [archivingItem, setArchivingItem] = useState(false);
 
   async function addTower() {
     const floors = parseInt(towerFloors, 10);
@@ -413,6 +520,84 @@ function TowerManager({ project, onChanged }: { project: Project; onChanged: () 
     }
   }
 
+  function startTowerEdit(tower: Tower) {
+    setEditTowerId(tower.id);
+    setEditTowerName(tower.name);
+    setEditTowerFloors(String(tower.totalFloors));
+  }
+
+  async function saveTowerEdit(towerId: string) {
+    if (!editTowerName.trim()) {
+      toast.error("Tower name required");
+      return;
+    }
+    setSavingTower(true);
+    try {
+      await inventoryService.updateTower(towerId, {
+        name: editTowerName.trim(),
+        total_floors: parseInt(editTowerFloors, 10) || 1,
+      });
+      toast.success("Tower updated", editTowerName.trim());
+      setEditTowerId(null);
+      await onChanged();
+    } catch (e) {
+      toast.error("Update failed", extractErrorMessage(e));
+    } finally {
+      setSavingTower(false);
+    }
+  }
+
+  function startUnitEdit(unit: Unit) {
+    setEditUnitId(unit.id);
+    setUnitForm({
+      unit_number: unit.unitNumber,
+      unit_type: unit.unitType,
+      area: String(unit.area),
+      base_price: String(unit.basePrice),
+      facing: unit.facing ?? "",
+    });
+  }
+
+  async function saveUnitEdit(unitId: string) {
+    if (!unitForm.unit_number.trim()) {
+      toast.error("Unit number required");
+      return;
+    }
+    setSavingUnit(true);
+    try {
+      await inventoryService.updateUnit(unitId, {
+        unit_number: unitForm.unit_number.trim(),
+        unit_type: unitForm.unit_type,
+        area: unitForm.area.trim() !== "" ? Number(unitForm.area) : undefined,
+        base_price: unitForm.base_price.trim() !== "" ? Number(unitForm.base_price) : undefined,
+        facing: unitForm.facing.trim() || null,
+      });
+      toast.success("Unit updated", unitForm.unit_number.trim());
+      setEditUnitId(null);
+      await onChanged();
+    } catch (e) {
+      toast.error("Update failed", extractErrorMessage(e));
+    } finally {
+      setSavingUnit(false);
+    }
+  }
+
+  async function confirmArchiveItem() {
+    if (!archiveItem) return;
+    setArchivingItem(true);
+    try {
+      if (archiveItem.kind === "tower") await inventoryService.archiveTower(archiveItem.id);
+      else await inventoryService.archiveUnit(archiveItem.id);
+      toast.success("Archived", archiveItem.label);
+      setArchiveItem(null);
+      await onChanged();
+    } catch (e) {
+      toast.error("Could not archive", extractErrorMessage(e));
+    } finally {
+      setArchivingItem(false);
+    }
+  }
+
   return (
     <div className="stack" style={{ gap: "0.75rem" }}>
       {project.towers.length === 0 && !showTowerForm && (
@@ -426,14 +611,118 @@ function TowerManager({ project, onChanged }: { project: Project; onChanged: () 
               <strong>{tower.name}</strong>{" "}
               <span className="muted text-sm">· {tower.totalFloors} floors · {tower.units.length} units</span>
             </div>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => (unitTowerId === tower.id ? setUnitTowerId(null) : openUnitForm(tower))}
-            >
-              {unitTowerId === tower.id ? "Close" : "+ Add units"}
-            </Button>
+            <div className="row" style={{ gap: 4, alignItems: "center" }}>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setViewUnitsTowerId(viewUnitsTowerId === tower.id ? null : tower.id)}
+              >
+                {viewUnitsTowerId === tower.id ? "Hide units" : "Units"}
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => (unitTowerId === tower.id ? setUnitTowerId(null) : openUnitForm(tower))}
+              >
+                {unitTowerId === tower.id ? "Close" : "+ Add units"}
+              </Button>
+              <button type="button" className="btn btn--ghost btn--icon" onClick={() => startTowerEdit(tower)} aria-label="Edit tower">
+                <Pencil size={14} />
+              </button>
+              <button
+                type="button"
+                className="btn btn--ghost btn--icon"
+                onClick={() => setArchiveItem({ kind: "tower", id: tower.id, label: tower.name })}
+                aria-label="Archive tower"
+              >
+                <Archive size={14} />
+              </button>
+            </div>
           </div>
+
+          {editTowerId === tower.id && (
+            <div className="form-grid" style={{ marginTop: "0.6rem", alignItems: "end" }}>
+              <TextField
+                id={`edit-tower-name-${tower.id}`}
+                label="Tower name"
+                value={editTowerName}
+                onChange={(e) => setEditTowerName(e.target.value)}
+              />
+              <TextField
+                id={`edit-tower-floors-${tower.id}`}
+                label="Total floors"
+                type="number"
+                min={1}
+                value={editTowerFloors}
+                onChange={(e) => setEditTowerFloors(e.target.value)}
+              />
+              <div className="row" style={{ gap: "0.5rem" }}>
+                <Button variant="secondary" size="sm" onClick={() => setEditTowerId(null)}>Cancel</Button>
+                <Button size="sm" loading={savingTower} onClick={() => void saveTowerEdit(tower.id)}>Save</Button>
+              </div>
+            </div>
+          )}
+
+          {viewUnitsTowerId === tower.id && (
+            <div style={{ marginTop: "0.75rem", overflowX: "auto" }}>
+              {tower.units.length === 0 ? (
+                <p className="muted text-sm">No units in this tower yet.</p>
+              ) : (
+                <table className="table">
+                  <thead>
+                    <tr>
+                      <th style={{ textAlign: "left" }}>Unit</th>
+                      <th style={{ textAlign: "left" }}>Floor</th>
+                      <th style={{ textAlign: "left" }}>Type</th>
+                      <th style={{ textAlign: "right" }}>Area</th>
+                      <th style={{ textAlign: "right" }}>Price</th>
+                      <th style={{ textAlign: "left" }}>Status</th>
+                      <th style={{ width: 72 }} />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {tower.units.map((u) =>
+                      editUnitId === u.id ? (
+                        <tr key={u.id}>
+                          <td>
+                            <input className="input" value={unitForm.unit_number} onChange={(e) => setUnitForm({ ...unitForm, unit_number: e.target.value })} />
+                          </td>
+                          <td>{u.floor}</td>
+                          <td>
+                            <select className="input" value={unitForm.unit_type} onChange={(e) => setUnitForm({ ...unitForm, unit_type: e.target.value as UnitType })}>
+                              {UNIT_TYPE_OPTIONS.map((o) => (
+                                <option key={o.value} value={o.value}>{o.label}</option>
+                              ))}
+                            </select>
+                          </td>
+                          <td><input className="input" type="number" style={{ textAlign: "right" }} value={unitForm.area} onChange={(e) => setUnitForm({ ...unitForm, area: e.target.value })} /></td>
+                          <td><input className="input" type="number" style={{ textAlign: "right" }} value={unitForm.base_price} onChange={(e) => setUnitForm({ ...unitForm, base_price: e.target.value })} /></td>
+                          <td>{u.status}</td>
+                          <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>
+                            <button type="button" className="btn btn--ghost btn--icon" onClick={() => setEditUnitId(null)} aria-label="Cancel">✕</button>
+                            <Button size="sm" loading={savingUnit} onClick={() => void saveUnitEdit(u.id)}>Save</Button>
+                          </td>
+                        </tr>
+                      ) : (
+                        <tr key={u.id}>
+                          <td><strong>{u.unitNumber}</strong></td>
+                          <td>{u.floor}</td>
+                          <td>{u.unitType}</td>
+                          <td style={{ textAlign: "right" }}>{u.area} {u.areaUnit}</td>
+                          <td style={{ textAlign: "right" }}>{formatInr(u.basePrice)}</td>
+                          <td>{u.status}</td>
+                          <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>
+                            <button type="button" className="btn btn--ghost btn--icon" onClick={() => startUnitEdit(u)} aria-label="Edit unit"><Pencil size={13} /></button>
+                            <button type="button" className="btn btn--ghost btn--icon" onClick={() => setArchiveItem({ kind: "unit", id: u.id, label: u.unitNumber })} aria-label="Archive unit"><Archive size={13} /></button>
+                          </td>
+                        </tr>
+                      )
+                    )}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          )}
 
           {unitTowerId === tower.id && (
             <div className="stack" style={{ marginTop: "0.75rem", gap: "0.6rem" }}>
@@ -573,6 +862,25 @@ function TowerManager({ project, onChanged }: { project: Project; onChanged: () 
           Add tower
         </Button>
       )}
+
+      <ConfirmDialog
+        open={archiveItem !== null}
+        title={archiveItem?.kind === "tower" ? "Archive tower?" : "Archive unit?"}
+        description={
+          archiveItem
+            ? `${archiveItem.label} will be hidden from inventory. ${
+                archiveItem.kind === "tower"
+                  ? "Blocked if any unit is booked, registered or sold."
+                  : "Only available/hold units can be archived."
+              }`
+            : ""
+        }
+        confirmLabel="Archive"
+        cancelLabel="Cancel"
+        loading={archivingItem}
+        onCancel={() => setArchiveItem(null)}
+        onConfirm={() => void confirmArchiveItem()}
+      />
     </div>
   );
 }

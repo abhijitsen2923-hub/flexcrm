@@ -123,6 +123,29 @@ export interface UnitBatchPayload {
   unit_prefix?: string | null;
 }
 
+export interface ProjectUpdatePayload {
+  name?: string;
+  builder_name?: string;
+  location?: string;
+  city?: string;
+  rera_number?: string | null;
+}
+
+export interface TowerUpdatePayload {
+  name?: string;
+  total_floors?: number;
+}
+
+export interface UnitUpdatePayload {
+  unit_number?: string;
+  unit_type?: UnitType;
+  area?: number;
+  area_unit?: string;
+  facing?: string | null;
+  view?: string | null;
+  base_price?: number;
+}
+
 export const inventoryService = {
   listProjects(): Promise<Project[]> {
     return apiClient.get<ApiProject[]>("/inventory/projects").then((r) => r.data.map(mapProject));
@@ -152,6 +175,30 @@ export const inventoryService = {
     return apiClient
       .patch<ApiUnit>(`/inventory/units/${unitId}/status`, { status })
       .then((r) => mapUnit(r.data));
+  },
+
+  updateProject(id: string, payload: ProjectUpdatePayload): Promise<Project> {
+    return apiClient.patch<ApiProject>(`/inventory/projects/${id}`, payload).then((r) => mapProject(r.data));
+  },
+
+  archiveProject(id: string): Promise<void> {
+    return apiClient.delete(`/inventory/projects/${id}`).then(() => undefined);
+  },
+
+  updateTower(id: string, payload: TowerUpdatePayload): Promise<Tower> {
+    return apiClient.patch<ApiTower>(`/inventory/towers/${id}`, payload).then((r) => mapTower(r.data));
+  },
+
+  archiveTower(id: string): Promise<void> {
+    return apiClient.delete(`/inventory/towers/${id}`).then(() => undefined);
+  },
+
+  updateUnit(id: string, payload: UnitUpdatePayload): Promise<Unit> {
+    return apiClient.patch<ApiUnit>(`/inventory/units/${id}`, payload).then((r) => mapUnit(r.data));
+  },
+
+  archiveUnit(id: string): Promise<void> {
+    return apiClient.delete(`/inventory/units/${id}`).then(() => undefined);
   },
 
   getUnit(unitId: string): Promise<Unit> {

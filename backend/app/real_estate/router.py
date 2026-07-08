@@ -1,10 +1,10 @@
 """Real estate API routes — inventory, site visits, bookings."""
-from datetime import date
+from datetime import UTC, date, datetime
 from decimal import Decimal, InvalidOperation
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
-from sqlalchemy import select
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -42,15 +42,18 @@ from app.real_estate.schemas import (
     ProjectCreate,
     ProjectMediaRead,
     ProjectRead,
+    ProjectUpdate,
     ProjectWithTowersRead,
     SiteVisitCreate,
     SiteVisitRead,
     SiteVisitUpdate,
     TowerCreate,
     TowerRead,
+    TowerUpdate,
     UnitBatchCreate,
     UnitRead,
     UnitStatusUpdate,
+    UnitUpdate,
 )
 from app.services.realtime import realtime_manager
 
@@ -68,8 +71,10 @@ async def list_projects(
 ):
     stmt = (
         select(Project)
+        .where(Project.is_deleted.is_(False))
         .options(
-            selectinload(Project.towers).selectinload(Tower.units),
+            selectinload(Project.towers.and_(Tower.is_deleted.is_(False)))
+            .selectinload(Tower.units.and_(Unit.is_deleted.is_(False))),
             selectinload(Project.media),
         )
         .order_by(Project.created_at.desc())
@@ -98,9 +103,10 @@ async def get_project(
 ):
     stmt = (
         select(Project)
-        .where(Project.id == project_id)
+        .where(Project.id == project_id, Project.is_deleted.is_(False))
         .options(
-            selectinload(Project.towers).selectinload(Tower.units),
+            selectinload(Project.towers.and_(Tower.is_deleted.is_(False)))
+            .selectinload(Tower.units.and_(Unit.is_deleted.is_(False))),
             selectinload(Project.media),
         )
     )
@@ -238,7 +244,7 @@ async def create_units_batch(
     # Return the tower's units freshly loaded (avoids per-object refresh after commit).
     stmt = (
         select(Unit)
-        .where(Unit.tower_id == tower_id)
+        .where(Unit.tower_id == tower_id, Unit.is_deleted.is_(False))
         .order_by(Unit.floor.desc(), Unit.unit_number)
     )
     return list((await session.execute(stmt)).scalars().all())
@@ -276,6 +282,152 @@ async def update_unit_status(
         "project_id": str(unit.project_id),
     })
     return unit
+
+
+# ---------------------------------------------------------------------------
+# Inventory — edit + archive (soft delete)
+# ---------------------------------------------------------------------------
+
+# A unit is safe to archive only before it carries any commitment.
+_ARCHIVABLE_UNIT_STATUSES = (UnitStatus.available, UnitStatus.hold)
+
+
+def _stamp_archived(obj, user_id: UUID | None, when: datetime) -> None:
+    obj.is_deleted = True
+    obj.deleted_at = when
+    obj.deleted_by_id = user_id
+
+
+@router.patch("/inventory/projects/{project_id}", response_model=ProjectRead)
+async def update_project(
+    project_id: UUID,
+    payload: ProjectUpdate,
+    _: object = Depends(require_permissions(PermissionCode.LEAD_MANAGE)),
+    session: AsyncSession = Depends(get_db_session),
+):
+    project = await session.get(Project, project_id)
+    if not project or project.is_deleted:
+        raise HTTPException(status_code=404, detail="Project not found")
+    for field, value in payload.model_dump(exclude_unset=True).items():
+        setattr(project, field, value)
+    await session.commit()
+    await session.refresh(project)
+    return project
+
+
+@router.delete("/inventory/projects/{project_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def archive_project(
+    project_id: UUID,
+    current_user=Depends(require_permissions(PermissionCode.LEAD_MANAGE)),
+    session: AsyncSession = Depends(get_db_session),
+):
+    project = await session.get(Project, project_id)
+    if not project or project.is_deleted:
+        raise HTTPException(status_code=404, detail="Project not found")
+    in_use = await session.scalar(
+        select(func.count())
+        .select_from(Unit)
+        .where(
+            Unit.project_id == project_id,
+            Unit.is_deleted.is_(False),
+            Unit.status.not_in(_ARCHIVABLE_UNIT_STATUSES),
+        )
+    )
+    if in_use:
+        raise HTTPException(status_code=409, detail="Project has booked/registered/sold units; cannot archive.")
+    now = datetime.now(UTC)
+    values = {"is_deleted": True, "deleted_at": now, "deleted_by_id": current_user.id}
+    await session.execute(
+        update(Unit).where(Unit.project_id == project_id, Unit.is_deleted.is_(False)).values(**values)
+    )
+    await session.execute(
+        update(Tower).where(Tower.project_id == project_id, Tower.is_deleted.is_(False)).values(**values)
+    )
+    _stamp_archived(project, current_user.id, now)
+    await session.commit()
+
+
+@router.patch("/inventory/towers/{tower_id}", response_model=TowerRead)
+async def update_tower(
+    tower_id: UUID,
+    payload: TowerUpdate,
+    _: object = Depends(require_permissions(PermissionCode.LEAD_MANAGE)),
+    session: AsyncSession = Depends(get_db_session),
+):
+    tower = await session.get(Tower, tower_id)
+    if not tower or tower.is_deleted:
+        raise HTTPException(status_code=404, detail="Tower not found")
+    for field, value in payload.model_dump(exclude_unset=True).items():
+        setattr(tower, field, value)
+    await session.commit()
+    await session.refresh(tower)
+    return tower
+
+
+@router.delete("/inventory/towers/{tower_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def archive_tower(
+    tower_id: UUID,
+    current_user=Depends(require_permissions(PermissionCode.LEAD_MANAGE)),
+    session: AsyncSession = Depends(get_db_session),
+):
+    tower = await session.get(Tower, tower_id)
+    if not tower or tower.is_deleted:
+        raise HTTPException(status_code=404, detail="Tower not found")
+    in_use = await session.scalar(
+        select(func.count())
+        .select_from(Unit)
+        .where(
+            Unit.tower_id == tower_id,
+            Unit.is_deleted.is_(False),
+            Unit.status.not_in(_ARCHIVABLE_UNIT_STATUSES),
+        )
+    )
+    if in_use:
+        raise HTTPException(status_code=409, detail="Tower has booked/registered/sold units; cannot archive.")
+    now = datetime.now(UTC)
+    values = {"is_deleted": True, "deleted_at": now, "deleted_by_id": current_user.id}
+    await session.execute(
+        update(Unit).where(Unit.tower_id == tower_id, Unit.is_deleted.is_(False)).values(**values)
+    )
+    _stamp_archived(tower, current_user.id, now)
+    await session.commit()
+
+
+@router.patch("/inventory/units/{unit_id}", response_model=UnitRead)
+async def update_unit(
+    unit_id: UUID,
+    payload: UnitUpdate,
+    _: object = Depends(require_permissions(PermissionCode.LEAD_MANAGE)),
+    session: AsyncSession = Depends(get_db_session),
+):
+    unit = await session.get(Unit, unit_id)
+    if not unit or unit.is_deleted:
+        raise HTTPException(status_code=404, detail="Unit not found")
+    data = payload.model_dump(exclude_unset=True)
+    if "unit_type" in data:
+        ut = data.pop("unit_type")
+        if ut is not None:
+            unit.unit_type = ut.value if hasattr(ut, "value") else ut
+    for field, value in data.items():
+        setattr(unit, field, value)
+    await session.commit()
+    await session.refresh(unit)
+    return unit
+
+
+@router.delete("/inventory/units/{unit_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def archive_unit(
+    unit_id: UUID,
+    current_user=Depends(require_permissions(PermissionCode.LEAD_MANAGE)),
+    session: AsyncSession = Depends(get_db_session),
+):
+    unit = await session.get(Unit, unit_id)
+    if not unit or unit.is_deleted:
+        raise HTTPException(status_code=404, detail="Unit not found")
+    if unit.status not in _ARCHIVABLE_UNIT_STATUSES:
+        raise HTTPException(status_code=409, detail="Cannot archive a booked/registered/sold unit.")
+    _stamp_archived(unit, current_user.id, datetime.now(UTC))
+    await session.commit()
 
 
 # ---------------------------------------------------------------------------
