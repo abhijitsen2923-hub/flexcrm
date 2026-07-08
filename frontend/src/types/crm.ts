@@ -156,6 +156,7 @@ export interface Customer {
   churn_reason: string | null;
   original_owner_id: string | null;
   current_owner_id: string | null;
+  current_owner?: { id: string; first_name: string; last_name: string; email: string } | null;
   source_lead_id: string | null;
   source_lead: CustomerSourceLead | null;
   created_by_id: string | null;

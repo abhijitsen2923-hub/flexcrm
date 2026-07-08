@@ -7,7 +7,7 @@ renewed → churned). The nightly health-check job (see
 between at_risk / renewal_due / active based on activity and renewals.
 """
 from datetime import UTC, date, datetime, timedelta
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from uuid import UUID
 
 from sqlalchemy import func, select
@@ -24,7 +24,8 @@ RENEWAL_WARNING_DAYS = 30
 
 
 async def recompute_ltv(session, customer: Customer) -> Decimal:
-    """Sum of every won Deal + every renewed Renewal for this customer."""
+    """Sum of every won Deal + every renewed Renewal + every confirmed real-estate
+    booking's total consideration for this customer."""
     deals = (
         await session.execute(
             select(func.coalesce(func.sum(Deal.amount), 0)).where(
@@ -41,8 +42,38 @@ async def recompute_ltv(session, customer: Customer) -> Decimal:
             )
         )
     ).scalar_one() or Decimal("0")
-    total = Decimal(deals) + Decimal(renewals)
+    total = Decimal(deals) + Decimal(renewals) + await _confirmed_booking_total(session, customer.id)
     customer.ltv = total
+    return total
+
+
+async def _confirmed_booking_total(session, customer_id: UUID) -> Decimal:
+    """Total consideration across a customer's confirmed real-estate bookings.
+
+    Imported lazily so this core lifecycle helper doesn't hard-depend on the
+    real-estate vertical. The `bookings` table exists in every tenant schema, so
+    the query is safe (non-RE tenants just have zero rows).
+    """
+    from app.database.enums import BookingStatus
+    from app.real_estate.models import Booking
+
+    snapshots = (
+        await session.execute(
+            select(Booking.pricing_snapshot).where(
+                Booking.customer_id == customer_id,
+                Booking.status == BookingStatus.confirmed,
+                Booking.is_deleted.is_(False),
+            )
+        )
+    ).scalars().all()
+
+    total = Decimal("0")
+    for snap in snapshots:
+        if isinstance(snap, dict) and snap.get("total") is not None:
+            try:
+                total += Decimal(str(snap["total"]))
+            except (InvalidOperation, TypeError):
+                pass
     return total
 
 

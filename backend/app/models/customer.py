@@ -72,6 +72,14 @@ class Customer(TenantBase, UUIDPrimaryKeyMixin, TimestampMixin, TenantAuditMixin
         foreign_keys=[source_lead_id],
         lazy="selectin",
     )
+    # Read-only link to the owning user (for display: owner name in Customer 360).
+    current_owner = relationship(
+        "User",
+        primaryjoin="Customer.current_owner_id == User.id",
+        foreign_keys="[Customer.current_owner_id]",
+        viewonly=True,
+        lazy="selectin",
+    )
     deals = relationship("Deal", back_populates="customer")
     activities = relationship("Activity", back_populates="customer")
     delivery_logs = relationship(

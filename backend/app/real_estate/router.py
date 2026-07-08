@@ -5,6 +5,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
 from sqlalchemy import func, select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -28,6 +29,7 @@ from app.real_estate.models import (
     Tower,
     Unit,
 )
+from app.services.customer_lifecycle import recompute_ltv
 from app.real_estate.schemas import (
     BookingCancel,
     BookingCreate,
@@ -644,7 +646,21 @@ async def advance_booking_step(
         booking.status = BookingStatus.confirmed
         unit.status = UnitStatus.booked
         booked_unit = (str(unit.id), str(unit.project_id))
-    await session.commit()
+        # Roll the confirmed purchase into the customer's lifetime value.
+        if booking.customer_id:
+            customer = await session.get(Customer, booking.customer_id)
+            if customer is not None:
+                await recompute_ltv(session, customer)
+    try:
+        await session.commit()
+    except IntegrityError:
+        # The partial unique index (uq_bookings_unit_confirmed) rejected a second
+        # confirmed booking for this unit — a concurrent double-confirm lost the race.
+        await session.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail="Unit was just booked by another transaction; please pick another unit.",
+        )
     if booked_unit is not None:
         await realtime_manager.broadcast(
             {
@@ -966,6 +982,12 @@ async def cancel_booking(
 
     booking.status = BookingStatus.cancelled
     booking.cancellation_reason = payload.reason
+
+    # Drop this purchase out of the customer's lifetime value.
+    if booking.customer_id:
+        customer = await session.get(Customer, booking.customer_id)
+        if customer is not None:
+            await recompute_ltv(session, customer)
 
     # Free the unit back to Available — but only if it hasn't progressed past a
     # booking (a registered/sold unit is left alone).

@@ -6,6 +6,7 @@ from pydantic import EmailStr, Field
 
 from app.database.enums import CustomerLifecycleStage, CustomerStatus
 from app.schemas.common import ORMModel, SearchSortParams
+from app.schemas.user import UserSummary
 
 
 class CustomerCompact(ORMModel):
@@ -58,6 +59,7 @@ class CustomerRead(CustomerCompact):
     churn_reason: str | None = None
     original_owner_id: UUID | None = None
     current_owner_id: UUID | None = None
+    current_owner: UserSummary | None = None
     created_by_id: UUID | None = None
     updated_by_id: UUID | None = None
     created_at: datetime

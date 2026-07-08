@@ -165,6 +165,14 @@ export function CustomerDrawer({ open, customer, onClose }: Props) {
                       <DetailRow label="Lead source" value={c.source ?? "—"} />
                       <DetailRow label="Lifecycle" value={c.lifecycle_stage} />
                       <DetailRow label="Status" value={c.status} />
+                      <DetailRow
+                        label="Owner"
+                        value={
+                          c.current_owner
+                            ? `${c.current_owner.first_name} ${c.current_owner.last_name}`
+                            : "—"
+                        }
+                      />
                       <DetailRow label="Lifetime value" value={formatCurrency(c.ltv ?? "0", "INR")} />
                       <DetailRow
                         label="Origin"
