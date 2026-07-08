@@ -9,7 +9,7 @@ from sqlalchemy.orm import selectinload
 from app.api.deps import require_permissions
 from app.core.exceptions import NotFoundError
 from app.core.permissions import PermissionCode
-from app.database.enums import UnitStatus, UnitType
+from app.database.enums import BookingStatus, UnitStatus, UnitType
 from app.database.session import get_db_session
 from app.real_estate.models import (
     Booking,
@@ -383,7 +383,27 @@ async def advance_booking_step(
         ps = PaymentSchedule(booking_id=booking.id, **ps_data.model_dump())
         ps.outstanding = ps.demand_amount - ps.paid_amount
         session.add(ps)
+
+    # Final step confirms the booking and marks the unit as Booked (unless it's
+    # already further along, e.g. registered/sold). Capture ids before commit so
+    # the post-commit broadcast doesn't trigger a lazy load on an expired object.
+    booked_unit: tuple[str, str] | None = None
+    if step == 4:
+        booking.status = BookingStatus.confirmed
+        unit = await session.get(Unit, booking.unit_id)
+        if unit is not None and unit.status in (UnitStatus.available, UnitStatus.hold):
+            unit.status = UnitStatus.booked
+            booked_unit = (str(unit.id), str(unit.project_id))
     await session.commit()
+    if booked_unit is not None:
+        await realtime_manager.broadcast(
+            {
+                "event": "unit.status_changed",
+                "unit_id": booked_unit[0],
+                "status": UnitStatus.booked.value,
+                "project_id": booked_unit[1],
+            }
+        )
     stmt = (
         select(Booking)
         .where(Booking.id == booking_id)
