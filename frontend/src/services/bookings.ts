@@ -1,5 +1,5 @@
 import { apiClient } from "./http";
-import type { Booking, BookingStatus, BookingStep, PricingSnapshot } from "../types/realestate";
+import type { Booking, BookingStatus, BookingStep, PricingSnapshot, UnitStatus, UnitType } from "../types/realestate";
 
 export interface CreateBookingPayload {
   unitId: string;
@@ -21,8 +21,29 @@ interface ApiBooking {
   possession_checklist?: boolean[] | null;
   created_at: string;
   updated_at: string;
+  unit?: {
+    id: string;
+    unit_number: string;
+    floor: number;
+    unit_type: string;
+    area: number | string;
+    area_unit: string;
+    base_price: number | string;
+    status: string;
+    tower_name: string | null;
+    project_name: string | null;
+  } | null;
   customer?: { id: string; contact_name: string; company_name: string; email: string | null } | null;
   kyc_documents?: { doc_type?: string; type?: string; file_path?: string | null; created_at?: string }[];
+  payment_schedules?: {
+    id: string;
+    installment_name: string;
+    due_date: string;
+    demand_amount: number | string;
+    paid_amount: number | string;
+    outstanding: number | string;
+    is_overdue: boolean;
+  }[];
 }
 
 function mapBooking(b: ApiBooking): Booking {
@@ -41,6 +62,15 @@ function mapBooking(b: ApiBooking): Booking {
           email: b.customer.email ?? null,
         }
       : null,
+    paymentSchedules: (b.payment_schedules ?? []).map((p) => ({
+      id: p.id,
+      installmentName: p.installment_name,
+      dueDate: p.due_date,
+      demandAmount: Number(p.demand_amount),
+      paidAmount: Number(p.paid_amount),
+      outstanding: Number(p.outstanding),
+      isOverdue: p.is_overdue,
+    })),
     kycDocuments: (b.kyc_documents ?? []).map((d) => ({
       type: (d.type ?? d.doc_type ?? "other") as "aadhaar" | "pan" | "photo" | "other",
       fileName: d.file_path ?? "",
@@ -49,6 +79,20 @@ function mapBooking(b: ApiBooking): Booking {
     pricingSnapshot: (b.pricing_snapshot as PricingSnapshot | null) ?? null,
     scheduledDate: b.scheduled_date,
     possessionChecklist: b.possession_checklist ?? null,
+    unit: b.unit
+      ? {
+          id: b.unit.id,
+          unitNumber: b.unit.unit_number,
+          floor: b.unit.floor,
+          unitType: b.unit.unit_type as UnitType,
+          area: Number(b.unit.area),
+          areaUnit: b.unit.area_unit as "sqft" | "sqmt",
+          basePrice: Number(b.unit.base_price),
+          status: b.unit.status as UnitStatus,
+          towerName: b.unit.tower_name ?? "",
+          projectName: b.unit.project_name ?? "",
+        }
+      : undefined,
     bookingFormUrl: null,
     allotmentLetterUrl: null,
     createdAt: b.created_at,

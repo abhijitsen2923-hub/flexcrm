@@ -88,6 +88,16 @@ class Unit(TenantBase, UUIDPrimaryKeyMixin, TimestampMixin):
     tower: Mapped["Tower"] = relationship("Tower", back_populates="units")
     bookings: Mapped[list["Booking"]] = relationship("Booking", back_populates="unit")
 
+    # Convenience names for read schemas (BookingUnitInfo). Only accessed when the
+    # tower + project are eager-loaded, so they never trigger a lazy load.
+    @property
+    def tower_name(self) -> str | None:
+        return self.tower.name if self.tower else None
+
+    @property
+    def project_name(self) -> str | None:
+        return self.tower.project.name if self.tower and self.tower.project else None
+
 
 class SiteVisit(TenantBase, UUIDPrimaryKeyMixin, TimestampMixin, TenantAuditMixin):
     __tablename__ = "site_visits"

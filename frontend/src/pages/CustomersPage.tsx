@@ -16,6 +16,7 @@ import {
   useToast,
   type DataTableColumn
 } from "../components";
+import { CustomerDrawer } from "../components/customers/CustomerDrawer";
 import { useCustomers } from "../hooks/useCustomers";
 import { usePermissions } from "../hooks/usePermissions";
 import { useRealtimeEvent } from "../realtime";
@@ -89,6 +90,9 @@ export default function CustomersPage() {
 
   const [deleting, setDeleting] = useState<Customer | null>(null);
   const [deleteSubmitting, setDeleteSubmitting] = useState(false);
+
+  // Customer 360 detail drawer (click a row).
+  const [detailCustomer, setDetailCustomer] = useState<Customer | null>(null);
 
   useRealtimeEvent((event) => {
     if (event.event.startsWith("customer.")) {
@@ -238,14 +242,19 @@ export default function CustomersPage() {
       render: (customer) =>
         canManage ? (
           <div className="row" style={{ justifyContent: "flex-end" }}>
-            <Button variant="ghost" size="sm" icon={<Pencil size={14} />} onClick={() => openEdit(customer)}>
+            <Button
+              variant="ghost"
+              size="sm"
+              icon={<Pencil size={14} />}
+              onClick={(e) => { e.stopPropagation(); openEdit(customer); }}
+            >
               Edit
             </Button>
             <Button
               variant="ghost"
               size="sm"
               icon={<Trash2 size={14} />}
-              onClick={() => setDeleting(customer)}
+              onClick={(e) => { e.stopPropagation(); setDeleting(customer); }}
             >
               Delete
             </Button>
@@ -340,6 +349,7 @@ export default function CustomersPage() {
               columns={columns}
               rows={customers}
               rowKey={(customer) => customer.id}
+              onRowClick={(customer) => setDetailCustomer(customer)}
               empty={<EmptyState title="No customers yet" description="Create your first customer to get started." />}
             />
           )}
@@ -445,6 +455,12 @@ export default function CustomersPage() {
         loading={deleteSubmitting}
         onCancel={() => setDeleting(null)}
         onConfirm={handleDelete}
+      />
+
+      <CustomerDrawer
+        open={detailCustomer !== null}
+        customer={detailCustomer}
+        onClose={() => setDetailCustomer(null)}
       />
     </>
   );

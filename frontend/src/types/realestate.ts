@@ -98,12 +98,23 @@ export interface BookingCustomer {
   email: string | null;
 }
 
+export interface PaymentScheduleEntry {
+  id: string;
+  installmentName: string;
+  dueDate: string;
+  demandAmount: number;
+  paidAmount: number;
+  outstanding: number;
+  isOverdue: boolean;
+}
+
 export interface Booking {
   id: string;
   unitId: string;
   leadId: string | null;
   customerId: string | null;
   customer: BookingCustomer | null;
+  paymentSchedules: PaymentScheduleEntry[];
   step: BookingStep;
   status: BookingStatus;
   kycDocuments: KycDocument[];
@@ -114,5 +125,5 @@ export interface Booking {
   allotmentLetterUrl: string | null;
   createdAt: string;
   updatedAt: string;
-  unit?: Pick<Unit, "id" | "unitNumber" | "floor" | "area" | "basePrice" | "status"> & { towerName: string; projectName: string };
+  unit?: Pick<Unit, "id" | "unitNumber" | "floor" | "unitType" | "area" | "areaUnit" | "basePrice" | "status"> & { towerName: string; projectName: string };
 }

@@ -160,11 +160,26 @@ class PaymentScheduleCreate(ORMModel):
     paid_amount: Decimal = Field(default=Decimal("0"), ge=0)
 
 
+class BookingUnitInfo(ORMModel):
+    """Unit details + site (project) and tower names for a purchase card."""
+    id: UUID
+    unit_number: str
+    floor: int
+    unit_type: str = "residential"
+    area: Decimal
+    area_unit: str
+    base_price: Decimal
+    status: UnitStatus
+    tower_name: str | None = None
+    project_name: str | None = None
+
+
 class BookingRead(ORMModel):
     id: UUID
     unit_id: UUID
     lead_id: UUID | None = None
     customer_id: UUID | None = None
+    unit: BookingUnitInfo | None = None
     step: int
     status: BookingStatus
     pricing_snapshot: dict | None = None
