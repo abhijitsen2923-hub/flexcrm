@@ -113,6 +113,8 @@ class SiteVisit(TenantBase, UUIDPrimaryKeyMixin, TimestampMixin, TenantAuditMixi
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     project: Mapped["Project"] = relationship("Project")
+    # Read-only link to the lead for display (lead name/number on the calendar).
+    lead = relationship("Lead", foreign_keys=[lead_id], viewonly=True)
 
 
 class Booking(TenantBase, UUIDPrimaryKeyMixin, TimestampMixin, TenantAuditMixin, TenantSoftDeleteMixin):
@@ -140,6 +142,9 @@ class Booking(TenantBase, UUIDPrimaryKeyMixin, TimestampMixin, TenantAuditMixin,
     )
     pricing_snapshot: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     scheduled_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    # Post-registration handover checklist — a list of booleans aligned with the
+    # UI's checklist items. Persisted so the Possession Tracker survives refresh.
+    possession_checklist: Mapped[list | None] = mapped_column(JSON, nullable=True)
 
     unit: Mapped["Unit"] = relationship("Unit", back_populates="bookings")
     # Read-only link to the customer for display (name on lists/trackers/docs).

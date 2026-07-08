@@ -31,6 +31,7 @@ from app.real_estate.schemas import (
     BookingStepAdvance,
     CollectionLedgerEntry,
     PaymentScheduleRead,
+    PossessionChecklistUpdate,
     PricingUpdate,
     ProjectCreate,
     ProjectRead,
@@ -220,12 +221,25 @@ async def list_site_visits(
     _: object = Depends(require_permissions(PermissionCode.LEAD_VIEW)),
     session: AsyncSession = Depends(get_db_session),
 ):
-    stmt = select(SiteVisit).order_by(SiteVisit.scheduled_at.desc())
+    stmt = (
+        select(SiteVisit)
+        .options(selectinload(SiteVisit.project), selectinload(SiteVisit.lead))
+        .order_by(SiteVisit.scheduled_at.desc())
+    )
     if project_id:
         stmt = stmt.where(SiteVisit.project_id == project_id)
     if lead_id:
         stmt = stmt.where(SiteVisit.lead_id == lead_id)
     return list((await session.execute(stmt)).scalars().all())
+
+
+async def _site_visit_read(session: AsyncSession, visit_id: UUID) -> SiteVisit:
+    stmt = (
+        select(SiteVisit)
+        .where(SiteVisit.id == visit_id)
+        .options(selectinload(SiteVisit.project), selectinload(SiteVisit.lead))
+    )
+    return (await session.execute(stmt)).scalar_one()
 
 
 @router.post("/site-visits", response_model=SiteVisitRead, status_code=status.HTTP_201_CREATED)
@@ -237,8 +251,7 @@ async def create_site_visit(
     visit = SiteVisit(**payload.model_dump())
     session.add(visit)
     await session.commit()
-    await session.refresh(visit)
-    return visit
+    return await _site_visit_read(session, visit.id)
 
 
 @router.patch("/site-visits/{visit_id}", response_model=SiteVisitRead)
@@ -254,8 +267,7 @@ async def update_site_visit(
     for field, value in payload.model_dump(exclude_unset=True).items():
         setattr(visit, field, value)
     await session.commit()
-    await session.refresh(visit)
-    return visit
+    return await _site_visit_read(session, visit_id)
 
 
 # ---------------------------------------------------------------------------
@@ -438,6 +450,26 @@ async def update_booking_pricing(
     if not booking or booking.is_deleted:
         raise HTTPException(status_code=404, detail="Booking not found")
     booking.pricing_snapshot = payload.pricing_snapshot
+    await session.commit()
+    stmt = (
+        select(Booking)
+        .where(Booking.id == booking_id)
+        .options(selectinload(Booking.customer), selectinload(Booking.kyc_documents), selectinload(Booking.payment_schedules))
+    )
+    return (await session.execute(stmt)).scalar_one()
+
+
+@router.put("/bookings/{booking_id}/possession", response_model=BookingRead)
+async def update_possession_checklist(
+    booking_id: UUID,
+    payload: PossessionChecklistUpdate,
+    _: object = Depends(require_permissions(PermissionCode.LEAD_MANAGE)),
+    session: AsyncSession = Depends(get_db_session),
+):
+    booking = await session.get(Booking, booking_id)
+    if not booking or booking.is_deleted:
+        raise HTTPException(status_code=404, detail="Booking not found")
+    booking.possession_checklist = payload.checklist
     await session.commit()
     stmt = (
         select(Booking)

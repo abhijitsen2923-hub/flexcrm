@@ -186,7 +186,8 @@ export function SiteVisitCalendar({ visits, onSchedule, onUpdateFeedback }: Prop
                   <span className="sv-event__time">
                     {new Date(v.scheduledAt).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}
                   </span>
-                  <span className="sv-event__lead">Lead {v.leadId.slice(0, 6)}</span>
+                  <span className="sv-event__lead">{v.lead?.contactName ?? (v.leadId ? `Lead ${v.leadId.slice(0, 6)}` : "Site visit")}</span>
+                  {v.project && <span className="sv-event__project muted text-xs">{v.project.name}</span>}
                   {v.feedback && (
                     <Badge tone={FEEDBACK_TONE[v.feedback]}>{FEEDBACK_LABELS[v.feedback]}</Badge>
                   )}
@@ -218,7 +219,10 @@ export function SiteVisitCalendar({ visits, onSchedule, onUpdateFeedback }: Prop
       {selectedVisit && (
         <Modal open title="Site Visit" onClose={() => setSelectedVisit(null)}>
           <div className="sv-detail">
-            <p><strong>Lead:</strong> {selectedVisit.leadId}</p>
+            <p><strong>Lead:</strong> {selectedVisit.lead?.contactName ?? "—"}
+              {selectedVisit.lead?.leadNumber ? ` (#${selectedVisit.lead.leadNumber})` : ""}
+              {selectedVisit.lead?.contactPhone ? ` · ${selectedVisit.lead.contactPhone}` : ""}</p>
+            <p><strong>Site:</strong> {selectedVisit.project?.name ?? "—"}</p>
             <p><strong>Scheduled:</strong> {formatDateTime(selectedVisit.scheduledAt)}</p>
             <p><strong>Attended:</strong> {selectedVisit.attended === null ? "Not recorded" : selectedVisit.attended ? "Yes" : "No"}</p>
             {selectedVisit.feedback && (

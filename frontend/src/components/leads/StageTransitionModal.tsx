@@ -5,16 +5,20 @@ import {
   Button,
   FieldWrapper,
   Modal,
+  SelectField,
   TextField,
   TextareaField
 } from "../../components";
 import { usePipelines } from "../../context/PipelineContext";
+import { useInventory } from "../../hooks/useInventory";
 import { usersService } from "../../services/users";
 import type { Lead, PipelineStage, UserSummary } from "../../types";
 import { extractErrorMessage } from "../../utils/errors";
 
 
 const MIN_COMMENT_LENGTH = 10;
+// Real-estate stage that schedules a site visit on the calendar.
+const SITE_VISIT_STAGE = "site_visit_scheduled";
 
 
 interface StageTransitionModalProps {
@@ -28,6 +32,7 @@ interface StageTransitionModalProps {
     next_action_date: string | null;
     attachment_path: string | null;
     mentions: string[];
+    site_visit?: { project_id: string; scheduled_at: string } | null;
   }) => Promise<void>;
 }
 
@@ -40,11 +45,15 @@ export function StageTransitionModal({
   onSubmit
 }: StageTransitionModalProps) {
   const { getStage } = usePipelines();
+  const { projects } = useInventory();
   const fromStage = lead ? getStage(lead.industry, lead.stage_code) : undefined;
+  const isSiteVisitStage = targetStage?.code === SITE_VISIT_STAGE;
 
   const [comment, setComment] = useState("");
   const [nextActionDate, setNextActionDate] = useState("");
   const [attachmentPath, setAttachmentPath] = useState("");
+  const [siteProjectId, setSiteProjectId] = useState("");
+  const [siteDateTime, setSiteDateTime] = useState("");
   const [mentions, setMentions] = useState<UserSummary[]>([]);
   const [mentionQuery, setMentionQuery] = useState("");
   const [mentionCandidates, setMentionCandidates] = useState<UserSummary[]>([]);
@@ -57,6 +66,8 @@ export function StageTransitionModal({
       setComment("");
       setNextActionDate("");
       setAttachmentPath("");
+      setSiteProjectId("");
+      setSiteDateTime("");
       setMentions([]);
       setMentionQuery("");
       setMentionCandidates([]);
@@ -88,8 +99,9 @@ export function StageTransitionModal({
   }, [open, mentionQuery, mentions]);
 
   const trimmedLength = useMemo(() => comment.trim().length, [comment]);
+  const siteVisitReady = !isSiteVisitStage || Boolean(siteProjectId && siteDateTime);
   const canSubmit = Boolean(
-    lead && targetStage && trimmedLength >= MIN_COMMENT_LENGTH && !submitting
+    lead && targetStage && trimmedLength >= MIN_COMMENT_LENGTH && siteVisitReady && !submitting
   );
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -103,7 +115,11 @@ export function StageTransitionModal({
         comment: comment.trim(),
         next_action_date: nextActionDate || null,
         attachment_path: attachmentPath.trim() || null,
-        mentions: mentions.map((u) => u.id)
+        mentions: mentions.map((u) => u.id),
+        site_visit:
+          isSiteVisitStage && siteProjectId && siteDateTime
+            ? { project_id: siteProjectId, scheduled_at: new Date(siteDateTime).toISOString() }
+            : null
       });
       onClose();
     } catch (submitError) {
@@ -168,6 +184,30 @@ export function StageTransitionModal({
             onChange={(event) => setAttachmentPath(event.target.value)}
           />
         </div>
+
+        {isSiteVisitStage && (
+          <div className="form-grid">
+            <SelectField
+              id="sv-project"
+              label="Site (project)"
+              value={siteProjectId}
+              onChange={(event) => setSiteProjectId(event.target.value)}
+              options={[
+                { value: "", label: "Select a site…" },
+                ...projects.map((p) => ({ value: p.id, label: p.name }))
+              ]}
+              hint="A site visit is booked on the calendar for this lead."
+            />
+            <TextField
+              id="sv-datetime"
+              label="Visit date & time"
+              type="datetime-local"
+              value={siteDateTime}
+              onChange={(event) => setSiteDateTime(event.target.value)}
+              required
+            />
+          </div>
+        )}
 
         <FieldWrapper label="Mention teammates (optional)" htmlFor="transition-mention-search">
           <input

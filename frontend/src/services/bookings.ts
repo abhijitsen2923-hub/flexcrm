@@ -18,6 +18,7 @@ interface ApiBooking {
   status: BookingStatus;
   pricing_snapshot: unknown | null;
   scheduled_date: string | null;
+  possession_checklist?: boolean[] | null;
   created_at: string;
   updated_at: string;
   customer?: { id: string; contact_name: string; company_name: string; email: string | null } | null;
@@ -47,6 +48,7 @@ function mapBooking(b: ApiBooking): Booking {
     })),
     pricingSnapshot: (b.pricing_snapshot as PricingSnapshot | null) ?? null,
     scheduledDate: b.scheduled_date,
+    possessionChecklist: b.possession_checklist ?? null,
     bookingFormUrl: null,
     allotmentLetterUrl: null,
     createdAt: b.created_at,
@@ -84,6 +86,12 @@ export const bookingsService = {
   setPricing(id: string, pricing: PricingSnapshot): Promise<Booking> {
     return apiClient
       .put<ApiBooking>(`/bookings/${id}/pricing`, { pricing_snapshot: pricing })
+      .then((r) => mapBooking(r.data));
+  },
+
+  savePossessionChecklist(id: string, checklist: boolean[]): Promise<Booking> {
+    return apiClient
+      .put<ApiBooking>(`/bookings/${id}/possession`, { checklist })
       .then((r) => mapBooking(r.data));
   },
 

@@ -1,7 +1,8 @@
-import { useState } from "react";
-import { Badge, Button, Card, EmptyState, LoadingBlock, Modal } from "../../components";
+import { useEffect, useState } from "react";
+import { Badge, Button, Card, EmptyState, LoadingBlock, Modal, useToast } from "../../components";
 import { useBookings } from "../../hooks/useBookings";
 import { useInventory } from "../../hooks/useInventory";
+import { bookingsService } from "../../services/bookings";
 import "./PossessionTrackerPage.css";
 
 const CHECKLIST = [
@@ -23,8 +24,23 @@ function makeBlank(): boolean[] {
 export default function PossessionTrackerPage() {
   const { bookings, loading } = useBookings();
   const { projects } = useInventory();
+  const toast = useToast();
   const [checked, setChecked] = useState<CheckedMap>({});
   const [activeId, setActiveId] = useState<string | null>(null);
+
+  // Seed the checklist from each booking's persisted state (once per booking,
+  // preserving any in-progress local edits).
+  useEffect(() => {
+    setChecked((prev) => {
+      const next = { ...prev };
+      for (const b of bookings) {
+        if (next[b.id] === undefined) {
+          next[b.id] = CHECKLIST.map((_, i) => b.possessionChecklist?.[i] ?? false);
+        }
+      }
+      return next;
+    });
+  }, [bookings]);
 
   function unitLabel(unitId: string): string {
     for (const p of projects) {
@@ -43,11 +59,16 @@ export default function PossessionTrackerPage() {
     return checked[id] ?? makeBlank();
   }
 
-  function toggle(id: string, idx: number) {
-    setChecked((prev) => {
-      const list = prev[id] ?? makeBlank();
-      return { ...prev, [id]: list.map((v, i) => (i === idx ? !v : v)) };
-    });
+  async function toggle(id: string, idx: number) {
+    const current = checked[id] ?? makeBlank();
+    const list = current.map((v, i) => (i === idx ? !v : v));
+    setChecked((prev) => ({ ...prev, [id]: list }));
+    try {
+      await bookingsService.savePossessionChecklist(id, list);
+    } catch {
+      setChecked((prev) => ({ ...prev, [id]: current })); // revert on failure
+      toast.error("Couldn't save checklist");
+    }
   }
 
   function doneCount(id: string) {
@@ -126,7 +147,7 @@ export default function PossessionTrackerPage() {
                 <input
                   type="checkbox"
                   checked={getList(activeId)[idx]}
-                  onChange={() => toggle(activeId, idx)}
+                  onChange={() => void toggle(activeId, idx)}
                 />
                 <span className={getList(activeId)[idx] ? "done-text" : ""}>
                   {item}

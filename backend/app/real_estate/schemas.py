@@ -87,6 +87,18 @@ class UnitBatchCreate(ORMModel):
     unit_prefix: str | None = Field(default=None, max_length=8)
 
 
+class SiteVisitProjectMini(ORMModel):
+    id: UUID
+    name: str
+
+
+class SiteVisitLeadMini(ORMModel):
+    id: UUID
+    lead_number: int
+    contact_name: str
+    contact_phone: str | None = None
+
+
 class SiteVisitRead(ORMModel):
     id: UUID
     lead_id: UUID | None = None
@@ -98,6 +110,8 @@ class SiteVisitRead(ORMModel):
     notes: str | None = None
     created_at: datetime
     updated_at: datetime
+    project: SiteVisitProjectMini | None = None
+    lead: SiteVisitLeadMini | None = None
 
 
 class SiteVisitCreate(ORMModel):
@@ -155,6 +169,7 @@ class BookingRead(ORMModel):
     status: BookingStatus
     pricing_snapshot: dict | None = None
     scheduled_date: date | None = None
+    possession_checklist: list[bool] | None = None
     created_at: datetime
     updated_at: datetime
     customer: CustomerCompact | None = None
@@ -180,6 +195,10 @@ class BookingStepAdvance(ORMModel):
 
 class PricingUpdate(ORMModel):
     pricing_snapshot: dict
+
+
+class PossessionChecklistUpdate(ORMModel):
+    checklist: list[bool]
 
 
 class CollectionLedgerEntry(ORMModel):

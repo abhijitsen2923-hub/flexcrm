@@ -24,6 +24,7 @@ import { useRealtimeEvent } from "../realtime";
 import { exportsService } from "../services/exports";
 import { leadsService, type LeadDuplicate, type LeadImportResult } from "../services/leads";
 import { organizationsService } from "../services/organizations";
+import { siteVisitsService } from "../services/site-visits";
 import { usersService } from "../services/users";
 import type { Lead, LeadIndustry, Organization, PipelineStage, User } from "../types";
 import { extractErrorMessage } from "../utils/errors";
@@ -907,10 +908,25 @@ export default function LeadsPage() {
         onClose={() => setTransitionOpen(false)}
         onSubmit={async (payload) => {
           if (!transitionLeadState) return;
-          await transitionLead(transitionLeadState.id, payload);
+          const { site_visit, ...transitionPayload } = payload;
+          await transitionLead(transitionLeadState.id, transitionPayload);
+          // When moving to the Site Visit stage, book the visit on the calendar.
+          if (site_visit) {
+            try {
+              await siteVisitsService.create({
+                leadId: transitionLeadState.id,
+                projectId: site_visit.project_id,
+                scheduledAt: site_visit.scheduled_at,
+              });
+            } catch (err) {
+              toast.error("Site visit not booked", extractErrorMessage(err));
+            }
+          }
           toast.success(
             "Stage updated",
-            `Moved to ${transitionTarget?.name ?? payload.to_stage_code}`
+            site_visit
+              ? "Moved · site visit booked on the calendar"
+              : `Moved to ${transitionTarget?.name ?? payload.to_stage_code}`
           );
           setDrawerKey((k) => k + 1);
         }}

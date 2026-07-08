@@ -63,6 +63,8 @@ export interface SiteVisit {
   attended: boolean | null;
   notes: string | null;
   createdAt: string;
+  project: { id: string; name: string } | null;
+  lead: { id: string; leadNumber: number; contactName: string; contactPhone: string | null } | null;
 }
 
 export interface PricingLineItem {
@@ -107,6 +109,7 @@ export interface Booking {
   kycDocuments: KycDocument[];
   pricingSnapshot: PricingSnapshot | null;
   scheduledDate: string | null;
+  possessionChecklist: boolean[] | null;
   bookingFormUrl: string | null;
   allotmentLetterUrl: string | null;
   createdAt: string;

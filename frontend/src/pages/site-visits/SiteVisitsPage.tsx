@@ -10,8 +10,17 @@ import { formatDateTime } from "../../utils/format";
 import "./SiteVisitsPage.css";
 
 const COLUMNS: DataTableColumn<SiteVisit>[] = [
-  { key: "leadId", header: "Lead", render: (v) => v.leadId.slice(0, 8) + "…" },
-  { key: "projectId", header: "Project", render: (v) => v.projectId.slice(0, 8) + "…" },
+  {
+    key: "leadId",
+    header: "Lead",
+    render: (v) =>
+      v.lead
+        ? `${v.lead.contactName}${v.lead.leadNumber ? ` (#${v.lead.leadNumber})` : ""}`
+        : v.leadId
+          ? v.leadId.slice(0, 8) + "…"
+          : "—",
+  },
+  { key: "projectId", header: "Site", render: (v) => v.project?.name ?? "—" },
   { key: "scheduledAt", header: "Scheduled", render: (v) => formatDateTime(v.scheduledAt) },
   {
     key: "attended",
