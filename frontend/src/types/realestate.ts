@@ -136,6 +136,7 @@ export interface Booking {
   pricingSnapshot: PricingSnapshot | null;
   scheduledDate: string | null;
   possessionChecklist: boolean[] | null;
+  cancellationReason: string | null;
   bookingFormUrl: string | null;
   allotmentLetterUrl: string | null;
   createdAt: string;

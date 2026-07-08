@@ -1,10 +1,11 @@
 import { useEffect, useState } from "react";
 import { useLocation, useSearchParams } from "react-router-dom";
 import { ClipboardCheck, Plus, Wallet } from "lucide-react";
-import { Badge, Button, Card, ConfirmDialog, DataTable, EmptyState, Modal, useToast } from "../../components";
+import { Badge, Button, Card, ConfirmDialog, DataTable, EmptyState, Modal, TextField, useToast } from "../../components";
 import type { DataTableColumn } from "../../components";
 import { useBookings } from "../../hooks/useBookings";
 import { useInventory } from "../../hooks/useInventory";
+import { bookingsService } from "../../services/bookings";
 import { inventoryService } from "../../services/inventory";
 import { LoadingBlock } from "../../components/ui/Spinner";
 import { BookingWizard } from "./components/BookingWizard";
@@ -41,6 +42,10 @@ export default function BookingsPage() {
   const [marking, setMarking] = useState(false);
   // Payment plan / collections modal for a booking.
   const [payBooking, setPayBooking] = useState<Booking | null>(null);
+  // Cancel-booking modal.
+  const [cancelTarget, setCancelTarget] = useState<Booking | null>(null);
+  const [cancelReason, setCancelReason] = useState("");
+  const [cancelling, setCancelling] = useState(false);
 
   // Available units across all projects, tagged with their tower/project names.
   const availableUnits = projects.flatMap((p) =>
@@ -145,6 +150,23 @@ export default function BookingsPage() {
     }
   }
 
+  async function confirmCancel() {
+    if (!cancelTarget) return;
+    setCancelling(true);
+    try {
+      await bookingsService.cancelBooking(cancelTarget.id, cancelReason.trim() || null);
+      toast.success("Booking cancelled");
+      setCancelTarget(null);
+      refresh();
+      // The unit was freed back to Available — refresh inventory too.
+      void refreshInventory();
+    } catch (err) {
+      toast.error("Could not cancel", extractErrorMessage(err));
+    } finally {
+      setCancelling(false);
+    }
+  }
+
   const columns: DataTableColumn<Booking>[] = [
     {
       key: "id",
@@ -169,9 +191,24 @@ export default function BookingsPage() {
       key: "status",
       header: "Status",
       render: (b) => (
-        <Badge tone={STATUS_TONE[b.status] ?? "neutral"}>
-          {b.status.charAt(0).toUpperCase() + b.status.slice(1)}
-        </Badge>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <Badge tone={STATUS_TONE[b.status] ?? "neutral"}>
+            {b.status.charAt(0).toUpperCase() + b.status.slice(1)}
+          </Badge>
+          {b.status !== "cancelled" && (
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={(e) => {
+                e.stopPropagation();
+                setCancelReason("");
+                setCancelTarget(b);
+              }}
+            >
+              Cancel
+            </Button>
+          )}
+        </div>
       ),
     },
     {
@@ -330,6 +367,41 @@ export default function BookingsPage() {
             void refresh();
           }}
         />
+      )}
+
+      {cancelTarget && (
+        <Modal
+          open
+          title="Cancel booking"
+          onClose={() => setCancelTarget(null)}
+          footer={
+            <>
+              <Button variant="secondary" onClick={() => setCancelTarget(null)} disabled={cancelling}>
+                Keep booking
+              </Button>
+              <Button variant="danger" loading={cancelling} onClick={() => void confirmCancel()}>
+                Cancel booking
+              </Button>
+            </>
+          }
+        >
+          <div className="stack" style={{ gap: "0.75rem" }}>
+            <p className="text-sm">
+              This frees{" "}
+              {cancelTarget.unit
+                ? `${cancelTarget.unit.projectName} · ${cancelTarget.unit.towerName} · ${cancelTarget.unit.unitNumber}`
+                : "the unit"}{" "}
+              back to Available. If any payment has been recorded, clear/refund it first.
+            </p>
+            <TextField
+              id="cancel-reason"
+              label="Reason (optional)"
+              value={cancelReason}
+              onChange={(e) => setCancelReason(e.target.value)}
+              placeholder="e.g. Customer backed out"
+            />
+          </div>
+        </Modal>
       )}
 
       <ConfirmDialog

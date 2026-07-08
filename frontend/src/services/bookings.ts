@@ -43,6 +43,7 @@ interface ApiBooking {
   pricing_snapshot: unknown | null;
   scheduled_date: string | null;
   possession_checklist?: boolean[] | null;
+  cancellation_reason?: string | null;
   created_at: string;
   updated_at: string;
   unit?: {
@@ -125,6 +126,7 @@ function mapBooking(b: ApiBooking): Booking {
     pricingSnapshot: (b.pricing_snapshot as PricingSnapshot | null) ?? null,
     scheduledDate: b.scheduled_date,
     possessionChecklist: b.possession_checklist ?? null,
+    cancellationReason: b.cancellation_reason ?? null,
     unit: b.unit
       ? {
           id: b.unit.id,
@@ -245,5 +247,12 @@ export const bookingsService = {
     return apiClient
       .get<{ url: string }>(`/bookings/${bookingId}/payments/${receiptId}/receipt/pdf`)
       .then((r) => r.data);
+  },
+
+  // Cancel a booking and free its unit (blocked server-side if payments exist).
+  cancelBooking(id: string, reason?: string | null): Promise<Booking> {
+    return apiClient
+      .post<ApiBooking>(`/bookings/${id}/cancel`, { reason: reason ?? null })
+      .then((r) => mapBooking(r.data));
   },
 };

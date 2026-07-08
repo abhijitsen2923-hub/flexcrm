@@ -29,6 +29,7 @@ from app.real_estate.models import (
     Unit,
 )
 from app.real_estate.schemas import (
+    BookingCancel,
     BookingCreate,
     BookingKycDocRead,
     BookingRead,
@@ -939,3 +940,45 @@ async def get_payment_receipt_pdf(
         "application/pdf",
     )
     return {"url": storage.presigned_get_url(key)}
+
+
+@router.post("/bookings/{booking_id}/cancel", response_model=BookingRead)
+async def cancel_booking(
+    booking_id: UUID,
+    payload: BookingCancel,
+    _: object = Depends(require_permissions(PermissionCode.LEAD_MANAGE)),
+    session: AsyncSession = Depends(get_db_session),
+):
+    """Cancel a booking and free its unit. Blocked once any payment is recorded
+    (the money must be refunded / cleared first)."""
+    stmt = (
+        select(Booking)
+        .where(Booking.id == booking_id)
+        .options(selectinload(Booking.payment_receipts))
+    )
+    booking = (await session.execute(stmt)).scalar_one_or_none()
+    if not booking or booking.is_deleted:
+        raise HTTPException(status_code=404, detail="Booking not found")
+    if booking.status == BookingStatus.cancelled:
+        raise HTTPException(status_code=409, detail="Booking is already cancelled.")
+    if booking.payment_receipts:
+        raise HTTPException(status_code=409, detail="Payments recorded; refund/clear them before cancelling.")
+
+    booking.status = BookingStatus.cancelled
+    booking.cancellation_reason = payload.reason
+
+    # Free the unit back to Available — but only if it hasn't progressed past a
+    # booking (a registered/sold unit is left alone).
+    unit = await session.get(Unit, booking.unit_id)
+    freed = bool(unit and unit.status in (UnitStatus.booked, UnitStatus.hold))
+    if freed:
+        unit.status = UnitStatus.available
+    await session.commit()
+    if freed and unit:
+        await realtime_manager.broadcast({
+            "event": "unit.status_changed",
+            "unit_id": str(unit.id),
+            "status": UnitStatus.available.value,
+            "project_id": str(unit.project_id),
+        })
+    return await _booking_read(session, booking_id)

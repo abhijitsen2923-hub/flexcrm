@@ -188,6 +188,8 @@ class Booking(TenantBase, UUIDPrimaryKeyMixin, TimestampMixin, TenantAuditMixin,
     # Post-registration handover checklist — a list of booleans aligned with the
     # UI's checklist items. Persisted so the Possession Tracker survives refresh.
     possession_checklist: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    # Optional note captured when a booking is cancelled.
+    cancellation_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     unit: Mapped["Unit"] = relationship("Unit", back_populates="bookings")
     # Read-only link to the customer for display (name on lists/trackers/docs).

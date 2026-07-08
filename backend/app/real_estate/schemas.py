@@ -260,6 +260,7 @@ class BookingRead(ORMModel):
     pricing_snapshot: dict | None = None
     scheduled_date: date | None = None
     possession_checklist: list[bool] | None = None
+    cancellation_reason: str | None = None
     created_at: datetime
     updated_at: datetime
     customer: CustomerCompact | None = None
@@ -282,6 +283,10 @@ class BookingStepAdvance(ORMModel):
     # Only an explicit confirm (step 4) finalizes the booking + books the unit.
     # Saving the date for a document preview passes confirm=False.
     confirm: bool = False
+
+
+class BookingCancel(ORMModel):
+    reason: str | None = Field(default=None, max_length=500)
 
 
 class PricingUpdate(ORMModel):
