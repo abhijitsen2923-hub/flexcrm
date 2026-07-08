@@ -390,7 +390,7 @@ async def advance_booking_step(
     # already further along, e.g. registered/sold). Capture ids before commit so
     # the post-commit broadcast doesn't trigger a lazy load on an expired object.
     booked_unit: tuple[str, str] | None = None
-    if step == 4:
+    if step == 4 and booking.status != BookingStatus.confirmed:
         booking.status = BookingStatus.confirmed
         unit = await session.get(Unit, booking.unit_id)
         if unit is not None and unit.status in (UnitStatus.available, UnitStatus.hold):

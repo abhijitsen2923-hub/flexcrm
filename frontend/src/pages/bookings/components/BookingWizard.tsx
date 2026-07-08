@@ -64,8 +64,10 @@ export function BookingWizard({ unit, onClose, onComplete, initialBooking = null
     setCustomerResults([]);
   }
 
-  // Step 4 state
-  const [scheduledDate, setScheduledDate] = useState("");
+  // Step 4 state — pre-fill from the booking so resuming a confirmed booking
+  // shows its saved registration date instead of resetting to empty.
+  const [scheduledDate, setScheduledDate] = useState(initialBooking?.scheduledDate ?? "");
+  const isConfirmed = booking?.status === "confirmed";
 
   const handleCreateBooking = async () => {
     // Resuming an existing booking — don't create a second one.
@@ -125,8 +127,19 @@ export function BookingWizard({ unit, onClose, onComplete, initialBooking = null
 
   const handleGenerate = async (docType: "booking_form" | "allotment_letter") => {
     if (!booking) return;
+    if (!scheduledDate) {
+      toast.error("Registration date required", "Set the registration date before generating the form.");
+      return;
+    }
     setSaving(true);
     try {
+      // Persist the registration date so it appears on the document. The backend
+      // won't re-confirm an already-confirmed booking (guarded), so this only
+      // updates the date.
+      if (booking.scheduledDate !== scheduledDate) {
+        const updated = await bookingsService.advanceStep(booking.id, 4, { scheduled_date: scheduledDate });
+        setBooking(updated);
+      }
       const { html, title } = await bookingsService.getDocumentHtml(booking.id, docType);
       setDocHtml(html);
       setDocTitle(title);
@@ -139,10 +152,14 @@ export function BookingWizard({ unit, onClose, onComplete, initialBooking = null
 
   const handleConfirm = async () => {
     if (!booking) return;
+    if (!scheduledDate) {
+      toast.error("Registration date required", "Enter the registration date to confirm the booking.");
+      return;
+    }
     setSaving(true);
     try {
-      const updated = await bookingsService.advanceStep(booking.id, 4, { scheduled_date: scheduledDate || null });
-      toast.success("Booking confirmed!");
+      const updated = await bookingsService.advanceStep(booking.id, 4, { scheduled_date: scheduledDate });
+      toast.success(isConfirmed ? "Registration date saved" : "Booking confirmed!");
       onComplete(updated);
     } catch {
       toast.error("Failed to confirm booking");
@@ -159,8 +176,9 @@ export function BookingWizard({ unit, onClose, onComplete, initialBooking = null
           <div className="booking-wizard__steps" role="list">
             {STEPS.map((label, i) => {
               const stepNum = i + 1;
-              const done = stepNum < step;
-              const active = stepNum === step;
+              // A confirmed booking has every step done (no yellow "active").
+              const done = stepNum < step || isConfirmed;
+              const active = stepNum === step && !isConfirmed;
               return (
                 <div
                   key={label}
@@ -322,11 +340,14 @@ export function BookingWizard({ unit, onClose, onComplete, initialBooking = null
                 type="date"
                 value={scheduledDate}
                 onChange={(e) => setScheduledDate(e.target.value)}
+                required
+                hint="Required — appears on the booking form and allotment letter."
               />
               <div className="bw-doc-actions">
                 <Button
                   variant="secondary"
                   loading={saving}
+                  disabled={!scheduledDate}
                   onClick={() => handleGenerate("booking_form")}
                 >
                   Generate Booking Form
@@ -334,15 +355,19 @@ export function BookingWizard({ unit, onClose, onComplete, initialBooking = null
                 <Button
                   variant="secondary"
                   loading={saving}
+                  disabled={!scheduledDate}
                   onClick={() => handleGenerate("allotment_letter")}
                 >
                   Generate Allotment Letter
                 </Button>
               </div>
+              {!scheduledDate && (
+                <p className="muted text-xs">Enter the registration date to generate documents.</p>
+              )}
               <div className="bw-footer">
                 <Button variant="secondary" onClick={() => setStep(3)}>← Back</Button>
                 <Button variant="primary" loading={saving} onClick={handleConfirm}>
-                  Confirm Booking
+                  {isConfirmed ? "Save & Close" : "Confirm Booking"}
                 </Button>
               </div>
             </div>
