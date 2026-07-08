@@ -108,6 +108,20 @@ export interface PaymentScheduleEntry {
   isOverdue: boolean;
 }
 
+export type PaymentMode = "upi" | "neft" | "cheque" | "cash" | "card" | "other";
+
+export interface PaymentReceipt {
+  id: string;
+  bookingId: string;
+  scheduleId: string | null;
+  amount: number;
+  paidOn: string;
+  mode: PaymentMode;
+  reference: string | null;
+  notes: string | null;
+  createdAt: string;
+}
+
 export interface Booking {
   id: string;
   unitId: string;
@@ -115,6 +129,7 @@ export interface Booking {
   customerId: string | null;
   customer: BookingCustomer | null;
   paymentSchedules: PaymentScheduleEntry[];
+  paymentReceipts: PaymentReceipt[];
   step: BookingStep;
   status: BookingStatus;
   kycDocuments: KycDocument[];

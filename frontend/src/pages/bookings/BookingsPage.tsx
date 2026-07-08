@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useLocation, useSearchParams } from "react-router-dom";
-import { ClipboardCheck, Plus } from "lucide-react";
+import { ClipboardCheck, Plus, Wallet } from "lucide-react";
 import { Badge, Button, Card, ConfirmDialog, DataTable, EmptyState, Modal, useToast } from "../../components";
 import type { DataTableColumn } from "../../components";
 import { useBookings } from "../../hooks/useBookings";
@@ -8,6 +8,7 @@ import { useInventory } from "../../hooks/useInventory";
 import { inventoryService } from "../../services/inventory";
 import { LoadingBlock } from "../../components/ui/Spinner";
 import { BookingWizard } from "./components/BookingWizard";
+import { PaymentPlanModal } from "./components/PaymentPlanModal";
 import type { Booking, Unit, UnitStatus } from "../../types/realestate";
 import { extractErrorMessage } from "../../utils/errors";
 import { formatDate, formatInr } from "../../utils/format";
@@ -38,6 +39,8 @@ export default function BookingsPage() {
   // Staged unit-lifecycle action (Booked → Registered → Sold) from the list.
   const [markAction, setMarkAction] = useState<{ unitId: string; label: string; target: UnitStatus } | null>(null);
   const [marking, setMarking] = useState(false);
+  // Payment plan / collections modal for a booking.
+  const [payBooking, setPayBooking] = useState<Booking | null>(null);
 
   // Available units across all projects, tagged with their tower/project names.
   const availableUnits = projects.flatMap((p) =>
@@ -203,6 +206,27 @@ export default function BookingsPage() {
       },
     },
     {
+      key: "payments",
+      header: "Payments",
+      render: (b) => {
+        const demand = b.paymentSchedules.reduce((n, p) => n + p.demandAmount, 0);
+        const paid = b.paymentSchedules.reduce((n, p) => n + p.paidAmount, 0);
+        return (
+          <Button
+            size="sm"
+            variant="secondary"
+            icon={<Wallet size={14} />}
+            onClick={(e) => {
+              e.stopPropagation();
+              setPayBooking(b);
+            }}
+          >
+            {b.paymentSchedules.length === 0 ? "Set up" : `${formatInr(paid)} / ${formatInr(demand)}`}
+          </Button>
+        );
+      },
+    },
+    {
       key: "scheduledDate",
       header: "Registration Date",
       render: (b) => (b.scheduledDate ? formatDate(b.scheduledDate) : "—"),
@@ -293,6 +317,17 @@ export default function BookingsPage() {
             // staged actions appear and the unit leaves the available picker.
             void refreshInventory();
             closeWizard();
+          }}
+        />
+      )}
+
+      {payBooking && (
+        <PaymentPlanModal
+          booking={payBooking}
+          onClose={() => setPayBooking(null)}
+          onChanged={(updated) => {
+            setPayBooking(updated);
+            void refresh();
           }}
         />
       )}

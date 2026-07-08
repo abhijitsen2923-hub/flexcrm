@@ -98,5 +98,9 @@ def doc_key(org_id: UUID, booking_id: UUID, doc_type: str) -> str:
     return f"org/{org_id}/bookings/{booking_id}/documents/{doc_type}.pdf"
 
 
+def receipt_key(org_id: UUID, booking_id: UUID, receipt_id: UUID) -> str:
+    return f"org/{org_id}/bookings/{booking_id}/receipts/{receipt_id}.pdf"
+
+
 def media_key(org_id: UUID, project_id: UUID, media_id: UUID, filename: str) -> str:
     return f"org/{org_id}/projects/{project_id}/media/{media_id}_{_safe_name(filename)}"

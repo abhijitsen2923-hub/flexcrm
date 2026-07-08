@@ -198,6 +198,12 @@ class Booking(TenantBase, UUIDPrimaryKeyMixin, TimestampMixin, TenantAuditMixin,
     payment_schedules: Mapped[list["PaymentSchedule"]] = relationship(
         "PaymentSchedule", back_populates="booking", cascade="all, delete-orphan"
     )
+    payment_receipts: Mapped[list["PaymentReceipt"]] = relationship(
+        "PaymentReceipt",
+        back_populates="booking",
+        cascade="all, delete-orphan",
+        order_by="PaymentReceipt.paid_on",
+    )
 
 
 class BookingKycDoc(TenantBase, UUIDPrimaryKeyMixin, TimestampMixin):
@@ -231,3 +237,27 @@ class PaymentSchedule(TenantBase, UUIDPrimaryKeyMixin, TimestampMixin):
     is_overdue: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
     booking: Mapped["Booking"] = relationship("Booking", back_populates="payment_schedules")
+
+
+class PaymentReceipt(TenantBase, UUIDPrimaryKeyMixin, TimestampMixin):
+    """A single collection transaction posted against a booking / installment."""
+    __tablename__ = "payment_receipts"
+    __table_args__ = (
+        Index("ix_payment_receipts_booking", "booking_id"),
+        {"schema": "tenant"},
+    )
+
+    booking_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("bookings.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    # Which installment this payment is applied to (nullable → ad-hoc payment).
+    schedule_id: Mapped[UUID | None] = mapped_column(
+        Uuid, ForeignKey("payment_schedules.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    amount: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    paid_on: Mapped[date] = mapped_column(Date, nullable=False)
+    mode: Mapped[str] = mapped_column(String(20), nullable=False)  # upi/neft/cheque/cash/card/other
+    reference: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    booking: Mapped["Booking"] = relationship("Booking", back_populates="payment_receipts")

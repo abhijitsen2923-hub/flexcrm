@@ -1,13 +1,17 @@
 """Real estate Pydantic schemas."""
 from datetime import date, datetime
 from decimal import Decimal
+from typing import Literal
 from uuid import UUID
 
-from pydantic import Field
+from pydantic import Field, computed_field
 
 from app.database.enums import BookingStatus, SiteVisitFeedback, UnitStatus, UnitType
 from app.schemas.common import ORMModel
 from app.schemas.customer import CustomerCompact
+
+
+PaymentMode = Literal["upi", "neft", "cheque", "cash", "card", "other"]
 
 
 class UnitRead(ORMModel):
@@ -157,8 +161,14 @@ class PaymentScheduleRead(ORMModel):
     demand_amount: Decimal
     paid_amount: Decimal
     outstanding: Decimal
-    is_overdue: bool
     created_at: datetime
+
+    # Overdue is time-dependent — derive it at read time from the parsed fields
+    # rather than trusting the stored column (which goes stale between writes).
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def is_overdue(self) -> bool:
+        return self.outstanding > 0 and self.due_date < date.today()
 
 
 class PaymentScheduleCreate(ORMModel):
@@ -166,6 +176,40 @@ class PaymentScheduleCreate(ORMModel):
     due_date: date
     demand_amount: Decimal = Field(ge=0)
     paid_amount: Decimal = Field(default=Decimal("0"), ge=0)
+
+
+class PaymentReceiptRead(ORMModel):
+    id: UUID
+    booking_id: UUID
+    schedule_id: UUID | None = None
+    amount: Decimal
+    paid_on: date
+    mode: str
+    reference: str | None = None
+    notes: str | None = None
+    created_at: datetime
+
+
+class PaymentPlanInstallment(ORMModel):
+    installment_name: str = Field(min_length=1, max_length=120)
+    due_date: date
+    # Amount is either an explicit rupee value OR a percentage of the booking's
+    # total consideration (server computes the amount). At least one is required.
+    amount: Decimal | None = Field(default=None, ge=0)
+    percentage: Decimal | None = Field(default=None, ge=0, le=100)
+
+
+class PaymentPlanCreate(ORMModel):
+    installments: list[PaymentPlanInstallment] = Field(min_length=1)
+
+
+class PaymentReceiptCreate(ORMModel):
+    schedule_id: UUID | None = None
+    amount: Decimal = Field(gt=0)
+    paid_on: date
+    mode: PaymentMode
+    reference: str | None = Field(default=None, max_length=120)
+    notes: str | None = None
 
 
 class BookingUnitInfo(ORMModel):
@@ -198,6 +242,7 @@ class BookingRead(ORMModel):
     customer: CustomerCompact | None = None
     kyc_documents: list[BookingKycDocRead] = []
     payment_schedules: list[PaymentScheduleRead] = []
+    payment_receipts: list[PaymentReceiptRead] = []
 
 
 class BookingCreate(ORMModel):

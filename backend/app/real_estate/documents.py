@@ -11,7 +11,17 @@ from datetime import date
 from html import escape
 
 from app.models.customer import Customer
-from app.real_estate.models import Booking, Project, Tower, Unit
+from app.real_estate.models import Booking, PaymentReceipt, Project, Tower, Unit
+
+
+_MODE_LABELS = {
+    "upi": "UPI",
+    "neft": "NEFT / RTGS",
+    "cheque": "Cheque",
+    "cash": "Cash",
+    "card": "Card",
+    "other": "Other",
+}
 
 
 _TITLES = {
@@ -165,6 +175,86 @@ def render_booking_document(
     </style></head><body><div class="doc">
       <div class="head">
         <span class="ref">Ref: {escape(ref)}</span>
+        <div class="builder">{escape(builder)}</div>
+        <div class="proj">{escape(proj_name)}{(' — ' + escape(location)) if location else ''}</div>
+        {rera_line}
+      </div>
+      <h1>{escape(title)}</h1>
+      {body}
+    </div></body></html>"""
+    return html, title
+
+
+def render_payment_receipt(
+    booking: Booking,
+    unit: Unit | None,
+    project: Project | None,
+    tower: Tower | None,
+    customer: Customer | None,
+    receipt: PaymentReceipt,
+) -> tuple[str, str]:
+    """Return (html, title) for a single payment receipt transaction."""
+    title = "Payment Receipt"
+
+    builder = project.builder_name if project else "Builder"
+    proj_name = project.name if project else "Project"
+    location = f"{project.location}, {project.city}" if project else ""
+    rera = project.rera_number if project and project.rera_number else None
+
+    unit_no = unit.unit_number if unit else "—"
+    tower_name = tower.name if tower else "—"
+
+    cust_name = customer.contact_name if customer else "—"
+
+    amount = _inr(receipt.amount)
+    mode = _MODE_LABELS.get(receipt.mode, receipt.mode)
+    ref = receipt.reference or "—"
+    receipt_no = str(receipt.id)[:8].upper()
+
+    details = "<table class='kv'>" + "".join([
+        _row("Receipt No.", receipt_no),
+        _row("Date", _fmt_date(receipt.paid_on)),
+        _row("Amount Received", amount),
+        _row("Payment Mode", mode),
+        _row("Reference", ref),
+        _row("Project", proj_name),
+        _row("Tower / Unit", f"{tower_name} · {unit_no}"),
+    ]) + "</table>"
+
+    body = f"""
+      <p>Received with thanks from <strong>{escape(cust_name)}</strong> the sum of
+      <strong>{escape(amount)}</strong> towards Unit <strong>{escape(unit_no)}</strong>
+      in {escape(proj_name)}.</p>
+      <h3>Payment Details</h3>
+      {details}
+      {('<p>' + escape(receipt.notes) + '</p>') if receipt.notes else ''}
+      <div class="sign"><div>Received By</div><div>For {escape(builder)}</div></div>
+    """
+
+    rera_line = f"<div class='rera'>RERA: {escape(rera)}</div>" if rera else ""
+    html = f"""<!doctype html><html><head><meta charset="utf-8"><title>{escape(title)}</title>
+    <style>
+      * {{ box-sizing: border-box; }}
+      body {{ font-family: Arial, Helvetica, sans-serif; color: #1f2937; margin: 0; padding: 32px; }}
+      .doc {{ max-width: 720px; margin: 0 auto; }}
+      .head {{ border-bottom: 3px solid #f59e0b; padding-bottom: 12px; margin-bottom: 20px; }}
+      .builder {{ font-size: 22px; font-weight: 800; color: #0f172a; }}
+      .proj {{ color: #6b7280; font-size: 13px; }}
+      .rera {{ color: #6b7280; font-size: 11px; margin-top: 4px; }}
+      h1 {{ font-size: 18px; text-transform: uppercase; letter-spacing: .05em; margin: 8px 0 20px; }}
+      h3 {{ font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: #6b7280; margin: 20px 0 8px; }}
+      p {{ font-size: 14px; line-height: 1.6; }}
+      table.kv {{ width: 100%; border-collapse: collapse; }}
+      table.kv td {{ padding: 6px 8px; border-bottom: 1px solid #eef1f5; font-size: 14px; }}
+      td.k {{ color: #6b7280; width: 40%; }}
+      td.v {{ font-weight: 600; }}
+      .ref {{ float: right; color: #6b7280; font-size: 12px; }}
+      .sign {{ display: flex; justify-content: space-between; margin-top: 56px; font-size: 13px; color: #374151; }}
+      .sign div {{ border-top: 1px solid #9ca3af; padding-top: 6px; width: 40%; text-align: center; }}
+      @media print {{ body {{ padding: 0; }} }}
+    </style></head><body><div class="doc">
+      <div class="head">
+        <span class="ref">Receipt: {escape(receipt_no)}</span>
         <div class="builder">{escape(builder)}</div>
         <div class="proj">{escape(proj_name)}{(' — ' + escape(location)) if location else ''}</div>
         {rera_line}

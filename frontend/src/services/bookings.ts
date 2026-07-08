@@ -1,10 +1,34 @@
 import { apiClient } from "./http";
-import type { Booking, BookingStatus, BookingStep, PricingSnapshot, UnitStatus, UnitType } from "../types/realestate";
+import type {
+  Booking,
+  BookingStatus,
+  BookingStep,
+  PaymentMode,
+  PricingSnapshot,
+  UnitStatus,
+  UnitType,
+} from "../types/realestate";
 
 export interface CreateBookingPayload {
   unitId: string;
   leadId?: string | null;
   customerId?: string | null;
+}
+
+export interface PaymentPlanInstallmentPayload {
+  installment_name: string;
+  due_date: string;
+  amount?: number | null;
+  percentage?: number | null;
+}
+
+export interface RecordPaymentPayload {
+  schedule_id?: string | null;
+  amount: number;
+  paid_on: string;
+  mode: PaymentMode;
+  reference?: string | null;
+  notes?: string | null;
 }
 
 // The API speaks snake_case; the app models are camelCase. Map at the boundary
@@ -44,6 +68,17 @@ interface ApiBooking {
     outstanding: number | string;
     is_overdue: boolean;
   }[];
+  payment_receipts?: {
+    id: string;
+    booking_id: string;
+    schedule_id: string | null;
+    amount: number | string;
+    paid_on: string;
+    mode: PaymentMode;
+    reference: string | null;
+    notes: string | null;
+    created_at: string;
+  }[];
 }
 
 function mapBooking(b: ApiBooking): Booking {
@@ -70,6 +105,17 @@ function mapBooking(b: ApiBooking): Booking {
       paidAmount: Number(p.paid_amount),
       outstanding: Number(p.outstanding),
       isOverdue: p.is_overdue,
+    })),
+    paymentReceipts: (b.payment_receipts ?? []).map((r) => ({
+      id: r.id,
+      bookingId: r.booking_id,
+      scheduleId: r.schedule_id,
+      amount: Number(r.amount),
+      paidOn: r.paid_on,
+      mode: r.mode,
+      reference: r.reference,
+      notes: r.notes,
+      createdAt: r.created_at,
     })),
     kycDocuments: (b.kyc_documents ?? []).map((d) => ({
       type: (d.type ?? d.doc_type ?? "other") as "aadhaar" | "pan" | "photo" | "other",
@@ -177,6 +223,27 @@ export const bookingsService = {
   getKycDownloadUrl(bookingId: string, docId: string): Promise<{ url: string }> {
     return apiClient
       .get<{ url: string }>(`/bookings/${bookingId}/kyc/${docId}/download`)
+      .then((r) => r.data);
+  },
+
+  // Create/replace a booking's installment plan (blocked once money is collected).
+  createPaymentPlan(bookingId: string, installments: PaymentPlanInstallmentPayload[]): Promise<Booking> {
+    return apiClient
+      .post<ApiBooking>(`/bookings/${bookingId}/payment-plan`, { installments })
+      .then((r) => mapBooking(r.data));
+  },
+
+  // Post a collection against a booking (optionally a specific installment).
+  recordPayment(bookingId: string, payload: RecordPaymentPayload): Promise<Booking> {
+    return apiClient
+      .post<ApiBooking>(`/bookings/${bookingId}/payments`, payload)
+      .then((r) => mapBooking(r.data));
+  },
+
+  // Presigned URL to a generated PDF receipt for one payment.
+  getReceiptPdfUrl(bookingId: string, receiptId: string): Promise<{ url: string }> {
+    return apiClient
+      .get<{ url: string }>(`/bookings/${bookingId}/payments/${receiptId}/receipt/pdf`)
       .then((r) => r.data);
   },
 };

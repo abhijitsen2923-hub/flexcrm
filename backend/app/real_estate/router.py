@@ -1,5 +1,6 @@
 """Real estate API routes — inventory, site visits, bookings."""
 from datetime import date
+from decimal import Decimal, InvalidOperation
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
@@ -15,10 +16,11 @@ from app.core.permissions import PermissionCode
 from app.database.enums import BookingStatus, UnitStatus, UnitType
 from app.database.session import get_db_session
 from app.models.customer import Customer
-from app.real_estate.documents import render_booking_document
+from app.real_estate.documents import render_booking_document, render_payment_receipt
 from app.real_estate.models import (
     Booking,
     BookingKycDoc,
+    PaymentReceipt,
     PaymentSchedule,
     Project,
     ProjectMedia,
@@ -32,6 +34,8 @@ from app.real_estate.schemas import (
     BookingRead,
     BookingStepAdvance,
     CollectionLedgerEntry,
+    PaymentPlanCreate,
+    PaymentReceiptCreate,
     PaymentScheduleRead,
     PossessionChecklistUpdate,
     PricingUpdate,
@@ -393,6 +397,7 @@ async def list_bookings(
             selectinload(Booking.unit).selectinload(Unit.tower).selectinload(Tower.project),
             selectinload(Booking.kyc_documents),
             selectinload(Booking.payment_schedules),
+            selectinload(Booking.payment_receipts),
         )
         .where(Booking.is_deleted.is_(False))
         .order_by(Booking.created_at.desc())
@@ -421,7 +426,7 @@ async def create_booking(
     stmt = (
         select(Booking)
         .where(Booking.id == booking.id)
-        .options(selectinload(Booking.customer), selectinload(Booking.unit).selectinload(Unit.tower).selectinload(Tower.project), selectinload(Booking.kyc_documents), selectinload(Booking.payment_schedules))
+        .options(selectinload(Booking.customer), selectinload(Booking.unit).selectinload(Unit.tower).selectinload(Tower.project), selectinload(Booking.kyc_documents), selectinload(Booking.payment_schedules), selectinload(Booking.payment_receipts))
     )
     return (await session.execute(stmt)).scalar_one()
 
@@ -435,7 +440,7 @@ async def get_booking(
     stmt = (
         select(Booking)
         .where(Booking.id == booking_id, Booking.is_deleted.is_(False))
-        .options(selectinload(Booking.customer), selectinload(Booking.unit).selectinload(Unit.tower).selectinload(Tower.project), selectinload(Booking.kyc_documents), selectinload(Booking.payment_schedules))
+        .options(selectinload(Booking.customer), selectinload(Booking.unit).selectinload(Unit.tower).selectinload(Tower.project), selectinload(Booking.kyc_documents), selectinload(Booking.payment_schedules), selectinload(Booking.payment_receipts))
     )
     booking = (await session.execute(stmt)).scalar_one_or_none()
     if not booking:
@@ -499,7 +504,7 @@ async def advance_booking_step(
     stmt = (
         select(Booking)
         .where(Booking.id == booking_id)
-        .options(selectinload(Booking.customer), selectinload(Booking.unit).selectinload(Unit.tower).selectinload(Tower.project), selectinload(Booking.kyc_documents), selectinload(Booking.payment_schedules))
+        .options(selectinload(Booking.customer), selectinload(Booking.unit).selectinload(Unit.tower).selectinload(Tower.project), selectinload(Booking.kyc_documents), selectinload(Booking.payment_schedules), selectinload(Booking.payment_receipts))
     )
     return (await session.execute(stmt)).scalar_one()
 
@@ -519,7 +524,7 @@ async def update_booking_pricing(
     stmt = (
         select(Booking)
         .where(Booking.id == booking_id)
-        .options(selectinload(Booking.customer), selectinload(Booking.unit).selectinload(Unit.tower).selectinload(Tower.project), selectinload(Booking.kyc_documents), selectinload(Booking.payment_schedules))
+        .options(selectinload(Booking.customer), selectinload(Booking.unit).selectinload(Unit.tower).selectinload(Tower.project), selectinload(Booking.kyc_documents), selectinload(Booking.payment_schedules), selectinload(Booking.payment_receipts))
     )
     return (await session.execute(stmt)).scalar_one()
 
@@ -539,7 +544,7 @@ async def update_possession_checklist(
     stmt = (
         select(Booking)
         .where(Booking.id == booking_id)
-        .options(selectinload(Booking.customer), selectinload(Booking.unit).selectinload(Unit.tower).selectinload(Tower.project), selectinload(Booking.kyc_documents), selectinload(Booking.payment_schedules))
+        .options(selectinload(Booking.customer), selectinload(Booking.unit).selectinload(Unit.tower).selectinload(Tower.project), selectinload(Booking.kyc_documents), selectinload(Booking.payment_schedules), selectinload(Booking.payment_receipts))
     )
     return (await session.execute(stmt)).scalar_one()
 
@@ -637,3 +642,148 @@ async def download_booking_kyc(
     if not doc or doc.booking_id != booking_id or not doc.file_path:
         raise HTTPException(status_code=404, detail="KYC document not found")
     return {"url": storage.presigned_get_url(doc.file_path)}
+
+
+# ---------------------------------------------------------------------------
+# Bookings — payment plan + collections
+# ---------------------------------------------------------------------------
+
+async def _booking_read(session: AsyncSession, booking_id: UUID) -> Booking:
+    """Re-fetch a booking with every relationship a BookingRead needs."""
+    stmt = (
+        select(Booking)
+        .where(Booking.id == booking_id)
+        .options(
+            selectinload(Booking.customer),
+            selectinload(Booking.unit).selectinload(Unit.tower).selectinload(Tower.project),
+            selectinload(Booking.kyc_documents),
+            selectinload(Booking.payment_schedules),
+            selectinload(Booking.payment_receipts),
+        )
+    )
+    booking = (await session.execute(stmt)).scalar_one_or_none()
+    if not booking:
+        raise HTTPException(status_code=404, detail="Booking not found")
+    return booking
+
+
+def _booking_total(booking: Booking) -> Decimal:
+    """Total consideration: the pricing snapshot's total, else the unit base price."""
+    snap = booking.pricing_snapshot or {}
+    if isinstance(snap, dict) and snap.get("total") is not None:
+        try:
+            return Decimal(str(snap["total"]))
+        except (InvalidOperation, TypeError):
+            pass
+    return booking.unit.base_price if booking.unit else Decimal("0")
+
+
+@router.post("/bookings/{booking_id}/payment-plan", response_model=BookingRead)
+async def create_payment_plan(
+    booking_id: UUID,
+    payload: PaymentPlanCreate,
+    _: object = Depends(require_permissions(PermissionCode.FINANCE_RECORD_PAYMENT)),
+    session: AsyncSession = Depends(get_db_session),
+):
+    """Create/replace a booking's installment plan. Amounts come from an explicit
+    value or a percentage of the total consideration. Blocked once any money has
+    been collected (so a plan is never rewritten out from under recorded payments)."""
+    stmt = (
+        select(Booking)
+        .where(Booking.id == booking_id)
+        .options(selectinload(Booking.payment_schedules), selectinload(Booking.unit))
+    )
+    booking = (await session.execute(stmt)).scalar_one_or_none()
+    if not booking or booking.is_deleted:
+        raise HTTPException(status_code=404, detail="Booking not found")
+    if any((ps.paid_amount or Decimal("0")) > 0 for ps in booking.payment_schedules):
+        raise HTTPException(status_code=409, detail="Payments already recorded; cannot replace the plan.")
+
+    for ps in list(booking.payment_schedules):
+        await session.delete(ps)
+
+    total = _booking_total(booking)
+    today = date.today()
+    for inst in payload.installments:
+        if inst.amount is not None:
+            demand = inst.amount
+        elif inst.percentage is not None:
+            demand = (total * inst.percentage / Decimal(100)).quantize(Decimal("0.01"))
+        else:
+            demand = Decimal("0")
+        session.add(
+            PaymentSchedule(
+                booking_id=booking_id,
+                installment_name=inst.installment_name,
+                due_date=inst.due_date,
+                demand_amount=demand,
+                paid_amount=Decimal("0"),
+                outstanding=demand,
+                is_overdue=(demand > 0 and inst.due_date < today),
+            )
+        )
+    await session.commit()
+    return await _booking_read(session, booking_id)
+
+
+@router.post("/bookings/{booking_id}/payments", response_model=BookingRead)
+async def record_payment(
+    booking_id: UUID,
+    payload: PaymentReceiptCreate,
+    _: object = Depends(require_permissions(PermissionCode.FINANCE_RECORD_PAYMENT)),
+    session: AsyncSession = Depends(get_db_session),
+):
+    """Post a collection against a booking (optionally a specific installment)."""
+    booking = await session.get(Booking, booking_id)
+    if not booking or booking.is_deleted:
+        raise HTTPException(status_code=404, detail="Booking not found")
+
+    if payload.schedule_id is not None:
+        ps = await session.get(PaymentSchedule, payload.schedule_id)
+        if not ps or ps.booking_id != booking_id:
+            raise HTTPException(status_code=404, detail="Installment not found")
+        ps.paid_amount = (ps.paid_amount or Decimal("0")) + payload.amount
+        ps.outstanding = max(Decimal("0"), ps.demand_amount - ps.paid_amount)
+        ps.is_overdue = ps.outstanding > 0 and ps.due_date < date.today()
+
+    session.add(
+        PaymentReceipt(
+            booking_id=booking_id,
+            schedule_id=payload.schedule_id,
+            amount=payload.amount,
+            paid_on=payload.paid_on,
+            mode=payload.mode,
+            reference=payload.reference,
+            notes=payload.notes,
+        )
+    )
+    await session.commit()
+    return await _booking_read(session, booking_id)
+
+
+@router.get("/bookings/{booking_id}/payments/{receipt_id}/receipt/pdf")
+async def get_payment_receipt_pdf(
+    booking_id: UUID,
+    receipt_id: UUID,
+    current_user=Depends(require_permissions(PermissionCode.FINANCE_VIEW)),
+    session: AsyncSession = Depends(get_db_session),
+):
+    """Render a PDF receipt for one payment, store it, and return a presigned URL."""
+    receipt = await session.get(PaymentReceipt, receipt_id)
+    if not receipt or receipt.booking_id != booking_id:
+        raise HTTPException(status_code=404, detail="Receipt not found")
+    booking = await session.get(Booking, booking_id)
+    unit = await session.get(Unit, booking.unit_id) if booking else None
+    project = await session.get(Project, unit.project_id) if unit else None
+    tower = await session.get(Tower, unit.tower_id) if unit else None
+    customer = (
+        await session.get(Customer, booking.customer_id) if booking and booking.customer_id else None
+    )
+    html, _title = render_payment_receipt(booking, unit, project, tower, customer, receipt)
+    pdf = html_to_pdf(html)
+    key = storage.put_object(
+        storage.receipt_key(current_user.organization_id, booking_id, receipt_id),
+        pdf,
+        "application/pdf",
+    )
+    return {"url": storage.presigned_get_url(key)}
