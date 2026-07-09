@@ -7,6 +7,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.database.base import TenantBase
 from app.database.enums import CustomerLifecycleStage, CustomerStatus
 from app.models.base import TenantAuditMixin, TenantSoftDeleteMixin, TimestampMixin, UUIDPrimaryKeyMixin
+from app.models.user import User  # direct ref to avoid cross-registry string lookup
 
 
 class Customer(TenantBase, UUIDPrimaryKeyMixin, TimestampMixin, TenantAuditMixin, TenantSoftDeleteMixin):
@@ -73,10 +74,12 @@ class Customer(TenantBase, UUIDPrimaryKeyMixin, TimestampMixin, TenantAuditMixin
         lazy="selectin",
     )
     # Read-only link to the owning user (for display: owner name in Customer 360).
+    # Uses lambda + imported User (not strings) because User lives in a different
+    # declarative registry — a string primaryjoin can't resolve it (mapper init fails).
     current_owner = relationship(
-        "User",
-        primaryjoin="Customer.current_owner_id == User.id",
-        foreign_keys="[Customer.current_owner_id]",
+        User,
+        primaryjoin=lambda: Customer.current_owner_id == User.id,
+        foreign_keys=lambda: [Customer.current_owner_id],
         viewonly=True,
         lazy="selectin",
     )
