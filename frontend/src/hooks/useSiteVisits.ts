@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
-import { siteVisitsService, type CreateSiteVisitPayload } from "../services/site-visits";
-import type { SiteVisit, SiteVisitFeedback } from "../types/realestate";
+import { siteVisitsService, type CreateSiteVisitPayload, type UpdateSiteVisitPayload } from "../services/site-visits";
+import type { SiteVisit } from "../types/realestate";
 
 export function useSiteVisits(filters?: { projectId?: string; leadId?: string; date?: string }) {
   const [visits, setVisits] = useState<SiteVisit[]>([]);
@@ -29,7 +29,7 @@ export function useSiteVisits(filters?: { projectId?: string; leadId?: string; d
   }, []);
 
   const updateFeedback = useCallback(
-    async (id: string, patch: { attended?: boolean; feedback?: SiteVisitFeedback | null; notes?: string }) => {
+    async (id: string, patch: UpdateSiteVisitPayload) => {
       const updated = await siteVisitsService.update(id, patch);
       setVisits((prev) => prev.map((v) => (v.id === id ? updated : v)));
       return updated;

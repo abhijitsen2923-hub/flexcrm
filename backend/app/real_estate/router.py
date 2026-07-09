@@ -17,6 +17,7 @@ from app.core.permissions import PermissionCode
 from app.database.enums import BookingStatus, UnitStatus, UnitType
 from app.database.session import get_db_session
 from app.models.customer import Customer
+from app.models.lead import Lead
 from app.real_estate.documents import render_booking_document, render_payment_receipt
 from app.real_estate.models import (
     Booking,
@@ -30,11 +31,13 @@ from app.real_estate.models import (
     Unit,
 )
 from app.services.customer_lifecycle import recompute_ltv
+from app.services.notifications import NotificationService
 from app.real_estate.schemas import (
     BookingCancel,
     BookingCreate,
     BookingKycDocRead,
     BookingRead,
+    BookingRegister,
     BookingStepAdvance,
     CollectionLedgerEntry,
     PaymentPlanCreate,
@@ -61,6 +64,26 @@ from app.real_estate.schemas import (
 from app.services.realtime import realtime_manager
 
 router = APIRouter()
+
+
+async def _booking_owner_id(session: AsyncSession, booking: Booking) -> UUID | None:
+    """Who 'owns' a booking for notification purposes: the customer's owner, else
+    the source lead's assignee, else whoever created the booking."""
+    if booking.customer_id:
+        cust = await session.get(Customer, booking.customer_id)
+        if cust and cust.current_owner_id:
+            return cust.current_owner_id
+    if booking.lead_id:
+        lead = await session.get(Lead, booking.lead_id)
+        if lead and lead.assigned_to_id:
+            return lead.assigned_to_id
+    return getattr(booking, "created_by_id", None)
+
+
+async def _notify(session: AsyncSession, user_id: UUID | None, message: str) -> None:
+    """Best-effort in-app notification (no-op when there's no recipient)."""
+    if user_id:
+        await NotificationService(session).create_notification(user_id=user_id, message=message)
 
 
 # ---------------------------------------------------------------------------
@@ -473,6 +496,12 @@ async def create_site_visit(
 ):
     visit = SiteVisit(**payload.model_dump())
     session.add(visit)
+    if visit.assigned_to_id:
+        project = await session.get(Project, visit.project_id)
+        await _notify(
+            session, visit.assigned_to_id,
+            f"Site visit scheduled at {project.name if project else 'a project'}.",
+        )
     await session.commit()
     return await _site_visit_read(session, visit.id)
 
@@ -646,6 +675,10 @@ async def advance_booking_step(
         booking.status = BookingStatus.confirmed
         unit.status = UnitStatus.booked
         booked_unit = (str(unit.id), str(unit.project_id))
+        await _notify(
+            session, await _booking_owner_id(session, booking),
+            f"Booking confirmed — unit {unit.unit_number}.",
+        )
         # Roll the confirmed purchase into the customer's lifetime value.
         if booking.customer_id:
             customer = await session.get(Customer, booking.customer_id)
@@ -926,6 +959,10 @@ async def record_payment(
             notes=payload.notes,
         )
     )
+    await _notify(
+        session, await _booking_owner_id(session, booking),
+        f"Payment of ₹{payload.amount} recorded.",
+    )
     await session.commit()
     return await _booking_read(session, booking_id)
 
@@ -1003,4 +1040,44 @@ async def cancel_booking(
             "status": UnitStatus.available.value,
             "project_id": str(unit.project_id),
         })
+    return await _booking_read(session, booking_id)
+
+
+@router.post("/bookings/{booking_id}/register", response_model=BookingRead)
+async def register_booking(
+    booking_id: UUID,
+    payload: BookingRegister,
+    _: object = Depends(require_permissions(PermissionCode.LEAD_MANAGE)),
+    session: AsyncSession = Depends(get_db_session),
+):
+    """Record the legal registration of a confirmed booking and mark its unit
+    Registered (captures deed no. + sub-registrar office + registration date)."""
+    booking = await session.get(Booking, booking_id)
+    if not booking or booking.is_deleted:
+        raise HTTPException(status_code=404, detail="Booking not found")
+    if booking.status != BookingStatus.confirmed:
+        raise HTTPException(status_code=409, detail="Only a confirmed booking can be registered.")
+
+    booking.scheduled_date = payload.registration_date
+    booking.registration_number = payload.registration_number
+    booking.sub_registrar_office = payload.sub_registrar_office
+
+    unit = await session.get(Unit, booking.unit_id)
+    if unit is None:
+        raise HTTPException(status_code=404, detail="Unit not found")
+    if unit.status not in (UnitStatus.booked, UnitStatus.registered):
+        raise HTTPException(status_code=409, detail=f"Unit is {unit.status.value}; it cannot be registered.")
+    unit.status = UnitStatus.registered
+
+    await _notify(
+        session, await _booking_owner_id(session, booking),
+        f"Unit {unit.unit_number} marked Registered.",
+    )
+    await session.commit()
+    await realtime_manager.broadcast({
+        "event": "unit.status_changed",
+        "unit_id": str(unit.id),
+        "status": UnitStatus.registered.value,
+        "project_id": str(unit.project_id),
+    })
     return await _booking_read(session, booking_id)

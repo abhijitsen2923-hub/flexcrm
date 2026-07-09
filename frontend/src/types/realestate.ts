@@ -2,6 +2,7 @@ export type UnitStatus = "available" | "hold" | "booked" | "registered" | "sold"
 export type UnitType = "residential" | "parking" | "shop" | "godown";
 export type UnitFacing = "north" | "south" | "east" | "west" | "north_east" | "north_west" | "south_east" | "south_west";
 export type SiteVisitFeedback = "hot" | "warm" | "cold";
+export type SiteVisitStatus = "scheduled" | "completed" | "cancelled";
 export type BookingStep = 1 | 2 | 3 | 4;
 export type BookingStatus = "draft" | "confirmed" | "cancelled";
 export type PropertyType = "apartment" | "villa" | "plot" | "commercial";
@@ -62,6 +63,7 @@ export interface SiteVisit {
   feedback: SiteVisitFeedback | null;
   attended: boolean | null;
   notes: string | null;
+  status: SiteVisitStatus;
   createdAt: string;
   project: { id: string; name: string } | null;
   lead: { id: string; leadNumber: number; contactName: string; contactPhone: string | null } | null;
@@ -137,6 +139,8 @@ export interface Booking {
   scheduledDate: string | null;
   possessionChecklist: boolean[] | null;
   cancellationReason: string | null;
+  registrationNumber: string | null;
+  subRegistrarOffice: string | null;
   bookingFormUrl: string | null;
   allotmentLetterUrl: string | null;
   createdAt: string;

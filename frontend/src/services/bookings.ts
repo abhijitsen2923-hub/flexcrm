@@ -44,6 +44,8 @@ interface ApiBooking {
   scheduled_date: string | null;
   possession_checklist?: boolean[] | null;
   cancellation_reason?: string | null;
+  registration_number?: string | null;
+  sub_registrar_office?: string | null;
   created_at: string;
   updated_at: string;
   unit?: {
@@ -127,6 +129,8 @@ function mapBooking(b: ApiBooking): Booking {
     scheduledDate: b.scheduled_date,
     possessionChecklist: b.possession_checklist ?? null,
     cancellationReason: b.cancellation_reason ?? null,
+    registrationNumber: b.registration_number ?? null,
+    subRegistrarOffice: b.sub_registrar_office ?? null,
     unit: b.unit
       ? {
           id: b.unit.id,
@@ -254,5 +258,13 @@ export const bookingsService = {
     return apiClient
       .post<ApiBooking>(`/bookings/${id}/cancel`, { reason: reason ?? null })
       .then((r) => mapBooking(r.data));
+  },
+
+  // Record the legal registration and mark the unit Registered.
+  registerBooking(
+    id: string,
+    payload: { registration_date: string; registration_number?: string | null; sub_registrar_office?: string | null }
+  ): Promise<Booking> {
+    return apiClient.post<ApiBooking>(`/bookings/${id}/register`, payload).then((r) => mapBooking(r.data));
   },
 };

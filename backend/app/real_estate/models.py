@@ -154,6 +154,8 @@ class SiteVisit(TenantBase, UUIDPrimaryKeyMixin, TimestampMixin, TenantAuditMixi
     )
     attended: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # scheduled / completed / cancelled — validated app-side.
+    status: Mapped[str] = mapped_column(String(20), nullable=False, server_default="scheduled")
 
     project: Mapped["Project"] = relationship("Project")
     # Read-only link to the lead for display (lead name/number on the calendar).
@@ -190,6 +192,9 @@ class Booking(TenantBase, UUIDPrimaryKeyMixin, TimestampMixin, TenantAuditMixin,
     possession_checklist: Mapped[list | None] = mapped_column(JSON, nullable=True)
     # Optional note captured when a booking is cancelled.
     cancellation_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Registration (legal milestone) record — captured when marking Registered.
+    registration_number: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    sub_registrar_office: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     unit: Mapped["Unit"] = relationship("Unit", back_populates="bookings")
     # Read-only link to the customer for display (name on lists/trackers/docs).

@@ -22,6 +22,7 @@ const COLUMNS: DataTableColumn<SiteVisit>[] = [
   },
   { key: "projectId", header: "Site", render: (v) => v.project?.name ?? "—" },
   { key: "scheduledAt", header: "Scheduled", render: (v) => formatDateTime(v.scheduledAt) },
+  { key: "status", header: "Status", render: (v) => (v.status === "cancelled" ? "Cancelled" : "Scheduled") },
   {
     key: "attended",
     header: "Attended",

@@ -143,6 +143,7 @@ class SiteVisitRead(ORMModel):
     feedback: SiteVisitFeedback | None = None
     attended: bool | None = None
     notes: str | None = None
+    status: str = "scheduled"
     created_at: datetime
     updated_at: datetime
     project: SiteVisitProjectMini | None = None
@@ -161,6 +162,10 @@ class SiteVisitUpdate(ORMModel):
     feedback: SiteVisitFeedback | None = None
     attended: bool | None = None
     notes: str | None = None
+    # Reschedule / reassign / cancel.
+    scheduled_at: datetime | None = None
+    assigned_to_id: UUID | None = None
+    status: Literal["scheduled", "completed", "cancelled"] | None = None
 
 
 class BookingKycDocRead(ORMModel):
@@ -261,6 +266,8 @@ class BookingRead(ORMModel):
     scheduled_date: date | None = None
     possession_checklist: list[bool] | None = None
     cancellation_reason: str | None = None
+    registration_number: str | None = None
+    sub_registrar_office: str | None = None
     created_at: datetime
     updated_at: datetime
     customer: CustomerCompact | None = None
@@ -287,6 +294,12 @@ class BookingStepAdvance(ORMModel):
 
 class BookingCancel(ORMModel):
     reason: str | None = Field(default=None, max_length=500)
+
+
+class BookingRegister(ORMModel):
+    registration_date: date
+    registration_number: str | None = Field(default=None, max_length=120)
+    sub_registrar_office: str | None = Field(default=None, max_length=255)
 
 
 class PricingUpdate(ORMModel):

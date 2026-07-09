@@ -1,12 +1,21 @@
 import { apiClient } from "./http";
-import type { SiteVisit, SiteVisitFeedback } from "../types/realestate";
+import type { SiteVisit, SiteVisitFeedback, SiteVisitStatus } from "../types/realestate";
 
 export interface CreateSiteVisitPayload {
-  leadId: string;
+  leadId?: string | null;
   projectId: string;
   scheduledAt: string;
   assignedToId?: string | null;
   notes?: string | null;
+}
+
+export interface UpdateSiteVisitPayload {
+  attended?: boolean;
+  feedback?: SiteVisitFeedback | null;
+  notes?: string;
+  scheduledAt?: string;
+  assignedToId?: string | null;
+  status?: SiteVisitStatus;
 }
 
 // The API is snake_case and returns enriched project/lead. Map at the boundary.
@@ -19,6 +28,7 @@ interface ApiSiteVisit {
   feedback: SiteVisitFeedback | null;
   attended: boolean | null;
   notes: string | null;
+  status?: SiteVisitStatus;
   created_at: string;
   project?: { id: string; name: string } | null;
   lead?: { id: string; lead_number: number; contact_name: string; contact_phone: string | null } | null;
@@ -34,6 +44,7 @@ function mapVisit(v: ApiSiteVisit): SiteVisit {
     feedback: v.feedback,
     attended: v.attended,
     notes: v.notes,
+    status: v.status ?? "scheduled",
     createdAt: v.created_at,
     project: v.project ? { id: v.project.id, name: v.project.name } : null,
     lead: v.lead
@@ -59,7 +70,7 @@ export const siteVisitsService = {
   create(payload: CreateSiteVisitPayload): Promise<SiteVisit> {
     return apiClient
       .post<ApiSiteVisit>("/site-visits", {
-        lead_id: payload.leadId,
+        lead_id: payload.leadId ?? null,
         project_id: payload.projectId,
         scheduled_at: payload.scheduledAt,
         assigned_to_id: payload.assignedToId ?? null,
@@ -68,10 +79,15 @@ export const siteVisitsService = {
       .then((r) => mapVisit(r.data));
   },
 
-  update(
-    id: string,
-    patch: { attended?: boolean; feedback?: SiteVisitFeedback | null; notes?: string }
-  ): Promise<SiteVisit> {
-    return apiClient.patch<ApiSiteVisit>(`/site-visits/${id}`, patch).then((r) => mapVisit(r.data));
+  update(id: string, patch: UpdateSiteVisitPayload): Promise<SiteVisit> {
+    // Map the camelCase reschedule/reassign fields to the API's snake_case.
+    const body: Record<string, unknown> = {};
+    if (patch.attended !== undefined) body.attended = patch.attended;
+    if (patch.feedback !== undefined) body.feedback = patch.feedback;
+    if (patch.notes !== undefined) body.notes = patch.notes;
+    if (patch.scheduledAt !== undefined) body.scheduled_at = patch.scheduledAt;
+    if (patch.assignedToId !== undefined) body.assigned_to_id = patch.assignedToId;
+    if (patch.status !== undefined) body.status = patch.status;
+    return apiClient.patch<ApiSiteVisit>(`/site-visits/${id}`, body).then((r) => mapVisit(r.data));
   },
 };

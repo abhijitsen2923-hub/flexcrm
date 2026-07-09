@@ -46,6 +46,10 @@ export default function BookingsPage() {
   const [cancelTarget, setCancelTarget] = useState<Booking | null>(null);
   const [cancelReason, setCancelReason] = useState("");
   const [cancelling, setCancelling] = useState(false);
+  // Registration modal (deed no. + sub-registrar office + date).
+  const [registerTarget, setRegisterTarget] = useState<Booking | null>(null);
+  const [regForm, setRegForm] = useState({ date: "", number: "", office: "" });
+  const [registering, setRegistering] = useState(false);
 
   // Available units across all projects, tagged with their tower/project names.
   const availableUnits = projects.flatMap((p) =>
@@ -167,6 +171,39 @@ export default function BookingsPage() {
     }
   }
 
+  function openRegister(b: Booking) {
+    setRegForm({
+      date: b.scheduledDate ?? new Date().toISOString().slice(0, 10),
+      number: b.registrationNumber ?? "",
+      office: b.subRegistrarOffice ?? "",
+    });
+    setRegisterTarget(b);
+  }
+
+  async function confirmRegister() {
+    if (!registerTarget) return;
+    if (!regForm.date) {
+      toast.error("Registration date is required");
+      return;
+    }
+    setRegistering(true);
+    try {
+      await bookingsService.registerBooking(registerTarget.id, {
+        registration_date: regForm.date,
+        registration_number: regForm.number.trim() || null,
+        sub_registrar_office: regForm.office.trim() || null,
+      });
+      toast.success("Registered", "Unit marked Registered");
+      setRegisterTarget(null);
+      refresh();
+      void refreshInventory();
+    } catch (err) {
+      toast.error("Could not register", extractErrorMessage(err));
+    } finally {
+      setRegistering(false);
+    }
+  }
+
   const columns: DataTableColumn<Booking>[] = [
     {
       key: "id",
@@ -221,7 +258,6 @@ export default function BookingsPage() {
           return <span className="muted text-xs">—</span>;
         }
         if (ctx.status === "sold") return <Badge tone="neutral">Sold</Badge>;
-        const target: UnitStatus = ctx.status === "booked" ? "registered" : "sold";
         const label = ctx.status === "booked" ? "Mark Registered" : "Mark Sold";
         return (
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -233,7 +269,8 @@ export default function BookingsPage() {
               variant="secondary"
               onClick={(e) => {
                 e.stopPropagation();
-                askMark(ctx, target);
+                if (ctx.status === "booked") openRegister(b);
+                else askMark(ctx, "sold");
               }}
             >
               {label}
@@ -399,6 +436,52 @@ export default function BookingsPage() {
               value={cancelReason}
               onChange={(e) => setCancelReason(e.target.value)}
               placeholder="e.g. Customer backed out"
+            />
+          </div>
+        </Modal>
+      )}
+
+      {registerTarget && (
+        <Modal
+          open
+          title="Register unit"
+          onClose={() => setRegisterTarget(null)}
+          footer={
+            <>
+              <Button variant="secondary" onClick={() => setRegisterTarget(null)} disabled={registering}>
+                Cancel
+              </Button>
+              <Button loading={registering} onClick={() => void confirmRegister()}>
+                Mark Registered
+              </Button>
+            </>
+          }
+        >
+          <div className="stack" style={{ gap: "0.75rem" }}>
+            <p className="text-sm muted">
+              Records the legal registration and moves the unit to Registered.
+            </p>
+            <TextField
+              id="reg-date"
+              label="Registration date"
+              type="date"
+              value={regForm.date}
+              onChange={(e) => setRegForm({ ...regForm, date: e.target.value })}
+              required
+            />
+            <TextField
+              id="reg-number"
+              label="Registration / deed no. (optional)"
+              value={regForm.number}
+              onChange={(e) => setRegForm({ ...regForm, number: e.target.value })}
+              placeholder="e.g. SRO-2026-12345"
+            />
+            <TextField
+              id="reg-office"
+              label="Sub-registrar office (optional)"
+              value={regForm.office}
+              onChange={(e) => setRegForm({ ...regForm, office: e.target.value })}
+              placeholder="e.g. SRO Whitefield"
             />
           </div>
         </Modal>
