@@ -41,45 +41,54 @@ async def _owner_id(session, booking):
     return booking.created_by_id
 
 
-async def run() -> dict[str, int]:
-    db_manager.configure()
+async def dispatch_registration_reminders(session) -> dict[str, int]:
+    """Send reminders for imminent registrations across every org, using the
+    provided session. Does NOT configure/dispose the engine — so both the CLI
+    (`run`) and the HTTP cron trigger can share the same logic."""
     counts: dict[str, int] = {"orgs": 0, "reminders": 0}
     today = datetime.now(UTC).date()
     horizon = today + timedelta(days=REMIND_WITHIN_DAYS)
-    async with db_manager.session_factory() as session:
-        with bypass(session):
-            orgs = (await session.execute(select(Organization))).scalars().all()
+    with bypass(session):
+        orgs = (await session.execute(select(Organization))).scalars().all()
 
-        for org in orgs:
-            set_scope(session, org.id)
-            counts["orgs"] += 1
-            rows = (
-                await session.execute(
-                    select(Booking, Unit)
-                    .join(Unit, Booking.unit_id == Unit.id)
-                    .where(
-                        Booking.is_deleted.is_(False),
-                        Booking.status == BookingStatus.confirmed,
-                        Booking.scheduled_date >= today,
-                        Booking.scheduled_date <= horizon,
-                        Unit.status == UnitStatus.booked,
-                    )
+    for org in orgs:
+        set_scope(session, org.id)
+        counts["orgs"] += 1
+        rows = (
+            await session.execute(
+                select(Booking, Unit)
+                .join(Unit, Booking.unit_id == Unit.id)
+                .where(
+                    Booking.is_deleted.is_(False),
+                    Booking.status == BookingStatus.confirmed,
+                    Booking.scheduled_date >= today,
+                    Booking.scheduled_date <= horizon,
+                    Unit.status == UnitStatus.booked,
                 )
-            ).all()
-            service = NotificationService(session)
-            for booking, unit in rows:
-                owner = await _owner_id(session, booking)
-                if owner:
-                    await service.create_notification(
-                        user_id=owner,
-                        message=(
-                            f"Registration due on {booking.scheduled_date.isoformat()} "
-                            f"for unit {unit.unit_number}."
-                        ),
-                    )
-                    counts["reminders"] += 1
-            await session.commit()
-        set_scope(session, None)
+            )
+        ).all()
+        service = NotificationService(session)
+        for booking, unit in rows:
+            owner = await _owner_id(session, booking)
+            if owner:
+                await service.create_notification(
+                    user_id=owner,
+                    message=(
+                        f"Registration due on {booking.scheduled_date.isoformat()} "
+                        f"for unit {unit.unit_number}."
+                    ),
+                )
+                counts["reminders"] += 1
+        await session.commit()
+    set_scope(session, None)
+    return counts
+
+
+async def run() -> dict[str, int]:
+    """CLI entrypoint: owns the engine lifecycle around the shared dispatch."""
+    db_manager.configure()
+    async with db_manager.session_factory() as session:
+        counts = await dispatch_registration_reminders(session)
     await db_manager.dispose()
     return counts
 

@@ -78,6 +78,11 @@ class Settings(BaseSettings):
     s3_secret_access_key: str | None = None
     s3_presign_ttl_seconds: int = 3600
 
+    # Shared secret for machine-triggered cron endpoints (e.g. the Cloudflare
+    # Worker that fires registration reminders). When unset, those endpoints
+    # reject every call (403) — so they're inert until deliberately enabled.
+    cron_secret: str | None = None
+
     websocket_ping_interval_seconds: int = 20
     websocket_event_buffer_size: int = 200
 

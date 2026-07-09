@@ -14,12 +14,17 @@
     "not_found_handling": "single-page-application",
     "binding": "ASSETS"
   },
-  // Cron: ping the backend DB health endpoint every 4 minutes to keep the Neon
-  // serverless compute warm (no cold-start latency on real requests).
+  // Crons (UTC):
+  //  - */4 * * * *  : ping the backend DB health endpoint to keep Neon warm.
+  //  - 30 3 * * *   : daily 03:30 UTC (~09:00 IST) — trigger registration reminders.
+  // The scheduled() handler branches on event.cron (worker/index.js).
   "triggers": {
-    "crons": ["*/4 * * * *"]
+    "crons": ["*/4 * * * *", "30 3 * * *"]
   },
   "vars": {
-    "KEEPALIVE_URL": "https://flexcrm-backend-539170436218.asia-south1.run.app/health/db"
+    "KEEPALIVE_URL": "https://flexcrm-backend-539170436218.asia-south1.run.app/health/db",
+    "REMINDERS_URL": "https://flexcrm-backend-539170436218.asia-south1.run.app/api/v1/cron/registration-reminders"
   }
+  // NOTE: CRON_SECRET is a Worker *secret*, not a var — set it with
+  // `npx wrangler secret put CRON_SECRET` (must match the backend CRON_SECRET).
 }
