@@ -2,9 +2,10 @@ import { X } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 
-import { Badge, Button, EmptyState, LoadingBlock, Modal } from "../../components";
+import { Badge, Button, EmptyState, LoadingBlock, Modal, useToast } from "../../components";
 import { bookingsService } from "../../services/bookings";
 import { customersService } from "../../services/customers";
+import { extractErrorMessage } from "../../utils/errors";
 import { siteVisitsService } from "../../services/site-visits";
 import { DocumentPreview } from "../../pages/bookings/components/DocumentPreview";
 import type { Customer } from "../../types";
@@ -43,6 +44,9 @@ export function CustomerDrawer({ open, customer, onClose }: Props) {
   const [docHtml, setDocHtml] = useState<string | null>(null);
   const [docTitle, setDocTitle] = useState("");
   const [docPdf, setDocPdf] = useState<{ bookingId: string; docType: "booking_form" | "allotment_letter" } | null>(null);
+  const [portalCreds, setPortalCreds] = useState<{ email: string; temporary_password: string } | null>(null);
+  const [inviting, setInviting] = useState(false);
+  const toast = useToast();
 
   useEffect(() => {
     if (!open) return;
@@ -64,6 +68,7 @@ export function CustomerDrawer({ open, customer, onClose }: Props) {
       setBookings([]);
       setVisits([]);
       setTab("overview");
+      setPortalCreds(null);
       return;
     }
     let cancelled = false;
@@ -101,6 +106,20 @@ export function CustomerDrawer({ open, customer, onClose }: Props) {
       setDocPdf({ bookingId, docType });
     } catch {
       /* preview failure is non-critical */
+    }
+  }
+
+  async function invitePortal() {
+    if (!customer) return;
+    setInviting(true);
+    try {
+      const creds = await customersService.grantPortalAccess(customer.id);
+      setPortalCreds(creds);
+      toast.success("Portal login created");
+    } catch (e) {
+      toast.error("Could not create portal login", extractErrorMessage(e));
+    } finally {
+      setInviting(false);
     }
   }
 
@@ -235,13 +254,13 @@ export function CustomerDrawer({ open, customer, onClose }: Props) {
                         <tbody>
                           {payments.map((p) => (
                             <tr key={p.id}>
-                              <td>{p.installmentName}</td>
-                              <td>
+                              <td data-label="Installment">{p.installmentName}</td>
+                              <td data-label="Due">
                                 {formatDate(p.dueDate)} {p.isOverdue && <Badge tone="danger">Overdue</Badge>}
                               </td>
-                              <td style={{ textAlign: "right" }}>{formatCurrency(p.demandAmount, "INR")}</td>
-                              <td style={{ textAlign: "right" }}>{formatCurrency(p.paidAmount, "INR")}</td>
-                              <td style={{ textAlign: "right" }}>{formatCurrency(p.outstanding, "INR")}</td>
+                              <td data-label="Demand" style={{ textAlign: "right" }}>{formatCurrency(p.demandAmount, "INR")}</td>
+                              <td data-label="Paid" style={{ textAlign: "right" }}>{formatCurrency(p.paidAmount, "INR")}</td>
+                              <td data-label="Outstanding" style={{ textAlign: "right" }}>{formatCurrency(p.outstanding, "INR")}</td>
                             </tr>
                           ))}
                         </tbody>
@@ -271,10 +290,22 @@ export function CustomerDrawer({ open, customer, onClose }: Props) {
               )}
             </div>
 
-            <footer className="drawer__footer">
-              <Button variant="secondary" onClick={onClose}>
-                Close
-              </Button>
+            <footer className="drawer__footer" style={{ flexDirection: "column", alignItems: "stretch", gap: "0.6rem" }}>
+              {portalCreds && (
+                <div className="card" style={{ padding: "0.6rem 0.8rem", fontSize: "0.8rem" }}>
+                  <div><strong>Portal login created.</strong> Share with the buyer:</div>
+                  <div style={{ marginTop: 4 }}>Email: <code>{portalCreds.email}</code></div>
+                  <div>Temp password: <code>{portalCreds.temporary_password}</code></div>
+                </div>
+              )}
+              <div className="row" style={{ justifyContent: "space-between", gap: "0.5rem" }}>
+                <Button variant="secondary" onClick={() => void invitePortal()} loading={inviting}>
+                  Invite to portal
+                </Button>
+                <Button variant="secondary" onClick={onClose}>
+                  Close
+                </Button>
+              </div>
             </footer>
           </div>
         </div>,

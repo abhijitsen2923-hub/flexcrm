@@ -276,13 +276,13 @@ export function PaymentPlanModal({ booking: initial, onClose, onChanged }: Props
               <tbody>
                 {booking.paymentSchedules.map((p) => (
                   <tr key={p.id}>
-                    <td>{p.installmentName}</td>
-                    <td>
+                    <td data-label="Installment">{p.installmentName}</td>
+                    <td data-label="Due">
                       {formatDate(p.dueDate)} {p.isOverdue && <Badge tone="danger">Overdue</Badge>}
                     </td>
-                    <td style={{ textAlign: "right" }}>{formatInr(p.demandAmount)}</td>
-                    <td style={{ textAlign: "right" }}>{formatInr(p.paidAmount)}</td>
-                    <td style={{ textAlign: "right" }}>{formatInr(p.outstanding)}</td>
+                    <td data-label="Demand" style={{ textAlign: "right" }}>{formatInr(p.demandAmount)}</td>
+                    <td data-label="Paid" style={{ textAlign: "right" }}>{formatInr(p.paidAmount)}</td>
+                    <td data-label="Outstanding" style={{ textAlign: "right" }}>{formatInr(p.outstanding)}</td>
                     <td style={{ textAlign: "right" }}>
                       {p.outstanding > 0 && (
                         <Button size="sm" variant="secondary" onClick={() => openRecord(p)}>Record</Button>

@@ -23,4 +23,6 @@ export const exportsService = {
   leads: () => downloadCsv("/exports/leads.csv", "leads.csv"),
   customers: () => downloadCsv("/exports/customers.csv", "customers.csv"),
   salesOrders: () => downloadCsv("/exports/sales-orders.csv", "sales-orders.csv"),
+  inventory: () => downloadCsv("/exports/inventory.csv", "inventory.csv"),
+  bookings: () => downloadCsv("/exports/bookings.csv", "bookings.csv"),
 };

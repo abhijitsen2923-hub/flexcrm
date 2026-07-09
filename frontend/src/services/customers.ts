@@ -43,5 +43,13 @@ export const customersService = {
   async remove(customerId: string): Promise<ApiMessageResponse> {
     const { data } = await apiClient.delete<ApiMessageResponse>(`/customers/${customerId}`);
     return data;
+  },
+
+  // Provision a buyer self-service portal login; returns temp credentials to share.
+  async grantPortalAccess(customerId: string): Promise<{ email: string; temporary_password: string }> {
+    const { data } = await apiClient.post<{ email: string; temporary_password: string }>(
+      `/customers/${customerId}/portal-access`
+    );
+    return data;
   }
 };

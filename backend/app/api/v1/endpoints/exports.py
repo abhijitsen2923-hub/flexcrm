@@ -25,6 +25,7 @@ from app.finance.models import SalesOrder
 from app.models.customer import Customer
 from app.models.lead import Lead
 from app.models.organization import Organization
+from app.real_estate.models import Booking, Tower, Unit
 
 
 router = APIRouter()
@@ -147,3 +148,70 @@ async def export_sales_orders(
         for o in orders
     ]
     return _csv_response(f"sales-orders-{datetime.utcnow().date()}.csv", rows, header)
+
+
+@router.get("/inventory.csv")
+async def export_inventory(
+    _: object = Depends(require_permissions(PermissionCode.EXPORT_DATA, PermissionCode.LEAD_VIEW)),
+    session: AsyncSession = Depends(get_db_session),
+):
+    stmt = (
+        select(Unit)
+        .where(Unit.is_deleted.is_(False))
+        .options(selectinload(Unit.tower).selectinload(Tower.project))
+        .order_by(Unit.created_at.desc())
+    )
+    units = (await session.execute(stmt)).scalars().all()
+    header = [
+        "project", "tower", "unit_number", "floor", "unit_type",
+        "area", "area_unit", "base_price", "status", "facing",
+    ]
+    rows = [
+        [
+            u.project_name or "", u.tower_name or "", u.unit_number, str(u.floor),
+            u.unit_type, str(u.area), u.area_unit, str(u.base_price),
+            u.status.value, u.facing or "",
+        ]
+        for u in units
+    ]
+    return _csv_response(f"inventory-{datetime.utcnow().date()}.csv", rows, header)
+
+
+@router.get("/bookings.csv")
+async def export_bookings(
+    _: object = Depends(require_permissions(PermissionCode.EXPORT_DATA, PermissionCode.LEAD_VIEW)),
+    session: AsyncSession = Depends(get_db_session),
+):
+    stmt = (
+        select(Booking)
+        .where(Booking.is_deleted.is_(False))
+        .options(
+            selectinload(Booking.unit).selectinload(Unit.tower).selectinload(Tower.project),
+            selectinload(Booking.customer),
+        )
+        .order_by(Booking.created_at.desc())
+    )
+    bookings = (await session.execute(stmt)).scalars().all()
+    header = [
+        "booking_id", "status", "customer", "project", "tower", "unit_number",
+        "total_consideration", "registration_date", "registration_number",
+        "sub_registrar_office", "created_at",
+    ]
+    rows = []
+    for b in bookings:
+        unit = b.unit
+        snap = b.pricing_snapshot if isinstance(b.pricing_snapshot, dict) else {}
+        total = snap.get("total")
+        rows.append([
+            str(b.id), b.status.value,
+            b.customer.contact_name if b.customer else "",
+            (unit.project_name or "") if unit else "",
+            (unit.tower_name or "") if unit else "",
+            unit.unit_number if unit else "",
+            str(total) if total is not None else "",
+            b.scheduled_date.isoformat() if b.scheduled_date else "",
+            b.registration_number or "",
+            b.sub_registrar_office or "",
+            b.created_at.isoformat(),
+        ])
+    return _csv_response(f"bookings-{datetime.utcnow().date()}.csv", rows, header)

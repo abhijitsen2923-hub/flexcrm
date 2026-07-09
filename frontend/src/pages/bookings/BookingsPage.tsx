@@ -1,12 +1,14 @@
 import { useEffect, useState } from "react";
 import { useLocation, useSearchParams } from "react-router-dom";
-import { ClipboardCheck, Plus, Wallet } from "lucide-react";
+import { ClipboardCheck, Download, Plus, Wallet } from "lucide-react";
 import { Badge, Button, Card, ConfirmDialog, DataTable, EmptyState, Modal, TextField, useToast } from "../../components";
 import type { DataTableColumn } from "../../components";
 import { useBookings } from "../../hooks/useBookings";
 import { useInventory } from "../../hooks/useInventory";
+import { usePermissions } from "../../hooks/usePermissions";
 import { bookingsService } from "../../services/bookings";
 import { inventoryService } from "../../services/inventory";
+import { exportsService } from "../../services/exports";
 import { LoadingBlock } from "../../components/ui/Spinner";
 import { BookingWizard } from "./components/BookingWizard";
 import { PaymentPlanModal } from "./components/PaymentPlanModal";
@@ -34,6 +36,8 @@ export default function BookingsPage() {
   const { bookings, loading, refresh } = useBookings();
   const { projects, updateUnitStatus, refresh: refreshInventory } = useInventory();
   const toast = useToast();
+  const { has: hasPerm } = usePermissions();
+  const canExport = hasPerm("EXPORT_DATA");
   const [wizardUnit, setWizardUnit] = useState<WizardUnit | null>(null);
   const [wizardBooking, setWizardBooking] = useState<Booking | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -314,9 +318,21 @@ export default function BookingsPage() {
     <div className="bookings-page">
       <div className="page-header">
         <h1 className="page-title">Bookings</h1>
-        <Button variant="primary" icon={<Plus size={16} />} onClick={() => setPickerOpen(true)}>
-          New Booking
-        </Button>
+        <div className="row" style={{ gap: "0.5rem" }}>
+          {canExport && (
+            <Button
+              variant="secondary"
+              size="sm"
+              icon={<Download size={14} />}
+              onClick={() => void exportsService.bookings().catch((e) => toast.error("Export failed", extractErrorMessage(e)))}
+            >
+              Export CSV
+            </Button>
+          )}
+          <Button variant="primary" icon={<Plus size={16} />} onClick={() => setPickerOpen(true)}>
+            New Booking
+          </Button>
+        </div>
       </div>
 
       {bookings.length === 0 ? (

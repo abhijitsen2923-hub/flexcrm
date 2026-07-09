@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
-import { Archive, Building2, Image, Pencil, Plus, Trash2, Upload } from "lucide-react";
+import { Archive, Building2, Download, Image, Pencil, Plus, Trash2, Upload } from "lucide-react";
 import { Button, Card, ConfirmDialog, DataTable, EmptyState, Modal, SelectField, TextField, useToast } from "../../components";
 import type { DataTableColumn } from "../../components";
 import { useInventory } from "../../hooks/useInventory";
+import { usePermissions } from "../../hooks/usePermissions";
 import { inventoryService } from "../../services/inventory";
+import { exportsService } from "../../services/exports";
 import type { Project, ProjectMedia, Tower, Unit, UnitType } from "../../types/realestate";
 import { LoadingBlock } from "../../components/ui/Spinner";
 import { extractErrorMessage } from "../../utils/errors";
@@ -156,6 +158,8 @@ const COLUMNS: DataTableColumn<Project>[] = [
 export default function ProjectsPage() {
   const { projects, loading, refresh } = useInventory();
   const toast = useToast();
+  const { has: hasPerm } = usePermissions();
+  const canExport = hasPerm("EXPORT_DATA");
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
   const [formOpen, setFormOpen] = useState(false);
   const [editingProject, setEditingProject] = useState<Project | null>(null);
@@ -277,9 +281,21 @@ export default function ProjectsPage() {
     <div className="projects-page">
       <div className="page-header">
         <h1 className="page-title">Projects</h1>
-        <Button variant="primary" icon={<Plus size={16} />} onClick={openCreate}>
-          Add Project
-        </Button>
+        <div className="row" style={{ gap: "0.5rem" }}>
+          {canExport && (
+            <Button
+              variant="secondary"
+              size="sm"
+              icon={<Download size={14} />}
+              onClick={() => void exportsService.inventory().catch((e) => toast.error("Export failed", extractErrorMessage(e)))}
+            >
+              Export CSV
+            </Button>
+          )}
+          <Button variant="primary" icon={<Plus size={16} />} onClick={openCreate}>
+            Add Project
+          </Button>
+        </div>
       </div>
 
       {projects.length === 0 ? (
@@ -705,12 +721,12 @@ function TowerManager({ project, onChanged }: { project: Project; onChanged: () 
                         </tr>
                       ) : (
                         <tr key={u.id}>
-                          <td><strong>{u.unitNumber}</strong></td>
-                          <td>{u.floor}</td>
-                          <td>{u.unitType}</td>
-                          <td style={{ textAlign: "right" }}>{u.area} {u.areaUnit}</td>
-                          <td style={{ textAlign: "right" }}>{formatInr(u.basePrice)}</td>
-                          <td>{u.status}</td>
+                          <td data-label="Unit"><strong>{u.unitNumber}</strong></td>
+                          <td data-label="Floor">{u.floor}</td>
+                          <td data-label="Type">{u.unitType}</td>
+                          <td data-label="Area" style={{ textAlign: "right" }}>{u.area} {u.areaUnit}</td>
+                          <td data-label="Price" style={{ textAlign: "right" }}>{formatInr(u.basePrice)}</td>
+                          <td data-label="Status">{u.status}</td>
                           <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>
                             <button type="button" className="btn btn--ghost btn--icon" onClick={() => startUnitEdit(u)} aria-label="Edit unit"><Pencil size={13} /></button>
                             <button type="button" className="btn btn--ghost btn--icon" onClick={() => setArchiveItem({ kind: "unit", id: u.id, label: u.unitNumber })} aria-label="Archive unit"><Archive size={13} /></button>
