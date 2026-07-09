@@ -28,7 +28,14 @@ export default {
       ctx.waitUntil(
         fetch(url, {
           method: "POST",
-          headers: { "x-cron-key": env.CRON_SECRET || "", "user-agent": "flexcrm-cron" },
+          // Always send a body → a Content-Length header is present. Google's
+          // front-end (in front of Cloud Run) returns 411 for a body-less POST.
+          body: "{}",
+          headers: {
+            "x-cron-key": env.CRON_SECRET || "",
+            "content-type": "application/json",
+            "user-agent": "flexcrm-cron",
+          },
         }).catch(() => {})
       );
       return;
