@@ -35,6 +35,8 @@ export function BookingWizard({ unit, onClose, onComplete, initialBooking = null
   const [docHtml, setDocHtml] = useState<string | null>(null);
   const [docTitle, setDocTitle] = useState<string>("");
   const [docPdf, setDocPdf] = useState<{ bookingId: string; docType: "booking_form" | "allotment_letter" } | null>(null);
+  // Which document is currently generating (per-button spinner, separate from `saving`).
+  const [generating, setGenerating] = useState<"booking_form" | "allotment_letter" | null>(null);
 
   // Step 2 state
   const [customerId, setCustomerId] = useState("");
@@ -137,7 +139,7 @@ export function BookingWizard({ unit, onClose, onComplete, initialBooking = null
       toast.error("Registration date required", "Set the registration date before generating the form.");
       return;
     }
-    setSaving(true);
+    setGenerating(docType);
     try {
       // Persist the registration date so it appears on the document — WITHOUT
       // confirming (confirm defaults false, and we stay on the current step so a
@@ -153,7 +155,7 @@ export function BookingWizard({ unit, onClose, onComplete, initialBooking = null
     } catch {
       toast.error("Document generation failed");
     } finally {
-      setSaving(false);
+      setGenerating(null);
     }
   };
 
@@ -358,16 +360,16 @@ export function BookingWizard({ unit, onClose, onComplete, initialBooking = null
               <div className="bw-doc-actions">
                 <Button
                   variant="secondary"
-                  loading={saving}
-                  disabled={!scheduledDate}
+                  loading={generating === "booking_form"}
+                  disabled={!scheduledDate || generating !== null || saving}
                   onClick={() => handleGenerate("booking_form")}
                 >
                   Generate Booking Form
                 </Button>
                 <Button
                   variant="secondary"
-                  loading={saving}
-                  disabled={!scheduledDate}
+                  loading={generating === "allotment_letter"}
+                  disabled={!scheduledDate || generating !== null || saving}
                   onClick={() => handleGenerate("allotment_letter")}
                 >
                   Generate Allotment Letter
@@ -377,8 +379,8 @@ export function BookingWizard({ unit, onClose, onComplete, initialBooking = null
                 <p className="muted text-xs">Enter the registration date to generate documents.</p>
               )}
               <div className="bw-footer">
-                <Button variant="secondary" onClick={() => setStep(3)}>← Back</Button>
-                <Button variant="primary" loading={saving} onClick={handleConfirm}>
+                <Button variant="secondary" onClick={() => setStep(3)} disabled={saving || generating !== null}>← Back</Button>
+                <Button variant="primary" loading={saving} disabled={saving || generating !== null} onClick={handleConfirm}>
                   {isConfirmed ? "Save & Close" : "Confirm Booking"}
                 </Button>
               </div>
