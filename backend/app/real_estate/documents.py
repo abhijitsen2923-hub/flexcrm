@@ -1,9 +1,10 @@
-"""Self-contained HTML documents for bookings (allotment letter, booking form,
-receipt). Rendered from booking + unit + project + customer data and returned as
-an HTML string the client previews in an iframe and prints (Save as PDF).
+"""On-brand HTML documents for bookings (allotment letter, booking form, receipt).
 
-No PDF library / file storage is wired — HTML + browser print keeps it dependency
-free while producing a real, on-brand document with the actual booking data.
+Rendered from booking + unit + project + customer data. The same HTML is used for
+the browser preview and for server-side PDF generation (see app/core/pdf.py). The
+markup is deliberately engine-neutral — tables + <hr> instead of flex/float, and
+"Rs." instead of the ₹ glyph — so it renders identically in WeasyPrint and in the
+pure-Python xhtml2pdf fallback (which lacks flexbox and a Unicode font).
 """
 from __future__ import annotations
 
@@ -23,7 +24,6 @@ _MODE_LABELS = {
     "other": "Other",
 }
 
-
 _TITLES = {
     "allotment_letter": "Allotment Letter",
     "booking_form": "Booking Form",
@@ -36,11 +36,9 @@ def _inr(value) -> str:
         n = float(value)
     except (TypeError, ValueError):
         return "—"
-    # Indian digit grouping (e.g. 12,34,567).
-    whole = f"{int(round(n)):,}"
-    # Python's default grouping is western; convert to Indian for the tail.
     s = str(int(round(n)))
-    if len(s) > 3:
+    whole = s
+    if len(s) > 3:  # Indian digit grouping, e.g. 12,34,567
         head, tail = s[:-3], s[-3:]
         parts = []
         while len(head) > 2:
@@ -48,7 +46,8 @@ def _inr(value) -> str:
             head = head[:-2]
         parts.insert(0, head)
         whole = ",".join(parts) + "," + tail
-    return f"₹{whole}"
+    # "Rs." (ASCII) rather than ₹ so it renders in every PDF engine's core font.
+    return f"Rs. {whole}"
 
 
 def _fmt_date(d) -> str:
@@ -60,6 +59,57 @@ def _row(label: str, value: str) -> str:
         f'<tr><td class="k">{escape(label)}</td>'
         f'<td class="v">{escape(str(value))}</td></tr>'
     )
+
+
+def _sign(left: str, right: str) -> str:
+    """Signature block as a table (xhtml2pdf has no flexbox)."""
+    return (
+        '<br/><br/><br/>'
+        '<table class="sign" width="100%"><tr>'
+        f'<td width="45%">{escape(left)}</td>'
+        '<td width="10%"></td>'
+        f'<td width="45%">{escape(right)}</td>'
+        '</tr></table>'
+    )
+
+
+_STYLE = """
+  @page { size: a4; margin: 2cm; }
+  body { font-family: Helvetica, Arial, sans-serif; color: #1f2937; }
+  .builder { font-size: 20px; font-weight: bold; color: #0f172a; }
+  .proj { color: #6b7280; font-size: 12px; }
+  .rera { color: #6b7280; font-size: 10px; }
+  h1 { font-size: 17px; margin: 10px 0 16px; }
+  h3 { font-size: 12px; color: #6b7280; margin: 16px 0 6px; }
+  p { font-size: 13px; }
+  table.kv { width: 100%; }
+  table.kv td { padding: 5px 6px; border-bottom: 1px solid #eef1f5; font-size: 13px; }
+  td.k { color: #6b7280; width: 40%; }
+  td.v { font-weight: bold; }
+  .ref { color: #6b7280; font-size: 11px; }
+  hr.rule { border: none; border-top: 3px solid #f59e0b; }
+  table.sign td { border-top: 1px solid #9ca3af; padding-top: 6px; font-size: 12px; color: #374151; text-align: center; }
+"""
+
+
+def _shell(title: str, builder: str, proj_name: str, location: str,
+           rera: str | None, ref_label: str, ref: str, body: str) -> str:
+    rera_line = f'<div class="rera">RERA: {escape(rera)}</div>' if rera else ""
+    proj_line = escape(proj_name) + ((" — " + escape(location)) if location else "")
+    return f"""<!doctype html><html><head><meta charset="utf-8"><title>{escape(title)}</title>
+    <style>{_STYLE}</style></head><body>
+      <table width="100%"><tr>
+        <td>
+          <div class="builder">{escape(builder)}</div>
+          <div class="proj">{proj_line}</div>
+          {rera_line}
+        </td>
+        <td align="right" valign="top"><span class="ref">{escape(ref_label)}: {escape(ref)}</span></td>
+      </tr></table>
+      <hr class="rule"/>
+      <h1>{escape(title)}</h1>
+      {body}
+    </body></html>"""
 
 
 def render_booking_document(
@@ -125,7 +175,7 @@ def render_booking_document(
           <p>Registration Date: <strong>{escape(registration_date)}</strong></p>
           <p>This allotment is subject to the terms of the agreement to sale and
           applicable statutory approvals.</p>
-          <div class="sign"><div>Applicant Signature</div><div>For {escape(builder)}</div></div>
+          {_sign("Applicant Signature", "For " + builder)}
         """
     elif doc_type == "receipt":
         body = f"""
@@ -135,7 +185,7 @@ def render_booking_document(
           <h3>Unit Details</h3>
           {unit_table}
           <p>Registration Date: <strong>{escape(registration_date)}</strong></p>
-          <div class="sign"><div>Received By</div><div>For {escape(builder)}</div></div>
+          {_sign("Received By", "For " + builder)}
         """
     else:  # booking_form
         body = f"""
@@ -148,41 +198,10 @@ def render_booking_document(
             {_row("Registration Date", registration_date)}
             {_row("Booking Ref", ref)}
           </table>
-          <div class="sign"><div>Applicant Signature</div><div>Authorised Signatory</div></div>
+          {_sign("Applicant Signature", "Authorised Signatory")}
         """
 
-    rera_line = f"<div class='rera'>RERA: {escape(rera)}</div>" if rera else ""
-    html = f"""<!doctype html><html><head><meta charset="utf-8"><title>{escape(title)}</title>
-    <style>
-      * {{ box-sizing: border-box; }}
-      body {{ font-family: Arial, Helvetica, sans-serif; color: #1f2937; margin: 0; padding: 32px; }}
-      .doc {{ max-width: 720px; margin: 0 auto; }}
-      .head {{ border-bottom: 3px solid #f59e0b; padding-bottom: 12px; margin-bottom: 20px; }}
-      .builder {{ font-size: 22px; font-weight: 800; color: #0f172a; }}
-      .proj {{ color: #6b7280; font-size: 13px; }}
-      .rera {{ color: #6b7280; font-size: 11px; margin-top: 4px; }}
-      h1 {{ font-size: 18px; text-transform: uppercase; letter-spacing: .05em; margin: 8px 0 20px; }}
-      h3 {{ font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: #6b7280; margin: 20px 0 8px; }}
-      p {{ font-size: 14px; line-height: 1.6; }}
-      table.kv {{ width: 100%; border-collapse: collapse; }}
-      table.kv td {{ padding: 6px 8px; border-bottom: 1px solid #eef1f5; font-size: 14px; }}
-      td.k {{ color: #6b7280; width: 40%; }}
-      td.v {{ font-weight: 600; }}
-      .ref {{ float: right; color: #6b7280; font-size: 12px; }}
-      .sign {{ display: flex; justify-content: space-between; margin-top: 56px; font-size: 13px; color: #374151; }}
-      .sign div {{ border-top: 1px solid #9ca3af; padding-top: 6px; width: 40%; text-align: center; }}
-      @media print {{ body {{ padding: 0; }} }}
-    </style></head><body><div class="doc">
-      <div class="head">
-        <span class="ref">Ref: {escape(ref)}</span>
-        <div class="builder">{escape(builder)}</div>
-        <div class="proj">{escape(proj_name)}{(' — ' + escape(location)) if location else ''}</div>
-        {rera_line}
-      </div>
-      <h1>{escape(title)}</h1>
-      {body}
-    </div></body></html>"""
-    return html, title
+    return _shell(title, builder, proj_name, location, rera, "Ref", ref, body), title
 
 
 def render_payment_receipt(
@@ -203,7 +222,6 @@ def render_payment_receipt(
 
     unit_no = unit.unit_number if unit else "—"
     tower_name = tower.name if tower else "—"
-
     cust_name = customer.contact_name if customer else "—"
 
     amount = _inr(receipt.amount)
@@ -228,38 +246,7 @@ def render_payment_receipt(
       <h3>Payment Details</h3>
       {details}
       {('<p>' + escape(receipt.notes) + '</p>') if receipt.notes else ''}
-      <div class="sign"><div>Received By</div><div>For {escape(builder)}</div></div>
+      {_sign("Received By", "For " + builder)}
     """
 
-    rera_line = f"<div class='rera'>RERA: {escape(rera)}</div>" if rera else ""
-    html = f"""<!doctype html><html><head><meta charset="utf-8"><title>{escape(title)}</title>
-    <style>
-      * {{ box-sizing: border-box; }}
-      body {{ font-family: Arial, Helvetica, sans-serif; color: #1f2937; margin: 0; padding: 32px; }}
-      .doc {{ max-width: 720px; margin: 0 auto; }}
-      .head {{ border-bottom: 3px solid #f59e0b; padding-bottom: 12px; margin-bottom: 20px; }}
-      .builder {{ font-size: 22px; font-weight: 800; color: #0f172a; }}
-      .proj {{ color: #6b7280; font-size: 13px; }}
-      .rera {{ color: #6b7280; font-size: 11px; margin-top: 4px; }}
-      h1 {{ font-size: 18px; text-transform: uppercase; letter-spacing: .05em; margin: 8px 0 20px; }}
-      h3 {{ font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: #6b7280; margin: 20px 0 8px; }}
-      p {{ font-size: 14px; line-height: 1.6; }}
-      table.kv {{ width: 100%; border-collapse: collapse; }}
-      table.kv td {{ padding: 6px 8px; border-bottom: 1px solid #eef1f5; font-size: 14px; }}
-      td.k {{ color: #6b7280; width: 40%; }}
-      td.v {{ font-weight: 600; }}
-      .ref {{ float: right; color: #6b7280; font-size: 12px; }}
-      .sign {{ display: flex; justify-content: space-between; margin-top: 56px; font-size: 13px; color: #374151; }}
-      .sign div {{ border-top: 1px solid #9ca3af; padding-top: 6px; width: 40%; text-align: center; }}
-      @media print {{ body {{ padding: 0; }} }}
-    </style></head><body><div class="doc">
-      <div class="head">
-        <span class="ref">Receipt: {escape(receipt_no)}</span>
-        <div class="builder">{escape(builder)}</div>
-        <div class="proj">{escape(proj_name)}{(' — ' + escape(location)) if location else ''}</div>
-        {rera_line}
-      </div>
-      <h1>{escape(title)}</h1>
-      {body}
-    </div></body></html>"""
-    return html, title
+    return _shell(title, builder, proj_name, location, rera, "Receipt", receipt_no, body), title
