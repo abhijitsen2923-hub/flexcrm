@@ -33,13 +33,15 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PATH=/opt/venv/bin:$PATH
 
-# libpq5 (psycopg2) + curl (healthcheck); the remaining libs are WeasyPrint's
-# native runtime deps (Pango/Cairo/GDK-PixBuf) for server-side PDF rendering.
+# libpq5 (psycopg2) + curl (healthcheck); the rest are WeasyPrint's native
+# runtime deps for server-side PDF rendering. WeasyPrint 60+ loads Pango via
+# pangoft2 (NOT pangocairo) + HarfBuzz + Fontconfig — libpangoft2-1.0-0 was the
+# missing lib that made write_pdf() 500 on Cloud Run.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         libpq5 curl \
-        libpango-1.0-0 libpangocairo-1.0-0 libcairo2 libgdk-pixbuf-2.0-0 \
-        libffi8 shared-mime-info fonts-dejavu-core \
+        libpango-1.0-0 libpangoft2-1.0-0 libharfbuzz0b libfontconfig1 \
+        libcairo2 libgdk-pixbuf-2.0-0 libffi8 shared-mime-info fonts-dejavu-core \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
