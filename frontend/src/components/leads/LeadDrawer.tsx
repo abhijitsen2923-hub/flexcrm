@@ -209,7 +209,7 @@ export function LeadDrawer({ open, lead, onClose, onTransitionRequest, refreshKe
                           )}
                           {entry.next_action_date && (
                             <span className="muted text-sm">
-                              · next action {formatDate(entry.next_action_date)}
+                              · next action {formatDateTime(entry.next_action_date)}
                             </span>
                           )}
                           {entry.attachment_path && (

@@ -44,6 +44,23 @@ export const leadIndustryOptions: Option<LeadIndustry>[] = asOptions([
   "real_estate"
 ]);
 
+// Controlled lead-source list — prevents free-text fragmentation and keeps values
+// aligned with historical / CSV data. "Other" reveals a free-text field.
+export const leadSourceOptions: Option<string>[] = [
+  "Walk-in", "Reference", "Instagram", "Facebook / Meta", "WhatsApp",
+  "Google Ads", "Website", "99acres", "MagicBricks", "Housing.com",
+  "Cold call", "Newspaper / Print", "Hoarding", "Other"
+].map((v) => ({ value: v, label: v }));
+
+// Real-estate "Property Interest" (unit configuration). "Other" → free text.
+export const propertyInterestOptions: Option<string>[] = [
+  "1 BHK", "2 BHK", "3 BHK", "4 BHK", "5 BHK+", "Studio", "Penthouse",
+  "Duplex", "Plot / Land", "Villa", "Commercial", "Other"
+].map((v) => ({ value: v, label: v }));
+
+// Sentinel that triggers the "please specify" free-text input.
+export const OTHER_OPTION = "Other";
+
 export const dealStageOptions: Option<DealStage>[] = asOptions([
   "discovery",
   "proposal",

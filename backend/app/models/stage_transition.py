@@ -25,7 +25,9 @@ class StageTransition(TenantBase, UUIDPrimaryKeyMixin):
     from_stage_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
     to_stage_code: Mapped[str] = mapped_column(String(64), nullable=False)
     comment: Mapped[str] = mapped_column(Text, nullable=False)
-    next_action_date: Mapped[date | None] = mapped_column(nullable=True)
+    # Date + time of the next follow-up (drives reminders). Kept the historical
+    # column name; type is now a timestamp so the "Time" is preserved.
+    next_action_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     attachment_path: Mapped[str | None] = mapped_column(String(512), nullable=True)
     performed_by_id: Mapped[UUID | None] = mapped_column(
         Uuid,

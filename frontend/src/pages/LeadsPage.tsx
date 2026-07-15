@@ -29,7 +29,7 @@ import { usersService } from "../services/users";
 import type { Lead, LeadIndustry, Organization, PipelineStage, User } from "../types";
 import { extractErrorMessage } from "../utils/errors";
 import { formatCurrency } from "../utils/format";
-import { industryInterestLabel, leadIndustryOptions, pipelineCategoryTone, titleCase } from "../utils/options";
+import { OTHER_OPTION, industryInterestLabel, leadIndustryOptions, leadSourceOptions, pipelineCategoryTone, propertyInterestOptions, titleCase } from "../utils/options";
 
 
 type ViewMode = "list" | "kanban";
@@ -76,9 +76,12 @@ interface CreateFormState {
   probability: string;
   expected_close_date: string;
   source: string;
+  source_other: string;
   interest: string;
+  interest_other: string;
   // Real-estate specific (only submitted when industry === "real_estate")
   property_type: string;
+  property_type_other: string;
   budget_min: string;
   budget_max: string;
   preferred_location: string;
@@ -103,8 +106,11 @@ function makeEmptyForm(
     probability: "0",
     expected_close_date: "",
     source: "",
+    source_other: "",
     interest: "",
+    interest_other: "",
     property_type: "",
+    property_type_other: "",
     budget_min: "",
     budget_max: "",
     preferred_location: "",
@@ -250,6 +256,17 @@ export default function LeadsPage() {
 
   async function handleCreateSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    // Mandatory controlled fields (meeting: prevent free-text fragmentation).
+    const resolvedSource = form.source === OTHER_OPTION ? form.source_other.trim() : form.source;
+    const resolvedInterest = form.interest === OTHER_OPTION ? form.interest_other.trim() : form.interest.trim();
+    if (!resolvedSource) {
+      setFormError("Please select a valid Source.");
+      return;
+    }
+    if (form.industry === "real_estate" && !resolvedInterest) {
+      setFormError("Please select a valid Property Interest.");
+      return;
+    }
     setSubmitting(true);
     setFormError(null);
     try {
@@ -281,10 +298,10 @@ export default function LeadsPage() {
         currency: form.currency || "INR",
         probability: Number(form.probability) || 0,
         expected_close_date: form.expected_close_date || null,
-        source: form.source.trim() || null,
-        interest: form.interest.trim() || null,
+        source: (form.source === OTHER_OPTION ? form.source_other.trim() : form.source) || null,
+        interest: (form.interest === OTHER_OPTION ? form.interest_other.trim() : form.interest.trim()) || null,
         ...(form.industry === "real_estate" ? {
-          property_type: form.property_type || null,
+          property_type: (form.property_type === OTHER_OPTION ? form.property_type_other.trim() : form.property_type) || null,
           budget_min: form.budget_min ? Number(form.budget_min) : null,
           budget_max: form.budget_max ? Number(form.budget_max) : null,
           preferred_location: form.preferred_location.trim() || null,
@@ -775,19 +792,35 @@ export default function LeadsPage() {
             onChange={(event) => setForm({ ...form, company_name: event.target.value })}
             placeholder="Optional"
           />
-          <TextField
-            id="lead-interest"
-            label={industryInterestLabel(form.industry)}
-            value={form.interest}
-            onChange={(event) => setForm({ ...form, interest: event.target.value })}
-            placeholder={
-              form.industry === "travel"
-                ? "e.g. Bali — 7 days"
-                : form.industry === "real_estate"
-                  ? "e.g. 2BHK in North Bengaluru"
-                  : "e.g. MBA — Marketing"
-            }
-          />
+          {form.industry === "real_estate" ? (
+            <>
+              <SelectField
+                id="lead-interest"
+                label={`${industryInterestLabel(form.industry)} *`}
+                value={form.interest}
+                onChange={(event) => setForm({ ...form, interest: event.target.value })}
+                required
+                options={[{ value: "", label: "Select…" }, ...propertyInterestOptions]}
+              />
+              {form.interest === OTHER_OPTION && (
+                <TextField
+                  id="lead-interest-other"
+                  label="Please specify property interest"
+                  value={form.interest_other}
+                  onChange={(event) => setForm({ ...form, interest_other: event.target.value })}
+                  required
+                />
+              )}
+            </>
+          ) : (
+            <TextField
+              id="lead-interest"
+              label={industryInterestLabel(form.industry)}
+              value={form.interest}
+              onChange={(event) => setForm({ ...form, interest: event.target.value })}
+              placeholder={form.industry === "travel" ? "e.g. Bali — 7 days" : "e.g. MBA — Marketing"}
+            />
+          )}
           {form.industry === "real_estate" && (
             <>
               <SelectField
@@ -799,9 +832,18 @@ export default function LeadsPage() {
                   { value: "apartment", label: "Apartment" },
                   { value: "villa", label: "Villa / Independent house" },
                   { value: "plot", label: "Plot / Land" },
-                  { value: "commercial", label: "Commercial" }
+                  { value: "commercial", label: "Commercial" },
+                  { value: OTHER_OPTION, label: "Other…" }
                 ]}
               />
+              {form.property_type === OTHER_OPTION && (
+                <TextField
+                  id="lead-property-type-other"
+                  label="Please specify property type"
+                  value={form.property_type_other}
+                  onChange={(event) => setForm({ ...form, property_type_other: event.target.value })}
+                />
+              )}
               <div className="form-grid">
                 <TextField
                   id="lead-budget-min"
@@ -845,13 +887,23 @@ export default function LeadsPage() {
               />
             </>
           )}
-          <TextField
+          <SelectField
             id="lead-source"
-            label="Source"
+            label="Source *"
             value={form.source}
             onChange={(event) => setForm({ ...form, source: event.target.value })}
-            placeholder="Instagram, Referral, Walk-in…"
+            required
+            options={[{ value: "", label: "Select…" }, ...leadSourceOptions]}
           />
+          {form.source === OTHER_OPTION && (
+            <TextField
+              id="lead-source-other"
+              label="Please specify source"
+              value={form.source_other}
+              onChange={(event) => setForm({ ...form, source_other: event.target.value })}
+              required
+            />
+          )}
           {/* Real estate captures a Budget min–max range (above) instead of a
               single Value, so Value/Currency are hidden for that vertical. */}
           {form.industry !== "real_estate" && (
@@ -879,24 +931,13 @@ export default function LeadsPage() {
               />
             </div>
           )}
-          <div className="form-grid">
-            <TextField
-              id="lead-probability"
-              label="Probability (%)"
-              type="number"
-              min={0}
-              max={100}
-              value={form.probability}
-              onChange={(event) => setForm({ ...form, probability: event.target.value })}
-            />
-            <TextField
-              id="lead-close-date"
-              label="Expected close"
-              type="date"
-              value={form.expected_close_date}
-              onChange={(event) => setForm({ ...form, expected_close_date: event.target.value })}
-            />
-          </div>
+          <TextField
+            id="lead-close-date"
+            label="Expected close"
+            type="date"
+            value={form.expected_close_date}
+            onChange={(event) => setForm({ ...form, expected_close_date: event.target.value })}
+          />
           {formError && <div className="error-banner">{formError}</div>}
         </form>
       </Modal>

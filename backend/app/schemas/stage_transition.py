@@ -15,7 +15,7 @@ MIN_COMMENT_LENGTH = 10
 class StageTransitionCreate(ORMModel):
     to_stage_code: str = Field(min_length=1, max_length=64)
     comment: str = Field(min_length=MIN_COMMENT_LENGTH, max_length=4000)
-    next_action_date: date | None = None
+    next_action_date: datetime | None = None
     attachment_path: str | None = Field(default=None, max_length=512)
     mentions: list[UUID] | None = None
     # Phase 2 — Education-only optional field captured on the Sold transition.
@@ -30,7 +30,7 @@ class StageTransitionRead(ORMModel):
     from_stage_code: str | None
     to_stage_code: str
     comment: str
-    next_action_date: date | None = None
+    next_action_date: datetime | None = None
     attachment_path: str | None = None
     performed_by_id: UUID | None = None
     performed_at: datetime
