@@ -78,6 +78,11 @@ class LeadUpdate(ORMModel):
     notes: str | None = None
 
 
+class LeadBulkReassign(ORMModel):
+    lead_ids: list[UUID] = Field(min_length=1)
+    assigned_to_id: UUID
+
+
 class LeadRead(ORMModel):
     id: UUID
     customer_id: UUID | None = None

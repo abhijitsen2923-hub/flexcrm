@@ -3,13 +3,14 @@ from uuid import UUID
 
 from fastapi import BackgroundTasks
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 
 from app.core.currencies import DEFAULT_CURRENCY, allowed_currencies_for_org
 from app.core.exceptions import NotFoundError, ValidationError
 from app.core.tenancy import current_org
 from app.database.enums import LeadIndustry
 from app.database.pipeline_seed import initial_stage_code
+from app.models.lead import Lead
 from app.models.organization import Organization
 from app.repositories.customers import CustomerRepository
 from app.repositories.leads import LeadRepository
@@ -45,6 +46,28 @@ class LeadService(ServiceBase):
         self.notification_service = NotificationService(session)
         self.email_service = EmailService()
         self.transition_service = StageTransitionService(session)
+
+    async def bulk_reassign(self, lead_ids: list[UUID], assigned_to_id: UUID, *, actor_id: UUID | None) -> int:
+        """Reassign the owner of many leads at once (Manager bulk action).
+
+        Returns the number of leads updated. Notifies the new owner once with the
+        count so they know their queue grew.
+        """
+        if not lead_ids:
+            return 0
+        result = await self.session.execute(
+            update(Lead)
+            .where(Lead.id.in_(lead_ids), Lead.is_deleted.is_(False))
+            .values(assigned_to_id=assigned_to_id, updated_by_id=actor_id)
+        )
+        count = result.rowcount or 0
+        if count:
+            await self.notification_service.create_notification(
+                user_id=assigned_to_id,
+                message=f"{count} lead{'s' if count != 1 else ''} assigned to you.",
+            )
+        await self.commit()
+        return count
 
     async def list_leads(self, pagination: PaginationParams, filters: LeadFilterParams):
         sort_by = validate_sort_field(filters.sort_by, self.allowed_sort_fields)

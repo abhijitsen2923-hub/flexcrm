@@ -232,6 +232,45 @@ export default function LeadsPage() {
     }
   }
 
+  // --- Bulk reassignment (Manager) ---------------------------------------
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [bulkOwner, setBulkOwner] = useState("");
+  const [bulkReassigning, setBulkReassigning] = useState(false);
+  const allPageSelected = leads.length > 0 && leads.every((l) => selectedIds.has(l.id));
+
+  function toggleSelect(id: string) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+  function toggleSelectAllOnPage() {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (leads.every((l) => prev.has(l.id))) leads.forEach((l) => next.delete(l.id));
+      else leads.forEach((l) => next.add(l.id));
+      return next;
+    });
+  }
+  async function handleBulkReassign() {
+    if (!bulkOwner || selectedIds.size === 0) return;
+    setBulkReassigning(true);
+    try {
+      const count = selectedIds.size;
+      await leadsService.bulkReassign(Array.from(selectedIds), bulkOwner);
+      toast.success("Owner updated", `Reassigned ${count} lead${count === 1 ? "" : "s"}.`);
+      setSelectedIds(new Set());
+      setBulkOwner("");
+      await refresh();
+    } catch (err) {
+      toast.error("Reassign failed", extractErrorMessage(err));
+    } finally {
+      setBulkReassigning(false);
+    }
+  }
+
   function openCreate() {
     setForm(makeEmptyForm(user?.business_type ?? "education", allowedCurrencies[0] ?? "INR"));
     setFormError(null);
@@ -384,6 +423,28 @@ export default function LeadsPage() {
 
   // --- List columns (spec §3.1) ------------------------------------------
   const columns: DataTableColumn<Lead>[] = [
+    ...(canAssign
+      ? [{
+          key: "select",
+          width: "36px",
+          header: (
+            <input
+              type="checkbox"
+              checked={allPageSelected}
+              onChange={toggleSelectAllOnPage}
+              aria-label="Select all on page"
+            />
+          ),
+          render: (lead: Lead) => (
+            <input
+              type="checkbox"
+              checked={selectedIds.has(lead.id)}
+              onChange={() => toggleSelect(lead.id)}
+              aria-label="Select lead"
+            />
+          ),
+        } as DataTableColumn<Lead>]
+      : []),
     {
       key: "lead",
       header: "Lead",
@@ -661,6 +722,38 @@ export default function LeadsPage() {
 
         {view === "list" ? (
           <>
+            {canAssign && selectedIds.size > 0 && (
+              <div
+                className="row"
+                style={{
+                  gap: "0.75rem",
+                  alignItems: "center",
+                  padding: "0.55rem 0.8rem",
+                  background: "var(--color-surface-muted)",
+                  borderRadius: "var(--radius-md)",
+                  marginBottom: "0.5rem",
+                  flexWrap: "wrap",
+                }}
+              >
+                <strong>{selectedIds.size} selected</strong>
+                <select
+                  className="select"
+                  value={bulkOwner}
+                  onChange={(e) => setBulkOwner(e.target.value)}
+                  style={{ maxWidth: 240 }}
+                  aria-label="Change owner to"
+                >
+                  <option value="">Change owner to…</option>
+                  {assignableUsers.map((u) => (
+                    <option key={u.id} value={u.id}>{u.first_name} {u.last_name}</option>
+                  ))}
+                </select>
+                <Button size="sm" loading={bulkReassigning} disabled={!bulkOwner} onClick={() => void handleBulkReassign()}>
+                  Change Owner
+                </Button>
+                <Button size="sm" variant="ghost" onClick={() => setSelectedIds(new Set())}>Clear</Button>
+              </div>
+            )}
             <div className="table-wrap table-wrap--leads" style={{ border: "none", borderRadius: 0, boxShadow: "none" }}>
               {loading && leads.length === 0 ? (
                 <LoadingBlock label="Loading leads…" />

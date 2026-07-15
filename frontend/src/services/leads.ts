@@ -131,6 +131,15 @@ export const leadsService = {
     return data;
   },
 
+  // Manager bulk reassignment — one owner for many leads.
+  async bulkReassign(leadIds: string[], assignedToId: string): Promise<ApiMessageResponse> {
+    const { data } = await apiClient.post<ApiMessageResponse>("/leads/bulk-reassign", {
+      lead_ids: leadIds,
+      assigned_to_id: assignedToId,
+    });
+    return data;
+  },
+
   async transitions(leadId: string): Promise<StageTransition[]> {
     const { data } = await apiClient.get<StageTransition[]>(`/leads/${leadId}/transitions`);
     return data;

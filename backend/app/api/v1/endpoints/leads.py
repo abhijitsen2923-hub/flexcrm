@@ -10,7 +10,7 @@ from app.core.lead_csv import build_template_csv
 from app.core.permissions import PermissionCode
 from app.database.session import get_db_session
 from app.schemas.common import MessageResponse, PaginatedResponse, PaginationParams, build_page_meta
-from app.schemas.lead import LeadCreate, LeadDuplicate, LeadFilterParams, LeadRead, LeadUpdate
+from app.schemas.lead import LeadBulkReassign, LeadCreate, LeadDuplicate, LeadFilterParams, LeadRead, LeadUpdate
 from app.schemas.lead_document import LeadDocumentRead, LeadDocumentUpload
 from app.schemas.stage_transition import StageTransitionCreate, StageTransitionRead
 from app.services.lead_documents import LeadDocumentService, get_lead_or_404
@@ -61,6 +61,19 @@ async def create_lead(
         actor_business_type=current_user.business_type,
         background_tasks=background_tasks,
     )
+
+
+@router.post("/bulk-reassign", response_model=MessageResponse)
+async def bulk_reassign_leads(
+    payload: LeadBulkReassign,
+    # Manager-only: needs both lead management AND user visibility (to pick owners).
+    current_user=Depends(require_permissions(PermissionCode.LEAD_MANAGE, PermissionCode.USER_VIEW)),
+    session: AsyncSession = Depends(get_db_session),
+):
+    count = await LeadService(session).bulk_reassign(
+        payload.lead_ids, payload.assigned_to_id, actor_id=current_user.id
+    )
+    return MessageResponse(message=f"Reassigned {count} lead(s).")
 
 
 @router.put("/{lead_id}", response_model=LeadRead)
