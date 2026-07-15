@@ -4,8 +4,9 @@ import { createPortal } from "react-dom";
 
 import { Badge, Button, LoadingBlock, EmptyState } from "../../components";
 import { usePipelines } from "../../context/PipelineContext";
+import { useAuth } from "../../hooks/useAuth";
 import { leadsService } from "../../services/leads";
-import type { Lead, PipelineStage, StageTransition } from "../../types";
+import type { Lead, LeadCallLog, PipelineStage, StageTransition } from "../../types";
 import { formatCurrency, formatDate, formatDateTime, formatRelative } from "../../utils/format";
 import { industryInterestLabel, pipelineCategoryTone, titleCase } from "../../utils/options";
 
@@ -24,10 +25,13 @@ interface LeadDrawerProps {
 
 export function LeadDrawer({ open, lead, onClose, onTransitionRequest, refreshKey }: LeadDrawerProps) {
   const { byIndustry, getStage } = usePipelines();
+  const { user } = useAuth();
   const [tab, setTab] = useState<TabKey>("overview");
   const [history, setHistory] = useState<StageTransition[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyError, setHistoryError] = useState(false);
+  const [calls, setCalls] = useState<LeadCallLog[]>([]);
+  const [callBusy, setCallBusy] = useState(false);
 
   // Escape key + lock body scroll while drawer is open.
   useEffect(() => {
@@ -67,11 +71,36 @@ export function LeadDrawer({ open, lead, onClose, onTransitionRequest, refreshKe
     };
   }, [open, lead?.id, refreshKey]);
 
+  useEffect(() => {
+    if (!open || !lead) {
+      setCalls([]);
+      return;
+    }
+    let cancelled = false;
+    void leadsService.calls(lead.id).then((rows) => { if (!cancelled) setCalls(rows); }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [open, lead?.id, refreshKey]);
+
+  async function handleLogCall(callType: "first_call" | "follow_up") {
+    if (!lead) return;
+    setCallBusy(true);
+    try {
+      await leadsService.logCall(lead.id, callType);
+      setCalls(await leadsService.calls(lead.id));
+    } catch {
+      /* non-critical */
+    } finally {
+      setCallBusy(false);
+    }
+  }
+
   if (!open || !lead) return null;
 
   const stages = byIndustry[lead.industry];
   const currentStage = getStage(lead.industry, lead.stage_code);
   const interestLabel = industryInterestLabel(lead.industry);
+  const myFirstCall = calls.find((c) => c.user_id === user?.id && c.call_type === "first_call");
+  const followUpCount = calls.filter((c) => c.call_type === "follow_up").length;
 
   return createPortal(
     // No backdrop-tap close: the drawer holds editable content (comments,
@@ -113,6 +142,37 @@ export function LeadDrawer({ open, lead, onClose, onTransitionRequest, refreshKe
         <div className="drawer__body">
           {tab === "overview" && (
             <div className="stack">
+              <div className="card" style={{ padding: "0.75rem 1rem" }}>
+                <div className="muted text-xs" style={{ textTransform: "uppercase", letterSpacing: ".04em", marginBottom: "0.5rem" }}>
+                  Call tracking
+                </div>
+                <div className="row" style={{ gap: "0.5rem", flexWrap: "wrap", alignItems: "center" }}>
+                  {myFirstCall ? (
+                    <Badge tone="success">First call done · {formatDateTime(myFirstCall.created_at)}</Badge>
+                  ) : (
+                    <Button size="sm" loading={callBusy} onClick={() => void handleLogCall("first_call")}>
+                      First Call Done
+                    </Button>
+                  )}
+                  <Button size="sm" variant="secondary" loading={callBusy} onClick={() => void handleLogCall("follow_up")}>
+                    Follow-up Call Done
+                  </Button>
+                  {followUpCount > 0 && (
+                    <span className="muted text-sm">{followUpCount} follow-up call{followUpCount === 1 ? "" : "s"}</span>
+                  )}
+                </div>
+                {calls.length > 0 && (
+                  <div className="stack" style={{ gap: "0.2rem", marginTop: "0.6rem" }}>
+                    {calls.slice().reverse().slice(0, 5).map((c) => (
+                      <div key={c.id} className="text-xs muted">
+                        {c.call_type === "first_call" ? "First call" : "Follow-up"}
+                        {" · "}{c.user ? `${c.user.first_name} ${c.user.last_name}` : "—"}
+                        {" · "}{formatDateTime(c.created_at)}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
               <DetailRow label="Contact" value={lead.contact_name || "—"} />
               <DetailRow label="Email" value={lead.contact_email ?? "—"} />
               <DetailRow label="Phone" value={lead.contact_phone ?? "—"} />

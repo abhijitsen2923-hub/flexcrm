@@ -10,7 +10,7 @@ from app.core.exceptions import NotFoundError, ValidationError
 from app.core.tenancy import current_org
 from app.database.enums import LeadIndustry
 from app.database.pipeline_seed import initial_stage_code
-from app.models.lead import Lead
+from app.models.lead import Lead, LeadCallLog
 from app.models.organization import Organization
 from app.repositories.customers import CustomerRepository
 from app.repositories.leads import LeadRepository
@@ -68,6 +68,34 @@ class LeadService(ServiceBase):
             )
         await self.commit()
         return count
+
+    async def log_call(self, lead_id: UUID, call_type: str, *, actor_id: UUID, notes: str | None = None) -> LeadCallLog:
+        """Record a call by the current user. 'first_call' is idempotent per
+        (lead, user) — clicking it again returns the existing log rather than
+        stacking duplicates."""
+        if call_type == "first_call":
+            existing = await self.session.scalar(
+                select(LeadCallLog).where(
+                    LeadCallLog.lead_id == lead_id,
+                    LeadCallLog.user_id == actor_id,
+                    LeadCallLog.call_type == "first_call",
+                )
+            )
+            if existing is not None:
+                return existing
+        log = LeadCallLog(lead_id=lead_id, user_id=actor_id, call_type=call_type, notes=notes)
+        self.session.add(log)
+        await self.commit()
+        # Re-query so the `user` relationship (selectin) is loaded for the response
+        # — accessing an unloaded relationship after commit would lazy-load in the
+        # async context and raise.
+        return await self.session.scalar(select(LeadCallLog).where(LeadCallLog.id == log.id))
+
+    async def list_calls(self, lead_id: UUID) -> list[LeadCallLog]:
+        result = await self.session.execute(
+            select(LeadCallLog).where(LeadCallLog.lead_id == lead_id).order_by(LeadCallLog.created_at)
+        )
+        return list(result.scalars().all())
 
     async def list_leads(self, pagination: PaginationParams, filters: LeadFilterParams):
         sort_by = validate_sort_field(filters.sort_by, self.allowed_sort_fields)

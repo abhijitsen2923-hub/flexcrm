@@ -10,7 +10,16 @@ from app.core.lead_csv import build_template_csv
 from app.core.permissions import PermissionCode
 from app.database.session import get_db_session
 from app.schemas.common import MessageResponse, PaginatedResponse, PaginationParams, build_page_meta
-from app.schemas.lead import LeadBulkReassign, LeadCreate, LeadDuplicate, LeadFilterParams, LeadRead, LeadUpdate
+from app.schemas.lead import (
+    LeadBulkReassign,
+    LeadCallLogCreate,
+    LeadCallLogRead,
+    LeadCreate,
+    LeadDuplicate,
+    LeadFilterParams,
+    LeadRead,
+    LeadUpdate,
+)
 from app.schemas.lead_document import LeadDocumentRead, LeadDocumentUpload
 from app.schemas.stage_transition import StageTransitionCreate, StageTransitionRead
 from app.services.lead_documents import LeadDocumentService, get_lead_or_404
@@ -106,6 +115,31 @@ async def delete_lead(
 ):
     await LeadService(session).delete_lead(lead_id, actor_id=current_user.id)
     return MessageResponse(message="Lead deleted successfully.")
+
+
+# --- Call tracking (per lead + user) --------------------------------------
+
+@router.get("/{lead_id}/calls", response_model=list[LeadCallLogRead])
+async def list_lead_calls(
+    lead_id: UUID,
+    _: object = Depends(require_permissions(PermissionCode.LEAD_VIEW)),
+    session: AsyncSession = Depends(get_db_session),
+):
+    await get_lead_or_404(session, lead_id)
+    return await LeadService(session).list_calls(lead_id)
+
+
+@router.post("/{lead_id}/calls", response_model=LeadCallLogRead, status_code=status.HTTP_201_CREATED)
+async def log_lead_call(
+    lead_id: UUID,
+    payload: LeadCallLogCreate,
+    current_user=Depends(require_permissions(PermissionCode.LEAD_MANAGE)),
+    session: AsyncSession = Depends(get_db_session),
+):
+    await get_lead_or_404(session, lead_id)
+    return await LeadService(session).log_call(
+        lead_id, payload.call_type, actor_id=current_user.id, notes=payload.notes
+    )
 
 
 # --- Stage transitions (spec §3.2) ----------------------------------------

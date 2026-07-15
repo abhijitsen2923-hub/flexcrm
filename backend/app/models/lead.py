@@ -116,3 +116,40 @@ class Lead(TenantBase, UUIDPrimaryKeyMixin, TimestampMixin, TenantAuditMixin, Te
         back_populates="lead",
         cascade="all, delete-orphan",
     )
+    call_logs = relationship(
+        "LeadCallLog",
+        back_populates="lead",
+        cascade="all, delete-orphan",
+        order_by="LeadCallLog.created_at",
+    )
+
+
+class LeadCallLog(TenantBase, UUIDPrimaryKeyMixin, TimestampMixin):
+    """A call logged by a specific user against a lead. Tracked per (lead, user)
+    so a reassigned owner can record their own first call independently of the
+    previous owner's."""
+    __tablename__ = "lead_call_logs"
+    __table_args__ = (
+        Index("ix_lead_call_logs_lead", "lead_id"),
+        {"schema": "tenant"},
+    )
+
+    lead_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("leads.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    user_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("public.users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    call_type: Mapped[str] = mapped_column(String(20), nullable=False)  # first_call | follow_up
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    lead = relationship("Lead", back_populates="call_logs")
+    # Read-only link to the caller (name on the timeline). Lambda + imported User
+    # to resolve the cross-registry (tenant → public.users) reference.
+    user = relationship(
+        User,
+        primaryjoin=lambda: LeadCallLog.user_id == User.id,
+        foreign_keys=lambda: [LeadCallLog.user_id],
+        viewonly=True,
+        lazy="selectin",
+    )

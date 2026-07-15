@@ -1,5 +1,6 @@
 from datetime import date, datetime
 from decimal import Decimal
+from typing import Literal
 from uuid import UUID
 
 from pydantic import EmailStr, Field
@@ -81,6 +82,21 @@ class LeadUpdate(ORMModel):
 class LeadBulkReassign(ORMModel):
     lead_ids: list[UUID] = Field(min_length=1)
     assigned_to_id: UUID
+
+
+class LeadCallLogCreate(ORMModel):
+    call_type: Literal["first_call", "follow_up"]
+    notes: str | None = Field(default=None, max_length=500)
+
+
+class LeadCallLogRead(ORMModel):
+    id: UUID
+    lead_id: UUID
+    user_id: UUID
+    call_type: str
+    notes: str | None = None
+    created_at: datetime
+    user: UserSummary | None = None
 
 
 class LeadRead(ORMModel):

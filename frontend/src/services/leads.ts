@@ -1,6 +1,7 @@
 import type {
   ApiMessageResponse,
   Lead,
+  LeadCallLog,
   LeadIndustry,
   LeadListResponse,
   PaginationQuery,
@@ -136,6 +137,20 @@ export const leadsService = {
     const { data } = await apiClient.post<ApiMessageResponse>("/leads/bulk-reassign", {
       lead_ids: leadIds,
       assigned_to_id: assignedToId,
+    });
+    return data;
+  },
+
+  // Per-(lead, user) call tracking.
+  async calls(leadId: string): Promise<LeadCallLog[]> {
+    const { data } = await apiClient.get<LeadCallLog[]>(`/leads/${leadId}/calls`);
+    return data;
+  },
+
+  async logCall(leadId: string, callType: "first_call" | "follow_up", notes?: string | null): Promise<LeadCallLog> {
+    const { data } = await apiClient.post<LeadCallLog>(`/leads/${leadId}/calls`, {
+      call_type: callType,
+      notes: notes ?? null,
     });
     return data;
   },

@@ -257,6 +257,16 @@ export interface StageTransition {
   performed_by?: UserSummary | null;
 }
 
+export interface LeadCallLog {
+  id: string;
+  lead_id: string;
+  user_id: string;
+  call_type: "first_call" | "follow_up";
+  notes: string | null;
+  created_at: string;
+  user?: UserSummary | null;
+}
+
 export interface Lead {
   id: string;
   customer_id: string | null;
