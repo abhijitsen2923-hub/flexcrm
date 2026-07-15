@@ -176,6 +176,18 @@ def require_any_permissions(*codes: PermissionCode):
     return dependency
 
 
+def require_broker():
+    """Require the caller to be a channel partner (broker). Used by the partner
+    portal's self-service endpoints, which scope everything to the caller and so
+    need role identity rather than a permission code."""
+    async def dependency(current_user=Depends(get_current_user)):
+        if current_user.role != UserRole.broker:
+            raise AuthorizationError("Channel-partner access required.")
+        return current_user
+
+    return dependency
+
+
 def pagination_params(
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=100),

@@ -1,4 +1,4 @@
-import { ClipboardList, IndianRupee, PlusCircle, Sparkles } from "lucide-react";
+import { ClipboardList, IndianRupee, LayoutDashboard, PlusCircle, Sparkles } from "lucide-react";
 import { NavLink, Outlet } from "react-router-dom";
 import { useAuth } from "../../hooks/useAuth";
 import "./PartnerLayout.css";
@@ -14,6 +14,12 @@ export function PartnerLayout() {
           Partner Portal
         </div>
         <nav className="partner-sidebar__nav">
+          <NavLink
+            to="/partner/dashboard"
+            className={({ isActive }) => `partner-link${isActive ? " is-active" : ""}`}
+          >
+            <LayoutDashboard size={16} /> Dashboard
+          </NavLink>
           <NavLink
             to="/partner/submit"
             className={({ isActive }) => `partner-link${isActive ? " is-active" : ""}`}

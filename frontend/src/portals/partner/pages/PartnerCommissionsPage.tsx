@@ -1,64 +1,57 @@
 import { useEffect, useState } from "react";
 import { Badge, Card, DataTable, EmptyState, LoadingBlock, useToast, type DataTableColumn } from "../../../components";
-import { useAuth } from "../../../hooks/useAuth";
-import { financeService } from "../../../services/finance";
+import { partnerPortalService } from "../../../services/partnerPortal";
 import { extractErrorMessage } from "../../../utils/errors";
-import { formatCurrency, formatDateTime } from "../../../utils/format";
-import type { CommissionLedgerEntry } from "../../../types";
+import { formatDate, formatInr } from "../../../utils/format";
+import type { BrokeragePayout } from "../../../types/partner";
+
+const STATUS_TONE = {
+  accrued: "info",
+  paid: "success",
+  reversed: "danger",
+} as const;
 
 export default function PartnerCommissionsPage() {
-  const { user } = useAuth();
-  const [entries, setEntries] = useState<CommissionLedgerEntry[]>([]);
+  const [payouts, setPayouts] = useState<BrokeragePayout[]>([]);
   const [loading, setLoading] = useState(true);
   const toast = useToast();
 
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
-    void financeService
-      .listLedger(user?.id)
-      .then((rows) => { if (!cancelled) setEntries(rows); })
-      .catch((err) => {
-        if (!cancelled) toast.error("Could not load commissions", extractErrorMessage(err));
-      })
+    void partnerPortalService
+      .commissions()
+      .then((rows) => { if (!cancelled) setPayouts(rows); })
+      .catch((err) => { if (!cancelled) toast.error("Could not load commissions", extractErrorMessage(err)); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [user?.id, toast]);
+  }, [toast]);
 
-  const total = entries
-    .filter((e) => e.direction === "payable")
-    .reduce((sum, e) => sum + Number(e.amount), 0);
+  const paid = payouts.filter((p) => p.status === "paid").reduce((s, p) => s + Number(p.amount), 0);
+  const outstanding = payouts.filter((p) => p.status === "accrued").reduce((s, p) => s + Number(p.amount), 0);
 
-  const paid = entries
-    .filter((e) => e.direction === "paid")
-    .reduce((sum, e) => sum + Number(e.amount), 0);
-
-  const columns: DataTableColumn<CommissionLedgerEntry>[] = [
-    { key: "when", header: "Date", render: (row) => formatDateTime(row.recorded_at) },
+  const columns: DataTableColumn<BrokeragePayout>[] = [
+    { key: "when", header: "Accrued", render: (r) => formatDate(r.created_at) },
     {
-      key: "dir",
-      header: "Type",
-      render: (row) => (
-        <Badge
-          tone={
-            row.direction === "reversed"
-              ? "danger"
-              : row.direction === "paid"
-                ? "success"
-                : "info"
-          }
-        >
-          {row.direction}
-        </Badge>
+      key: "amount",
+      header: "Brokerage",
+      align: "right",
+      render: (r) => (
+        <div>
+          <strong>{formatInr(Number(r.amount))}</strong>
+          <div className="muted text-xs">
+            {r.rate_type === "percent" ? `${r.rate_snapshot}%` : "flat"}
+            {r.deal_value ? ` · deal ${formatInr(Number(r.deal_value))}` : ""}
+          </div>
+        </div>
       ),
     },
     {
-      key: "amount",
-      header: "Amount",
-      align: "right",
-      render: (row) => formatCurrency(row.amount),
+      key: "status",
+      header: "Status",
+      render: (r) => <Badge tone={STATUS_TONE[r.status] ?? "neutral"}>{r.status}</Badge>,
     },
-    { key: "note", header: "Note", render: (row) => row.note ?? "—" },
+    { key: "paid_on", header: "Paid on", render: (r) => (r.paid_on ? formatDate(r.paid_on) : "—") },
   ];
 
   if (loading) return <LoadingBlock label="Loading commissions…" />;
@@ -68,33 +61,33 @@ export default function PartnerCommissionsPage() {
       <div className="page-header">
         <div className="page-header__titles">
           <h1>Commissions</h1>
-          <p>Your earned commissions from referred bookings.</p>
+          <p>Brokerage you have earned from referred deals.</p>
         </div>
       </div>
 
       <div className="kpi-grid" style={{ marginBottom: "var(--space-4)" }}>
         <div className="kpi">
-          <div className="kpi__label">Total payable</div>
-          <div className="kpi__value">{formatCurrency(total)}</div>
+          <div className="kpi__label">Total earned</div>
+          <div className="kpi__value">{formatInr(paid + outstanding)}</div>
         </div>
         <div className="kpi">
           <div className="kpi__label">Paid out</div>
-          <div className="kpi__value">{formatCurrency(paid)}</div>
+          <div className="kpi__value">{formatInr(paid)}</div>
         </div>
         <div className="kpi">
           <div className="kpi__label">Outstanding</div>
-          <div className="kpi__value">{formatCurrency(total - paid)}</div>
+          <div className="kpi__value">{formatInr(outstanding)}</div>
         </div>
       </div>
 
-      {entries.length === 0 ? (
+      {payouts.length === 0 ? (
         <EmptyState
           title="No commission records yet"
-          description="Commission entries appear here when a booking linked to your referral is confirmed."
+          description="Brokerage is accrued automatically when a lead you referred is marked Sold."
         />
       ) : (
         <Card>
-          <DataTable columns={columns} rows={entries} rowKey={(r) => r.id} />
+          <DataTable columns={columns} rows={payouts} rowKey={(r) => r.id} />
         </Card>
       )}
     </div>

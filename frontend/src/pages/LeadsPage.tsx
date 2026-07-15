@@ -22,6 +22,7 @@ import { useLeads } from "../hooks/useLeads";
 import { usePermissions } from "../hooks/usePermissions";
 import { useRealtimeEvent } from "../realtime";
 import { exportsService } from "../services/exports";
+import { channelPartnersService, type PartnerOption } from "../services/channelPartners";
 import { leadsService, type LeadDuplicate, type LeadImportResult } from "../services/leads";
 import { organizationsService } from "../services/organizations";
 import { siteVisitsService } from "../services/site-visits";
@@ -86,6 +87,7 @@ interface CreateFormState {
   budget_max: string;
   preferred_location: string;
   possession_preference: string;
+  partner_id: string;
 }
 
 
@@ -114,7 +116,8 @@ function makeEmptyForm(
     budget_min: "",
     budget_max: "",
     preferred_location: "",
-    possession_preference: ""
+    possession_preference: "",
+    partner_id: ""
   };
 }
 
@@ -221,6 +224,20 @@ export default function LeadsPage() {
       .catch((err) => { if (!cancelled) toast.error("Couldn't load users", extractErrorMessage(err)); });
     return () => { cancelled = true; };
   }, [canAssign]);
+
+  // Channel partners for the "Referred by" picker — real-estate only, and only
+  // for users who can create leads (the options endpoint requires LEAD_MANAGE).
+  const [partnerOptions, setPartnerOptions] = useState<PartnerOption[]>([]);
+  const canAttributePartner = hasPerm("LEAD_MANAGE") && (user?.business_type === "real_estate");
+  useEffect(() => {
+    if (!canAttributePartner) return;
+    let cancelled = false;
+    void channelPartnersService
+      .options()
+      .then((opts) => { if (!cancelled) setPartnerOptions(opts); })
+      .catch(() => { if (!cancelled) setPartnerOptions([]); });
+    return () => { cancelled = true; };
+  }, [canAttributePartner]);
 
   async function handleAssign(lead: Lead, userId: string | null) {
     try {
@@ -344,7 +361,8 @@ export default function LeadsPage() {
           budget_min: form.budget_min ? Number(form.budget_min) : null,
           budget_max: form.budget_max ? Number(form.budget_max) : null,
           preferred_location: form.preferred_location.trim() || null,
-          possession_preference: form.possession_preference || null
+          possession_preference: form.possession_preference || null,
+          partner_id: form.partner_id || null
         } : {})
       });
       toast.success("Lead created", form.title.trim());
@@ -978,6 +996,18 @@ export default function LeadsPage() {
                   { value: "2_years", label: "Within 2 years" }
                 ]}
               />
+              {canAttributePartner && partnerOptions.length > 0 && (
+                <SelectField
+                  id="lead-partner"
+                  label="Referred by (channel partner)"
+                  value={form.partner_id}
+                  onChange={(event) => setForm({ ...form, partner_id: event.target.value })}
+                  options={[
+                    { value: "", label: "— None —" },
+                    ...partnerOptions.map((p) => ({ value: p.id, label: `${p.company_name} · ${p.contact_name}` }))
+                  ]}
+                />
+              )}
             </>
           )}
           <SelectField

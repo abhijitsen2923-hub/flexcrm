@@ -176,8 +176,17 @@ class StageTransitionService(ServiceBase):
                     _select(_SalesOrder).where(_SalesOrder.lead_id == lead.id)
                 )
             ).scalar_one_or_none()
+            order = existing
             if existing is None:
-                await sales_service.create_from_lead(lead, actor_id=actor_id)
+                order = await sales_service.create_from_lead(lead, actor_id=actor_id)
+            # Channel-partner brokerage: accrue the referring partner's payout on
+            # the Sold deal. Idempotent (one payout per lead) so a re-sold
+            # transition with an existing order won't double-accrue. Local import
+            # to avoid a circular import at module load.
+            if order is not None:
+                from app.services.channel_partners import ChannelPartnerService
+
+                await ChannelPartnerService(self.session).accrue_brokerage(lead, sales_order=order)
 
         await self.commit()
         await self.invalidate_reporting_cache()

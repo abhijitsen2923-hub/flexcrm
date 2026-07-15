@@ -289,6 +289,8 @@ export interface Lead {
   last_comment_preview: string | null;
   last_comment_at: string | null;
   assigned_to_id: string | null;
+  // Channel partner (broker) who referred this lead, if any.
+  partner_id: string | null;
   // Real-estate specific (null for other verticals). Numeric fields arrive as
   // strings over JSON, same as `value`.
   property_type: string | null;
@@ -302,6 +304,7 @@ export interface Lead {
   updated_at: string;
   customer?: Pick<Customer, "id" | "company_name" | "contact_name" | "email" | "status"> | null;
   assigned_to?: UserSummary | null;
+  partner?: { id: string; company_name: string; contact_name: string } | null;
   // Set by the list endpoint when another active lead shares this lead's email
   // or phone. Drives the "!" duplicate marker in the UI.
   is_duplicate?: boolean;

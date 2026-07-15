@@ -39,6 +39,7 @@ export interface LeadCreatePayload {
   source?: string | null;
   interest?: string | null;
   assigned_to_id?: string | null;
+  partner_id?: string | null;
   property_type?: string | null;
   budget_min?: number | null;
   budget_max?: number | null;

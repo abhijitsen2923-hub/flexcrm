@@ -1,6 +1,6 @@
 import { type FormEvent, useState } from "react";
 import { Button, SelectField, TextField, useToast } from "../../../components";
-import { leadsService } from "../../../services/leads";
+import { partnerPortalService } from "../../../services/partnerPortal";
 import { extractErrorMessage } from "../../../utils/errors";
 
 interface FormState {
@@ -36,24 +36,29 @@ export default function PartnerLeadFormPage() {
     setForm((prev) => ({ ...prev, [key]: val }));
   }
 
+  const canSubmit =
+    form.contact_name.trim().length > 0 &&
+    form.contact_phone.trim().length > 0 &&
+    form.contact_email.trim().length > 0;
+
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     setSubmitting(true);
     setError(null);
     try {
-      await leadsService.create({
-        industry: "real_estate",
-        title: `${form.contact_name} — ${form.preferred_location || "Referral"}`,
-        contact_name: form.contact_name,
-        contact_phone: form.contact_phone || null,
-        contact_email: form.contact_email || null,
-        source: "partner_referral",
-        interest: form.preferred_location || null,
+      // Industry / source / partner attribution are all forced server-side —
+      // we only send contact + requirement details.
+      await partnerPortalService.submitLead({
+        contact_name: form.contact_name.trim(),
+        contact_phone: form.contact_phone.trim(),
+        contact_email: form.contact_email.trim(),
+        preferred_location: form.preferred_location || null,
         property_type: form.property_type || null,
+        interest: form.preferred_location || null,
         budget_min: form.budget_min ? Number(form.budget_min) : null,
         budget_max: form.budget_max ? Number(form.budget_max) : null,
         notes: form.notes || null,
-      } as Parameters<typeof leadsService.create>[0]);
+      });
       toast.success("Lead submitted", `${form.contact_name} has been added to the pipeline.`);
       setForm(BLANK);
       setSubmitted(true);
@@ -69,7 +74,7 @@ export default function PartnerLeadFormPage() {
       <div className="page-header">
         <div className="page-header__titles">
           <h1>Submit a Lead</h1>
-          <p>Refer a prospective buyer and track their progress here.</p>
+          <p>Refer a prospective buyer and track their progress in My Leads.</p>
         </div>
       </div>
 
@@ -85,11 +90,7 @@ export default function PartnerLeadFormPage() {
           }}
         >
           Lead submitted successfully.{" "}
-          <button
-            type="button"
-            className="link"
-            onClick={() => setSubmitted(false)}
-          >
+          <button type="button" className="link" onClick={() => setSubmitted(false)}>
             Submit another
           </button>
         </div>
@@ -111,6 +112,7 @@ export default function PartnerLeadFormPage() {
               label="Phone"
               value={form.contact_phone}
               onChange={(e) => set("contact_phone", e.target.value)}
+              required
               placeholder="+91 …"
             />
             <TextField
@@ -119,7 +121,8 @@ export default function PartnerLeadFormPage() {
               type="email"
               value={form.contact_email}
               onChange={(e) => set("contact_email", e.target.value)}
-              placeholder="Optional"
+              required
+              placeholder="buyer@example.com"
             />
           </div>
           <SelectField
@@ -128,6 +131,7 @@ export default function PartnerLeadFormPage() {
             value={form.property_type}
             onChange={(e) => set("property_type", e.target.value)}
             options={[
+              { value: "", label: "Select…" },
               { value: "apartment", label: "Apartment" },
               { value: "villa", label: "Villa / Independent house" },
               { value: "plot", label: "Plot / Land" },
@@ -172,7 +176,7 @@ export default function PartnerLeadFormPage() {
           />
           {error && <div className="error-banner">{error}</div>}
           <div style={{ display: "flex", justifyContent: "flex-end" }}>
-            <Button type="submit" loading={submitting} disabled={!form.contact_name}>
+            <Button type="submit" loading={submitting} disabled={!canSubmit}>
               Submit lead
             </Button>
           </div>

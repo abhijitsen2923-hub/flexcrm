@@ -16,7 +16,7 @@ class LeadRepository(BaseRepository[Lead]):
 
     @property
     def default_options(self):
-        return [selectinload(Lead.customer), selectinload(Lead.assigned_to)]
+        return [selectinload(Lead.customer), selectinload(Lead.assigned_to), selectinload(Lead.partner)]
 
     async def find_duplicates(
         self, email: str | None, phone_digits: str | None, limit: int = 5

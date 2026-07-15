@@ -1,63 +1,72 @@
-import { useMemo } from "react";
-import { Badge, Card, DataTable, EmptyState, LoadingBlock, type DataTableColumn } from "../../../components";
-import { useAuth } from "../../../hooks/useAuth";
-import { useLeads } from "../../../hooks/useLeads";
-import type { Lead } from "../../../types";
+import { useEffect, useState } from "react";
+import { Badge, Card, DataTable, EmptyState, LoadingBlock, useToast, type DataTableColumn } from "../../../components";
+import { partnerPortalService } from "../../../services/partnerPortal";
+import { extractErrorMessage } from "../../../utils/errors";
+import { formatInr, formatRelative } from "../../../utils/format";
 import { pipelineCategoryTone } from "../../../utils/options";
 import { usePipelines } from "../../../context/PipelineContext";
-import { formatCurrency, formatRelative } from "../../../utils/format";
-
-const QUERY = { page: 1, page_size: 50, industry: "real_estate" as const };
+import type { PartnerLeadRow } from "../../../types/partner";
 
 export default function PartnerLeadTrackerPage() {
-  const { user } = useAuth();
-  const { leads, loading } = useLeads(QUERY);
+  const [leads, setLeads] = useState<PartnerLeadRow[]>([]);
+  const [loading, setLoading] = useState(true);
   const { getStage } = usePipelines();
+  const toast = useToast();
 
-  // Brokers see only leads they submitted (source = partner_referral from their user).
-  // Backend enforces this via token scope; the filter here is a UI convenience only.
-  const myLeads = useMemo(
-    () => leads.filter((l) => l.source === "partner_referral"),
-    [leads]
-  );
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    void partnerPortalService
+      .leads()
+      .then((rows) => { if (!cancelled) setLeads(rows); })
+      .catch((err) => { if (!cancelled) toast.error("Could not load your leads", extractErrorMessage(err)); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [toast]);
 
-  const columns: DataTableColumn<Lead>[] = [
+  const columns: DataTableColumn<PartnerLeadRow>[] = [
     {
       key: "name",
       header: "Buyer",
       render: (l) => (
         <div>
           <div style={{ fontWeight: 600 }}>{l.contact_name || l.title}</div>
-          <div className="muted text-xs">{l.contact_phone ?? "—"}</div>
+          <div className="muted text-xs">#{l.lead_number}</div>
         </div>
       ),
     },
     {
-      key: "interest",
-      header: "Interest",
-      render: (l) => l.interest ?? "—",
+      key: "requirement",
+      header: "Requirement",
+      render: (l) => (
+        <div>
+          <div>{l.property_type ?? "—"}</div>
+          <div className="muted text-xs">{l.preferred_location ?? ""}</div>
+        </div>
+      ),
+    },
+    {
+      key: "budget",
+      header: "Budget",
+      align: "right",
+      render: (l) =>
+        l.budget_min || l.budget_max
+          ? `${l.budget_min ? formatInr(Number(l.budget_min)) : "—"} – ${l.budget_max ? formatInr(Number(l.budget_max)) : "—"}`
+          : "—",
     },
     {
       key: "stage",
       header: "Stage",
       render: (l) => {
-        const stage = getStage(l.industry, l.stage_code);
+        const stage = getStage("real_estate", l.stage_code);
         const tone = stage ? pipelineCategoryTone(stage.category) : "neutral";
-        return (
-          <Badge tone={tone}>{stage ? stage.name : l.stage_code}</Badge>
-        );
+        return <Badge tone={tone}>{stage ? stage.name : l.stage_code}</Badge>;
       },
     },
     {
-      key: "value",
-      header: "Value",
-      align: "right",
-      render: (l) => formatCurrency(l.value, l.currency || "INR"),
-    },
-    {
-      key: "updated",
-      header: "Updated",
-      render: (l) => formatRelative(l.last_comment_at ?? l.updated_at ?? ""),
+      key: "created",
+      header: "Referred",
+      render: (l) => formatRelative(l.created_at),
     },
   ];
 
@@ -72,18 +81,14 @@ export default function PartnerLeadTrackerPage() {
         </div>
       </div>
 
-      {myLeads.length === 0 ? (
+      {leads.length === 0 ? (
         <EmptyState
           title="No leads submitted yet"
           description="Use the Submit Lead form to refer your first buyer."
         />
       ) : (
         <Card>
-          <DataTable
-            columns={columns}
-            rows={myLeads}
-            rowKey={(l) => l.id}
-          />
+          <DataTable columns={columns} rows={leads} rowKey={(l) => l.id} />
         </Card>
       )}
     </div>

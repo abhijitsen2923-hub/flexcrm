@@ -42,6 +42,8 @@ class LeadCreate(ORMModel):
     source: str | None = Field(default=None, max_length=120)
     interest: str | None = Field(default=None, max_length=255)
     assigned_to_id: UUID | None = None
+    # Referring channel partner (broker), if this walk-in came via one.
+    partner_id: UUID | None = None
     property_type: str | None = Field(default=None, max_length=64)
     budget_min: Decimal | None = Field(default=None, ge=0)
     budget_max: Decimal | None = Field(default=None, ge=0)
@@ -71,6 +73,7 @@ class LeadUpdate(ORMModel):
     source: str | None = Field(default=None, max_length=120)
     interest: str | None = Field(default=None, max_length=255)
     assigned_to_id: UUID | None = None
+    partner_id: UUID | None = None
     property_type: str | None = Field(default=None, max_length=64)
     budget_min: Decimal | None = Field(default=None, ge=0)
     budget_max: Decimal | None = Field(default=None, ge=0)
@@ -99,6 +102,13 @@ class LeadCallLogRead(ORMModel):
     user: UserSummary | None = None
 
 
+class LeadPartnerCompact(ORMModel):
+    """Just enough of the referring partner to label a lead."""
+    id: UUID
+    company_name: str
+    contact_name: str
+
+
 class LeadRead(ORMModel):
     id: UUID
     customer_id: UUID | None = None
@@ -120,6 +130,7 @@ class LeadRead(ORMModel):
     last_comment_preview: str | None = None
     last_comment_at: datetime | None = None
     assigned_to_id: UUID | None = None
+    partner_id: UUID | None = None
     property_type: str | None = None
     budget_min: Decimal | None = None
     budget_max: Decimal | None = None
@@ -132,6 +143,7 @@ class LeadRead(ORMModel):
     updated_at: datetime
     customer: CustomerCompact | None = None
     assigned_to: UserSummary | None = None
+    partner: LeadPartnerCompact | None = None
     # True when another active lead in the tenant shares this lead's email or
     # phone — surfaced as a "!" marker in the list so duplicates are visible.
     # Computed at list time (not stored); defaults False for single-lead reads.
@@ -155,3 +167,4 @@ class LeadFilterParams(SearchSortParams):
     stage_code: str | None = None
     source: str | None = None
     assigned_to_id: UUID | None = None
+    partner_id: UUID | None = None

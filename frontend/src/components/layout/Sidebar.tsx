@@ -8,6 +8,7 @@ import {
   ClipboardCheck,
   ClipboardList,
   FileCheck2,
+  Handshake,
   KeyRound,
   Layers,
   LayoutDashboard,
@@ -53,6 +54,7 @@ const NAV: ReadonlyArray<NavItem> = [
   { to: "/bookings", label: "Bookings", icon: ClipboardCheck, requires: ["LEAD_MANAGE"], moduleKey: "bookings" },
   { to: "/trackers/registration", label: "Registration", icon: FileCheck2, requires: ["LEAD_MANAGE"], moduleKey: "bookings" },
   { to: "/trackers/possession", label: "Possession", icon: KeyRound, requires: ["LEAD_MANAGE"], moduleKey: "bookings" },
+  { to: "/channel-partners", label: "Channel Partners", icon: Handshake, requires: ["USER_VIEW"], moduleKey: "bookings" },
   // Always-visible
   { to: "/analytics", label: "Analytics", icon: BarChart3, requires: ["ANALYTICS_VIEW"] },
   { to: "/users", label: "Users", icon: Users, requires: ["USER_VIEW"] }

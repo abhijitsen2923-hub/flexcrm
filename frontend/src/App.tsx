@@ -51,9 +51,12 @@ const ServiceRequestsPage = lazy(() => import("./portals/customer/pages/ServiceR
 const ReferralSubmitPage = lazy(() => import("./portals/customer/pages/ReferralSubmitPage"));
 // Channel-partner portal
 const PartnerLayout = lazy(() => import("./portals/partner/PartnerLayout").then((m) => ({ default: m.PartnerLayout })));
+const PartnerDashboardPage = lazy(() => import("./portals/partner/pages/PartnerDashboardPage"));
 const PartnerLeadFormPage = lazy(() => import("./portals/partner/pages/PartnerLeadFormPage"));
 const PartnerLeadTrackerPage = lazy(() => import("./portals/partner/pages/PartnerLeadTrackerPage"));
 const PartnerCommissionsPage = lazy(() => import("./portals/partner/pages/PartnerCommissionsPage"));
+// Staff channel-partner management
+const ChannelPartnersPage = lazy(() => import("./pages/channel-partners/ChannelPartnersPage"));
 const NotFoundPage = lazy(() => import("./pages/NotFoundPage"));
 
 
@@ -85,7 +88,8 @@ export function App() {
                       {/* Channel-partner portal — own layout, role-gated */}
                       <Route path="/partner" element={<PartnerRoute />}>
                         <Route element={<PartnerLayout />}>
-                          <Route index element={<Navigate to="leads" replace />} />
+                          <Route index element={<Navigate to="dashboard" replace />} />
+                          <Route path="dashboard" element={<PartnerDashboardPage />} />
                           <Route path="submit" element={<PartnerLeadFormPage />} />
                           <Route path="leads" element={<PartnerLeadTrackerPage />} />
                           <Route path="commissions" element={<PartnerCommissionsPage />} />
@@ -118,6 +122,7 @@ export function App() {
                         {FEATURES.bookings && <Route path="bookings" element={<BookingsPage />} />}
                         {FEATURES.bookings && <Route path="trackers/registration" element={<RegistrationTrackerPage />} />}
                         {FEATURES.bookings && <Route path="trackers/possession" element={<PossessionTrackerPage />} />}
+                        {FEATURES.bookings && <Route path="channel-partners" element={<ChannelPartnersPage />} />}
                         <Route path="users" element={<UsersPage />} />
                         <Route path="admin" element={<PlatformAdminPage />} />
                         <Route path="*" element={<NotFoundPage />} />

@@ -107,6 +107,7 @@ class LeadService(ServiceBase):
                 "stage_code": filters.stage_code,
                 "source": filters.source,
                 "assigned_to_id": filters.assigned_to_id,
+                "partner_id": filters.partner_id,
             },
             search=filters.search,
             search_fields=("title", "interest"),
@@ -207,6 +208,7 @@ class LeadService(ServiceBase):
                 "source": payload.source,
                 "interest": payload.interest,
                 "assigned_to_id": payload.assigned_to_id,
+                "partner_id": payload.partner_id,
                 # Real-estate fields were previously dropped on create — persist
                 # them so Budget (which replaces Value for real estate) is saved.
                 "property_type": payload.property_type,

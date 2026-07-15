@@ -1,4 +1,5 @@
 from app.models.activity import Activity
+from app.models.channel_partner import BrokeragePayout, ChannelPartner
 from app.models.customer import Customer
 from app.models.deal import Deal
 from app.models.delivery_log import DeliveryLog
@@ -18,6 +19,8 @@ from app.models.user_permission_grant import UserPermissionGrant
 
 __all__ = [
     "Activity",
+    "BrokeragePayout",
+    "ChannelPartner",
     "Customer",
     "Deal",
     "DeliveryLog",

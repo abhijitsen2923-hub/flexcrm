@@ -5,6 +5,7 @@ from app.api.v1.endpoints import (
     admin,
     analytics,
     auth,
+    channel_partners,
     cron,
     customer_lifecycle,
     customers,
@@ -13,6 +14,7 @@ from app.api.v1.endpoints import (
     exports,
     leads,
     organizations,
+    partner_portal,
     permissions,
     pipeline_stages,
     tasks,
@@ -49,6 +51,8 @@ api_router.include_router(hr_router, prefix="/hr", tags=["HR"])
 api_router.include_router(exports.router, prefix="/exports", tags=["Exports"])
 api_router.include_router(real_estate_router, tags=["Real Estate"])
 api_router.include_router(customer_portal_router, prefix="/customer", tags=["Customer Portal"])
+api_router.include_router(channel_partners.router, prefix="/channel-partners", tags=["Channel Partners"])
+api_router.include_router(partner_portal.router, prefix="/partner", tags=["Partner Portal"])
 api_router.include_router(custom_roles_router, tags=["Custom Roles"])
 # Permissions routes mount at the root so `/me/permissions` and
 # `/users/{id}/permissions` live alongside their conceptual siblings without

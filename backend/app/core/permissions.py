@@ -245,11 +245,13 @@ ROLE_PERMISSION_DEFAULTS: dict[UserRole, tuple[PermissionCode, ...]] = {
         PermissionCode.DASHBOARD_VIEW,
         PermissionCode.LEAD_VIEW, PermissionCode.LEAD_MANAGE,
     ),
-    UserRole.broker: (
-        PermissionCode.DASHBOARD_VIEW,
-        PermissionCode.LEAD_VIEW, PermissionCode.LEAD_MANAGE,
-        PermissionCode.CUSTOMER_VIEW,
-    ),
+    # Channel partner (broker) — self-service portal ONLY. Intentionally holds no
+    # staff permissions: everything a broker can do (submit a referral, see their
+    # own leads / dashboard / commissions) is exposed through /partner/* endpoints
+    # gated by `require_broker` and scoped to the caller. With no permissions, the
+    # generic staff endpoints (/leads, /dashboard, …) all 403 — so a broker can
+    # never read another partner's referrals or org-wide data.
+    UserRole.broker: (),
     UserRole.customer: (
         PermissionCode.DASHBOARD_VIEW,
     ),
