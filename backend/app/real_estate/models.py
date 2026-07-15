@@ -211,6 +211,12 @@ class Booking(TenantBase, UUIDPrimaryKeyMixin, TimestampMixin, TenantAuditMixin,
         cascade="all, delete-orphan",
         order_by="PaymentReceipt.paid_on",
     )
+    refunds: Mapped[list["BookingRefund"]] = relationship(
+        "BookingRefund",
+        back_populates="booking",
+        cascade="all, delete-orphan",
+        order_by="BookingRefund.refunded_on",
+    )
 
 
 class BookingKycDoc(TenantBase, UUIDPrimaryKeyMixin, TimestampMixin):
@@ -268,3 +274,30 @@ class PaymentReceipt(TenantBase, UUIDPrimaryKeyMixin, TimestampMixin):
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     booking: Mapped["Booking"] = relationship("Booking", back_populates="payment_receipts")
+
+
+class BookingRefund(TenantBase, UUIDPrimaryKeyMixin, TimestampMixin):
+    """A refund issued when a paid booking is cancelled.
+
+    `gross_paid` snapshots the total collected at refund time; `deduction_amount`
+    is the forfeiture / cancellation charge withheld by the builder; `refund_amount`
+    is the net paid back to the buyer (gross_paid − deduction). Recording a refund
+    is what cancels an otherwise-blocked paid booking (see the cancel guard)."""
+    __tablename__ = "booking_refunds"
+    __table_args__ = (
+        Index("ix_booking_refunds_booking", "booking_id"),
+        {"schema": "tenant"},
+    )
+
+    booking_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("bookings.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    gross_paid: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    deduction_amount: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False, default=0)
+    refund_amount: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    mode: Mapped[str] = mapped_column(String(20), nullable=False)  # upi/neft/cheque/cash/card/other
+    refunded_on: Mapped[date] = mapped_column(Date, nullable=False)
+    reference: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    booking: Mapped["Booking"] = relationship("Booking", back_populates="refunds")

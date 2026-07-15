@@ -31,6 +31,14 @@ export interface RecordPaymentPayload {
   notes?: string | null;
 }
 
+export interface RefundBookingPayload {
+  deduction_amount: number;
+  mode: PaymentMode;
+  refunded_on: string;
+  reference?: string | null;
+  reason?: string | null;
+}
+
 // The API speaks snake_case; the app models are camelCase. Map at the boundary
 // (same pattern as the inventory service).
 interface ApiBooking {
@@ -82,6 +90,18 @@ interface ApiBooking {
     notes: string | null;
     created_at: string;
   }[];
+  refunds?: {
+    id: string;
+    booking_id: string;
+    gross_paid: number | string;
+    deduction_amount: number | string;
+    refund_amount: number | string;
+    mode: PaymentMode;
+    refunded_on: string;
+    reference: string | null;
+    reason: string | null;
+    created_at: string;
+  }[];
 }
 
 function mapBooking(b: ApiBooking): Booking {
@@ -118,6 +138,18 @@ function mapBooking(b: ApiBooking): Booking {
       mode: r.mode,
       reference: r.reference,
       notes: r.notes,
+      createdAt: r.created_at,
+    })),
+    refunds: (b.refunds ?? []).map((r) => ({
+      id: r.id,
+      bookingId: r.booking_id,
+      grossPaid: Number(r.gross_paid),
+      deductionAmount: Number(r.deduction_amount),
+      refundAmount: Number(r.refund_amount),
+      mode: r.mode,
+      refundedOn: r.refunded_on,
+      reference: r.reference,
+      reason: r.reason,
       createdAt: r.created_at,
     })),
     kycDocuments: (b.kyc_documents ?? []).map((d) => ({
@@ -257,6 +289,14 @@ export const bookingsService = {
   cancelBooking(id: string, reason?: string | null): Promise<Booking> {
     return apiClient
       .post<ApiBooking>(`/bookings/${id}/cancel`, { reason: reason ?? null })
+      .then((r) => mapBooking(r.data));
+  },
+
+  // Refund a paid booking and cancel it. gross_paid + net are computed
+  // server-side from recorded receipts; we only send the withheld deduction.
+  refundBooking(id: string, payload: RefundBookingPayload): Promise<Booking> {
+    return apiClient
+      .post<ApiBooking>(`/bookings/${id}/refund`, payload)
       .then((r) => mapBooking(r.data));
   },
 

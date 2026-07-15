@@ -240,6 +240,29 @@ class PaymentReceiptCreate(ORMModel):
     notes: str | None = None
 
 
+class BookingRefundRead(ORMModel):
+    id: UUID
+    booking_id: UUID
+    gross_paid: Decimal
+    deduction_amount: Decimal
+    refund_amount: Decimal
+    mode: str
+    refunded_on: date
+    reference: str | None = None
+    reason: str | None = None
+    created_at: datetime
+
+
+class BookingRefundCreate(ORMModel):
+    # gross_paid + refund_amount are computed server-side from recorded receipts;
+    # the client only supplies the withheld deduction and the payout details.
+    deduction_amount: Decimal = Field(default=Decimal("0"), ge=0)
+    mode: PaymentMode
+    refunded_on: date
+    reference: str | None = Field(default=None, max_length=120)
+    reason: str | None = Field(default=None, max_length=500)
+
+
 class BookingUnitInfo(ORMModel):
     """Unit details + site (project) and tower names for a purchase card."""
     id: UUID
@@ -274,6 +297,7 @@ class BookingRead(ORMModel):
     kyc_documents: list[BookingKycDocRead] = []
     payment_schedules: list[PaymentScheduleRead] = []
     payment_receipts: list[PaymentReceiptRead] = []
+    refunds: list[BookingRefundRead] = []
 
 
 class BookingCreate(ORMModel):

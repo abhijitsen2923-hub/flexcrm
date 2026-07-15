@@ -338,6 +338,28 @@ export function PaymentPlanModal({ booking: initial, onClose, onChanged }: Props
                 </div>
               </div>
             )}
+
+            {booking.refunds.length > 0 && (
+              <div>
+                <div className="muted text-xs" style={{ textTransform: "uppercase", letterSpacing: ".04em", margin: "0.5rem 0" }}>
+                  Refunds
+                </div>
+                <div className="stack" style={{ gap: "0.4rem" }}>
+                  {booking.refunds.map((r) => (
+                    <div key={r.id} className="row row--between" style={{ alignItems: "center", padding: "0.4rem 0.6rem", border: "1px solid var(--color-border)", borderRadius: "var(--radius-sm)" }}>
+                      <span className="text-sm">
+                        {formatDate(r.refundedOn)} · <strong>{formatInr(r.refundAmount)}</strong> refunded{" "}
+                        <span className="muted">
+                          · {r.mode.toUpperCase()}
+                          {r.deductionAmount > 0 ? ` · ${formatInr(r.deductionAmount)} withheld` : ""}
+                          {r.reference ? ` · ${r.reference}` : ""}
+                        </span>
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>

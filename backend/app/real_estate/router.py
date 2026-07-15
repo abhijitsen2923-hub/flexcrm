@@ -22,6 +22,7 @@ from app.real_estate.documents import render_booking_document, render_payment_re
 from app.real_estate.models import (
     Booking,
     BookingKycDoc,
+    BookingRefund,
     PaymentReceipt,
     PaymentSchedule,
     Project,
@@ -37,6 +38,7 @@ from app.real_estate.schemas import (
     BookingCreate,
     BookingKycDocRead,
     BookingRead,
+    BookingRefundCreate,
     BookingRegister,
     BookingStepAdvance,
     CollectionLedgerEntry,
@@ -861,6 +863,7 @@ async def _booking_read(session: AsyncSession, booking_id: UUID) -> Booking:
             selectinload(Booking.kyc_documents),
             selectinload(Booking.payment_schedules),
             selectinload(Booking.payment_receipts),
+            selectinload(Booking.refunds),
         )
     )
     booking = (await session.execute(stmt)).scalar_one_or_none()
@@ -1032,6 +1035,82 @@ async def cancel_booking(
     freed = bool(unit and unit.status in (UnitStatus.booked, UnitStatus.hold))
     if freed:
         unit.status = UnitStatus.available
+    await session.commit()
+    if freed and unit:
+        await realtime_manager.broadcast({
+            "event": "unit.status_changed",
+            "unit_id": str(unit.id),
+            "status": UnitStatus.available.value,
+            "project_id": str(unit.project_id),
+        })
+    return await _booking_read(session, booking_id)
+
+
+@router.post("/bookings/{booking_id}/refund", response_model=BookingRead)
+async def refund_booking(
+    booking_id: UUID,
+    payload: BookingRefundCreate,
+    _: object = Depends(require_permissions(PermissionCode.FINANCE_REFUND)),
+    session: AsyncSession = Depends(get_db_session),
+):
+    """Refund a paid booking and cancel it. This is the counterpart to /cancel:
+    an unpaid booking is cancelled directly, a paid one is cancelled *here* by
+    recording the refund (net = collected − deduction) and freeing its unit."""
+    stmt = (
+        select(Booking)
+        .where(Booking.id == booking_id)
+        .options(selectinload(Booking.payment_receipts))
+    )
+    booking = (await session.execute(stmt)).scalar_one_or_none()
+    if not booking or booking.is_deleted:
+        raise HTTPException(status_code=404, detail="Booking not found")
+    if booking.status == BookingStatus.cancelled:
+        raise HTTPException(status_code=409, detail="Booking is already cancelled.")
+
+    gross_paid = sum((r.amount for r in booking.payment_receipts), Decimal("0"))
+    if gross_paid <= 0:
+        raise HTTPException(
+            status_code=409,
+            detail="No payments recorded on this booking — use cancel instead of refund.",
+        )
+    if payload.deduction_amount > gross_paid:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Deduction (₹{payload.deduction_amount}) cannot exceed the amount paid (₹{gross_paid}).",
+        )
+    refund_amount = gross_paid - payload.deduction_amount
+
+    session.add(
+        BookingRefund(
+            booking_id=booking_id,
+            gross_paid=gross_paid,
+            deduction_amount=payload.deduction_amount,
+            refund_amount=refund_amount,
+            mode=payload.mode,
+            refunded_on=payload.refunded_on,
+            reference=payload.reference,
+            reason=payload.reason,
+        )
+    )
+    booking.status = BookingStatus.cancelled
+    booking.cancellation_reason = payload.reason
+
+    # Drop this purchase out of the customer's lifetime value.
+    if booking.customer_id:
+        customer = await session.get(Customer, booking.customer_id)
+        if customer is not None:
+            await recompute_ltv(session, customer)
+
+    # Free the unit back to Available (unless it has progressed past a booking).
+    unit = await session.get(Unit, booking.unit_id)
+    freed = bool(unit and unit.status in (UnitStatus.booked, UnitStatus.hold))
+    if freed:
+        unit.status = UnitStatus.available
+    await _notify(
+        session, await _booking_owner_id(session, booking),
+        f"Booking cancelled — ₹{refund_amount} refunded"
+        + (f" (₹{payload.deduction_amount} withheld)." if payload.deduction_amount > 0 else "."),
+    )
     await session.commit()
     if freed and unit:
         await realtime_manager.broadcast({

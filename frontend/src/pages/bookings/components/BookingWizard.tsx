@@ -330,6 +330,7 @@ export function BookingWizard({ unit, onClose, onComplete, initialBooking = null
               <PriceCalculator
                 basePrice={unit.basePrice}
                 floor={unit.floor}
+                area={unit.area}
                 onPricingChange={setPricing}
               />
               <div className="bw-footer">

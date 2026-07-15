@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useLocation, useSearchParams } from "react-router-dom";
 import { ClipboardCheck, Download, Plus, Wallet } from "lucide-react";
-import { Badge, Button, Card, ConfirmDialog, DataTable, EmptyState, Modal, TextField, useToast } from "../../components";
+import { Badge, Button, Card, ConfirmDialog, DataTable, EmptyState, Modal, SelectField, TextField, useToast } from "../../components";
 import type { DataTableColumn } from "../../components";
 import { useBookings } from "../../hooks/useBookings";
 import { useInventory } from "../../hooks/useInventory";
@@ -12,7 +12,7 @@ import { exportsService } from "../../services/exports";
 import { LoadingBlock } from "../../components/ui/Spinner";
 import { BookingWizard } from "./components/BookingWizard";
 import { PaymentPlanModal } from "./components/PaymentPlanModal";
-import type { Booking, Unit, UnitStatus } from "../../types/realestate";
+import type { Booking, PaymentMode, Unit, UnitStatus } from "../../types/realestate";
 import { extractErrorMessage } from "../../utils/errors";
 import { formatDate, formatInr } from "../../utils/format";
 import "./BookingsPage.css";
@@ -46,10 +46,14 @@ export default function BookingsPage() {
   const [marking, setMarking] = useState(false);
   // Payment plan / collections modal for a booking.
   const [payBooking, setPayBooking] = useState<Booking | null>(null);
-  // Cancel-booking modal.
+  // Cancel-booking modal. When the booking already has money collected, the same
+  // modal collects refund details instead (a paid booking is cancelled via refund).
   const [cancelTarget, setCancelTarget] = useState<Booking | null>(null);
   const [cancelReason, setCancelReason] = useState("");
   const [cancelling, setCancelling] = useState(false);
+  const [refundForm, setRefundForm] = useState<{ deduction: string; mode: PaymentMode; date: string; reference: string }>(
+    { deduction: "0", mode: "neft", date: "", reference: "" }
+  );
   // Registration modal (deed no. + sub-registrar office + date).
   const [registerTarget, setRegisterTarget] = useState<Booking | null>(null);
   const [regForm, setRegForm] = useState({ date: "", number: "", office: "" });
@@ -160,6 +164,39 @@ export default function BookingsPage() {
 
   async function confirmCancel() {
     if (!cancelTarget) return;
+    const paid = cancelTarget.paymentReceipts.reduce((n, r) => n + r.amount, 0);
+    // A paid booking can only be cancelled by recording a refund (server blocks
+    // a plain cancel once money is collected).
+    if (paid > 0) {
+      const deduction = Number(refundForm.deduction) || 0;
+      if (!refundForm.date) {
+        toast.error("Refund date is required");
+        return;
+      }
+      if (deduction > paid) {
+        toast.error("Deduction can't exceed the amount paid", formatInr(paid));
+        return;
+      }
+      setCancelling(true);
+      try {
+        await bookingsService.refundBooking(cancelTarget.id, {
+          deduction_amount: deduction,
+          mode: refundForm.mode,
+          refunded_on: refundForm.date,
+          reference: refundForm.reference.trim() || null,
+          reason: cancelReason.trim() || null,
+        });
+        toast.success("Booking refunded & cancelled", `Net refund ${formatInr(paid - deduction)}`);
+        setCancelTarget(null);
+        refresh();
+        void refreshInventory();
+      } catch (err) {
+        toast.error("Could not refund", extractErrorMessage(err));
+      } finally {
+        setCancelling(false);
+      }
+      return;
+    }
     setCancelling(true);
     try {
       await bookingsService.cancelBooking(cancelTarget.id, cancelReason.trim() || null);
@@ -243,6 +280,7 @@ export default function BookingsPage() {
               onClick={(e) => {
                 e.stopPropagation();
                 setCancelReason("");
+                setRefundForm({ deduction: "0", mode: "neft", date: new Date().toISOString().slice(0, 10), reference: "" });
                 setCancelTarget(b);
               }}
             >
@@ -422,40 +460,98 @@ export default function BookingsPage() {
         />
       )}
 
-      {cancelTarget && (
-        <Modal
-          open
-          title="Cancel booking"
-          onClose={() => setCancelTarget(null)}
-          footer={
-            <>
-              <Button variant="secondary" onClick={() => setCancelTarget(null)} disabled={cancelling}>
-                Keep booking
-              </Button>
-              <Button variant="danger" loading={cancelling} onClick={() => void confirmCancel()}>
-                Cancel booking
-              </Button>
-            </>
-          }
-        >
-          <div className="stack" style={{ gap: "0.75rem" }}>
-            <p className="text-sm">
-              This frees{" "}
-              {cancelTarget.unit
-                ? `${cancelTarget.unit.projectName} · ${cancelTarget.unit.towerName} · ${cancelTarget.unit.unitNumber}`
-                : "the unit"}{" "}
-              back to Available. If any payment has been recorded, clear/refund it first.
-            </p>
-            <TextField
-              id="cancel-reason"
-              label="Reason (optional)"
-              value={cancelReason}
-              onChange={(e) => setCancelReason(e.target.value)}
-              placeholder="e.g. Customer backed out"
-            />
-          </div>
-        </Modal>
-      )}
+      {cancelTarget && (() => {
+        const paid = cancelTarget.paymentReceipts.reduce((n, r) => n + r.amount, 0);
+        const isRefund = paid > 0;
+        const deduction = Number(refundForm.deduction) || 0;
+        const net = Math.max(0, paid - deduction);
+        return (
+          <Modal
+            open
+            title={isRefund ? "Refund & cancel booking" : "Cancel booking"}
+            onClose={() => setCancelTarget(null)}
+            footer={
+              <>
+                <Button variant="secondary" onClick={() => setCancelTarget(null)} disabled={cancelling}>
+                  Keep booking
+                </Button>
+                <Button variant="danger" loading={cancelling} onClick={() => void confirmCancel()}>
+                  {isRefund ? "Refund & cancel" : "Cancel booking"}
+                </Button>
+              </>
+            }
+          >
+            <div className="stack" style={{ gap: "0.75rem" }}>
+              <p className="text-sm">
+                This frees{" "}
+                {cancelTarget.unit
+                  ? `${cancelTarget.unit.projectName} · ${cancelTarget.unit.towerName} · ${cancelTarget.unit.unitNumber}`
+                  : "the unit"}{" "}
+                back to Available.
+              </p>
+              {isRefund && (
+                <>
+                  <div className="row row--between text-sm" style={{ padding: "0.25rem 0" }}>
+                    <span className="muted">Collected so far</span>
+                    <strong>{formatInr(paid)}</strong>
+                  </div>
+                  <TextField
+                    id="refund-deduction"
+                    label="Deduction / forfeiture (₹)"
+                    type="number"
+                    min="0"
+                    value={refundForm.deduction}
+                    onChange={(e) => setRefundForm({ ...refundForm, deduction: e.target.value })}
+                    hint="Cancellation charges withheld by the builder. 0 = full refund."
+                  />
+                  <div className="row row--between text-sm" style={{ padding: "0.25rem 0" }}>
+                    <span className="muted">Net refund to buyer</span>
+                    <strong style={{ fontSize: "var(--text-display-sm)" }}>{formatInr(net)}</strong>
+                  </div>
+                  <div className="form-grid">
+                    <SelectField
+                      id="refund-mode"
+                      label="Refund mode"
+                      value={refundForm.mode}
+                      onChange={(e) => setRefundForm({ ...refundForm, mode: e.target.value as PaymentMode })}
+                      options={[
+                        { value: "neft", label: "NEFT / Bank transfer" },
+                        { value: "upi", label: "UPI" },
+                        { value: "cheque", label: "Cheque" },
+                        { value: "cash", label: "Cash" },
+                        { value: "card", label: "Card" },
+                        { value: "other", label: "Other" },
+                      ]}
+                    />
+                    <TextField
+                      id="refund-date"
+                      label="Refund date"
+                      type="date"
+                      value={refundForm.date}
+                      onChange={(e) => setRefundForm({ ...refundForm, date: e.target.value })}
+                      required
+                    />
+                  </div>
+                  <TextField
+                    id="refund-reference"
+                    label="Reference (optional)"
+                    value={refundForm.reference}
+                    onChange={(e) => setRefundForm({ ...refundForm, reference: e.target.value })}
+                    placeholder="e.g. UTR / cheque no."
+                  />
+                </>
+              )}
+              <TextField
+                id="cancel-reason"
+                label="Reason (optional)"
+                value={cancelReason}
+                onChange={(e) => setCancelReason(e.target.value)}
+                placeholder="e.g. Customer backed out"
+              />
+            </div>
+          </Modal>
+        );
+      })()}
 
       {registerTarget && (
         <Modal

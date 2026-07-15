@@ -75,6 +75,10 @@ export interface PricingLineItem {
 }
 
 export interface PricingSnapshot {
+  // "Box price" inputs — when the unit area is known, base = ratePerSqft × area.
+  // Both optional so older snapshots (base entered as a flat amount) still parse.
+  ratePerSqft?: number;
+  area?: number;
   basePrice: number;
   floorRise: number;
   plc: number;
@@ -124,6 +128,19 @@ export interface PaymentReceipt {
   createdAt: string;
 }
 
+export interface BookingRefund {
+  id: string;
+  bookingId: string;
+  grossPaid: number;
+  deductionAmount: number;
+  refundAmount: number;
+  mode: PaymentMode;
+  refundedOn: string;
+  reference: string | null;
+  reason: string | null;
+  createdAt: string;
+}
+
 export interface Booking {
   id: string;
   unitId: string;
@@ -132,6 +149,7 @@ export interface Booking {
   customer: BookingCustomer | null;
   paymentSchedules: PaymentScheduleEntry[];
   paymentReceipts: PaymentReceipt[];
+  refunds: BookingRefund[];
   step: BookingStep;
   status: BookingStatus;
   kycDocuments: KycDocument[];
