@@ -27,6 +27,7 @@ class UserRole(StrEnum):
     telecaller = "telecaller"
     accounts = "accounts"
     crm_team = "crm_team"
+    receptionist = "receptionist"  # entry-only: create/view leads
     # External-portal roles (real estate)
     broker = "broker"      # channel partner
     customer = "customer"  # buyer portal

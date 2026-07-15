@@ -20,6 +20,7 @@ export type UserRole =
   | "telecaller"
   | "accounts"
   | "crm_team"
+  | "receptionist"
   | "broker"
   // Customer portal — end-buyer accounts, no staff access.
   | "customer"
@@ -50,7 +51,7 @@ export type PermissionCode =
 export const ROLES_BY_INDUSTRY: Record<LeadIndustry, UserRole[]> = {
   education: ["owner", "academic_admin", "counselor", "fee_admin", "support", "analyst"],
   travel: ["owner", "ops_manager", "travel_agent", "visa_coordinator", "support", "analyst"],
-  real_estate: ["owner", "sales_manager", "sales_executive", "telecaller", "accounts", "crm_team", "broker", "support", "analyst"],
+  real_estate: ["owner", "sales_manager", "sales_executive", "telecaller", "receptionist", "accounts", "crm_team", "broker", "support", "analyst"],
 };
 export type UserStatus = "active" | "inactive" | "invited" | "suspended";
 export type CustomerStatus = "active" | "inactive" | "prospect" | "churned";

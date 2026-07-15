@@ -89,6 +89,7 @@ ROLE_INDUSTRIES: dict[UserRole, frozenset[LeadIndustry | None]] = {
     UserRole.telecaller: frozenset({LeadIndustry.real_estate}),
     UserRole.accounts: frozenset({LeadIndustry.real_estate}),
     UserRole.crm_team: frozenset({LeadIndustry.real_estate}),
+    UserRole.receptionist: frozenset({LeadIndustry.real_estate}),
     UserRole.broker: frozenset({LeadIndustry.real_estate}),
     UserRole.customer: frozenset({LeadIndustry.real_estate}),
     # Custom — org-defined role template, valid in any vertical.
@@ -237,6 +238,12 @@ ROLE_PERMISSION_DEFAULTS: dict[UserRole, tuple[PermissionCode, ...]] = {
         PermissionCode.CUSTOMER_VIEW, PermissionCode.CUSTOMER_MANAGE,
         PermissionCode.TASK_VIEW, PermissionCode.TASK_MANAGE,
         PermissionCode.ACTIVITY_VIEW, PermissionCode.ACTIVITY_MANAGE,
+    ),
+    # Receptionist / front-desk — entry only: create & view leads. No user mgmt,
+    # no reassignment (needs USER_VIEW), no finance, no customer/task tooling.
+    UserRole.receptionist: (
+        PermissionCode.DASHBOARD_VIEW,
+        PermissionCode.LEAD_VIEW, PermissionCode.LEAD_MANAGE,
     ),
     UserRole.broker: (
         PermissionCode.DASHBOARD_VIEW,
