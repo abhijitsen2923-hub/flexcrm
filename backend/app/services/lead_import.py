@@ -30,6 +30,11 @@ from app.core.currencies import DEFAULT_CURRENCY, allowed_currencies_for_org
 from app.core.exceptions import AppException, ValidationError
 from app.core.lead_csv import CsvColumn, import_columns_for
 from app.core.tenancy import current_org
+from app.core.lead_normalize import (
+    normalize_property_interest,
+    normalize_property_type,
+    normalize_source,
+)
 from app.database.enums import LeadIndustry, UserRole
 from app.database.pipeline_seed import initial_stage_code
 from app.models.organization import Organization
@@ -236,6 +241,17 @@ class LeadImportService(ServiceBase):
                 payload_kwargs[col.key] = self._parse_date(raw_val)
             else:
                 payload_kwargs[col.key] = raw_val or None
+
+        # Snap free-text CSV values to the controlled dropdown labels so imported
+        # rows line up with the UI's Source / Property Interest / Property type
+        # selects. Unrecognised values pass through as free text (never rejected).
+        if "source" in payload_kwargs:
+            payload_kwargs["source"] = normalize_source(payload_kwargs["source"])
+        if industry == LeadIndustry.real_estate:
+            if "interest" in payload_kwargs:
+                payload_kwargs["interest"] = normalize_property_interest(payload_kwargs["interest"])
+            if "property_type" in payload_kwargs:
+                payload_kwargs["property_type"] = normalize_property_type(payload_kwargs["property_type"])
 
         # Resolve an optional lead owner by email → a user in this workspace.
         owner_email = (row.get("owner_email") or "").strip().lower()
