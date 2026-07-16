@@ -49,11 +49,30 @@ class ChannelPartnerUpdate(ORMModel):
     user_id: UUID | None = None
 
 
-class ChannelPartnerRead(ChannelPartnerBase):
+class ChannelPartnerRead(ORMModel):
+    """Non-sensitive partner view returned to any _VIEW role (incl. analyst).
+    Deliberately OMITS PAN + payout bank/UPI details — those are PII/financial
+    and only surface via the USER_MANAGE-gated `ChannelPartnerFull`."""
     id: UUID
     user_id: UUID | None = None
+    company_name: str
+    contact_name: str
+    phone: str | None = None
+    email: str | None = None
+    rera_number: str | None = None
+    brokerage_type: BrokerageType = "percent"
+    brokerage_rate: Decimal = Decimal("0")
+    is_active: bool = True
     created_at: datetime
     updated_at: datetime
+
+
+class ChannelPartnerFull(ChannelPartnerRead):
+    """Full record incl. PAN + payout details — only for editing (USER_MANAGE)."""
+    pan: str | None = None
+    payout_bank_account: str | None = None
+    payout_ifsc: str | None = None
+    payout_upi: str | None = None
 
 
 class ChannelPartnerStats(ORMModel):

@@ -4,6 +4,7 @@ import type {
   BrokeragePayout,
   ChannelPartner,
   ChannelPartnerCreate,
+  ChannelPartnerFull,
   ChannelPartnerListItem,
   ChannelPartnerUpdate,
   PayoutStatus,
@@ -30,6 +31,11 @@ export const channelPartnersService = {
 
   get(id: string): Promise<ChannelPartnerListItem> {
     return apiClient.get<ChannelPartnerListItem>(`/channel-partners/${id}`).then((r) => r.data);
+  },
+
+  // Full record incl. PAN + payout details (USER_MANAGE) — for the edit form.
+  getFull(id: string): Promise<ChannelPartnerFull> {
+    return apiClient.get<ChannelPartnerFull>(`/channel-partners/${id}/full`).then((r) => r.data);
   },
 
   create(payload: ChannelPartnerCreate): Promise<ChannelPartner> {

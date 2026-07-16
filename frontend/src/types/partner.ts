@@ -4,6 +4,8 @@
 export type BrokerageType = "percent" | "flat";
 export type PayoutStatus = "accrued" | "paid" | "reversed";
 
+// Non-sensitive partner view (roster/detail). PAN + payout details are omitted
+// server-side for view-only roles — fetch ChannelPartnerFull (USER_MANAGE) to edit.
 export interface ChannelPartner {
   id: string;
   user_id: string | null;
@@ -12,15 +14,18 @@ export interface ChannelPartner {
   phone: string | null;
   email: string | null;
   rera_number: string | null;
-  pan: string | null;
   brokerage_type: BrokerageType;
   brokerage_rate: string;
-  payout_bank_account: string | null;
-  payout_ifsc: string | null;
-  payout_upi: string | null;
   is_active: boolean;
   created_at: string;
   updated_at: string;
+}
+
+export interface ChannelPartnerFull extends ChannelPartner {
+  pan: string | null;
+  payout_bank_account: string | null;
+  payout_ifsc: string | null;
+  payout_upi: string | null;
 }
 
 export interface ChannelPartnerStats {

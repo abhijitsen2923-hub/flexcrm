@@ -22,7 +22,6 @@ import type { Lead, User } from "../../types";
 import type {
   BrokeragePayout,
   BrokerageType,
-  ChannelPartner,
   ChannelPartnerListItem,
 } from "../../types/partner";
 
@@ -110,24 +109,31 @@ export default function ChannelPartnersPage() {
     setFormOpen(true);
   }
 
-  function openEdit(p: ChannelPartner) {
-    setEditingId(p.id);
-    setForm({
-      company_name: p.company_name,
-      contact_name: p.contact_name,
-      phone: p.phone ?? "",
-      email: p.email ?? "",
-      rera_number: p.rera_number ?? "",
-      pan: p.pan ?? "",
-      brokerage_type: p.brokerage_type,
-      brokerage_rate: String(p.brokerage_rate ?? "0"),
-      payout_bank_account: p.payout_bank_account ?? "",
-      payout_ifsc: p.payout_ifsc ?? "",
-      payout_upi: p.payout_upi ?? "",
-      is_active: p.is_active,
-      user_id: p.user_id ?? "",
-    });
-    setFormOpen(true);
+  async function openEdit(p: ChannelPartnerListItem) {
+    // The roster item omits PAN + payout details (view-only PII protection);
+    // fetch the full record (USER_MANAGE) to prefill the edit form.
+    try {
+      const full = await channelPartnersService.getFull(p.id);
+      setEditingId(p.id);
+      setForm({
+        company_name: full.company_name,
+        contact_name: full.contact_name,
+        phone: full.phone ?? "",
+        email: full.email ?? "",
+        rera_number: full.rera_number ?? "",
+        pan: full.pan ?? "",
+        brokerage_type: full.brokerage_type,
+        brokerage_rate: String(full.brokerage_rate ?? "0"),
+        payout_bank_account: full.payout_bank_account ?? "",
+        payout_ifsc: full.payout_ifsc ?? "",
+        payout_upi: full.payout_upi ?? "",
+        is_active: full.is_active,
+        user_id: full.user_id ?? "",
+      });
+      setFormOpen(true);
+    } catch (err) {
+      toast.error("Could not load partner", extractErrorMessage(err));
+    }
   }
 
   async function submitForm() {
@@ -243,7 +249,7 @@ export default function ChannelPartnersPage() {
             <Button
               size="sm"
               variant="ghost"
-              onClick={(e) => { e.stopPropagation(); openEdit(p); }}
+              onClick={(e) => { e.stopPropagation(); void openEdit(p); }}
             >
               Edit
             </Button>

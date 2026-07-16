@@ -187,6 +187,15 @@ class StageTransitionService(ServiceBase):
                 from app.services.channel_partners import ChannelPartnerService
 
                 await ChannelPartnerService(self.session).accrue_brokerage(lead, sales_order=order)
+        elif current_stage.code == SOLD_STAGE_CODE:
+            # Leaving Sold (reopened to an active stage, or moved to lost) undoes
+            # the deal — reverse any still-accrued brokerage so it isn't left
+            # payable on a collapsed sale.
+            from app.services.channel_partners import ChannelPartnerService
+
+            await ChannelPartnerService(self.session).reverse_brokerage_for_lead(
+                lead.id, why=f"lead moved {SOLD_STAGE_CODE} -> {target_stage.code}"
+            )
 
         await self.commit()
         await self.invalidate_reporting_cache()

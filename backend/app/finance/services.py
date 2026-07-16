@@ -295,6 +295,16 @@ class RefundService(ServiceBase):
                 )
             )
 
+        # Also reverse any still-accrued channel-partner brokerage for this deal
+        # so a refunded sale doesn't leave brokerage payable. Local import avoids
+        # a circular dependency at module load.
+        if sales_order_id is not None:
+            from app.services.channel_partners import ChannelPartnerService
+
+            await ChannelPartnerService(self.session).reverse_brokerage_for_sales_order(
+                sales_order_id, why=payload.reason or "refund issued"
+            )
+
         await self.session.flush()
         await realtime_manager.broadcast(
             {

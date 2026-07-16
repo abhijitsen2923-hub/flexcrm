@@ -12,6 +12,7 @@ from app.schemas.channel_partner import (
     BrokeragePayoutRead,
     BrokeragePayoutUpdate,
     ChannelPartnerCreate,
+    ChannelPartnerFull,
     ChannelPartnerListItem,
     ChannelPartnerRead,
     ChannelPartnerUpdate,
@@ -80,6 +81,17 @@ async def get_channel_partner(
     partner = await svc.get_partner(partner_id)
     stats = await svc.stats_for(partner_id)
     return _to_list_item(partner, stats)
+
+
+@router.get("/{partner_id}/full", response_model=ChannelPartnerFull)
+async def get_channel_partner_full(
+    partner_id: UUID,
+    _: object = Depends(require_permissions(PermissionCode.USER_MANAGE)),
+    session: AsyncSession = Depends(get_db_session),
+):
+    """Full record incl. PAN + payout details — for the edit form only, gated by
+    USER_MANAGE so view-only roles never receive partner PII/bank details."""
+    return await ChannelPartnerService(session).get_partner(partner_id)
 
 
 @router.patch("/{partner_id}", response_model=ChannelPartnerRead)

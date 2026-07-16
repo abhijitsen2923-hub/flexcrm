@@ -74,11 +74,15 @@ class ChannelPartnerService(ServiceBase):
         return partner
 
     async def partner_for_user(self, user_id: UUID) -> ChannelPartner | None:
-        """Resolve the ChannelPartner profile a broker login is attached to."""
+        """Resolve the ACTIVE ChannelPartner profile a broker login is attached
+        to. A deactivated (is_active=False) or soft-deleted partner resolves to
+        None, so the portal (submit/dashboard/leads/commissions) rejects them."""
         return (
             await self.session.execute(
                 select(ChannelPartner).where(
-                    ChannelPartner.user_id == user_id, ChannelPartner.is_deleted.is_(False)
+                    ChannelPartner.user_id == user_id,
+                    ChannelPartner.is_deleted.is_(False),
+                    ChannelPartner.is_active.is_(True),
                 )
             )
         ).scalar_one_or_none()
@@ -251,16 +255,26 @@ class ChannelPartnerService(ServiceBase):
         ).scalar_one_or_none()
         if partner is None or not partner.is_active:
             return None
-        # Don't double-accrue if a payout already exists for this lead.
+        # Don't double-accrue if a LIVE payout already exists for this lead. A
+        # `reversed` payout (deal refunded / reopened) does NOT block a genuine
+        # re-accrual on a later re-sold transition.
         existing = (
             await self.session.execute(
-                select(BrokeragePayout.id).where(BrokeragePayout.lead_id == lead.id)
+                select(BrokeragePayout.id).where(
+                    BrokeragePayout.lead_id == lead.id,
+                    BrokeragePayout.status != "reversed",
+                )
             )
         ).first()
         if existing is not None:
             return None
 
         deal_value = Decimal(str(getattr(sales_order, "deal_value", 0) or 0))
+        if deal_value <= 0:
+            # Real-estate leads keep their expected size in budget_* — the `value`
+            # column is hidden on the form and stays 0, which would make every
+            # percent brokerage accrue 0. Fall back to the budget as the deal size.
+            deal_value = Decimal(str(lead.budget_max or lead.budget_min or 0))
         rate = Decimal(str(partner.brokerage_rate or 0))
         if partner.brokerage_type == "flat":
             amount = rate
@@ -283,3 +297,27 @@ class ChannelPartnerService(ServiceBase):
         self.session.add(payout)
         # Caller (stage transition) owns the commit.
         return payout
+
+    async def _reverse_accrued(self, *, lead_id=None, sales_order_id=None, why: str) -> int:
+        """Flip still-accrued brokerage payouts to `reversed` when the underlying
+        deal is undone (refund / reopen). Only 'accrued' rows are touched — a
+        payout already 'paid' out is a real disbursement handled manually, never
+        auto-clawed-back. The caller owns the commit."""
+        if lead_id is None and sales_order_id is None:
+            return 0
+        stmt = select(BrokeragePayout).where(BrokeragePayout.status == "accrued")
+        if lead_id is not None:
+            stmt = stmt.where(BrokeragePayout.lead_id == lead_id)
+        if sales_order_id is not None:
+            stmt = stmt.where(BrokeragePayout.sales_order_id == sales_order_id)
+        rows = (await self.session.execute(stmt)).scalars().all()
+        for p in rows:
+            p.status = "reversed"
+            p.note = f"{p.note or ''} | reversed ({why})".strip(" |")
+        return len(rows)
+
+    async def reverse_brokerage_for_lead(self, lead_id, *, why: str) -> int:
+        return await self._reverse_accrued(lead_id=lead_id, why=why)
+
+    async def reverse_brokerage_for_sales_order(self, sales_order_id, *, why: str) -> int:
+        return await self._reverse_accrued(sales_order_id=sales_order_id, why=why)
