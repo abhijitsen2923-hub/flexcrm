@@ -21,13 +21,16 @@ async def websocket_updates(websocket: WebSocket):
         if payload.get("type") != "access":
             raise ValueError("invalid token type")
         user_id = UUID(payload["sub"])
+        # Tag the socket with its org so it only receives that org's broadcasts.
+        org_raw = payload.get("org")
+        org_id = UUID(org_raw) if org_raw else None
     except Exception:
         await websocket.close(code=1008)
         return
 
     last_event_id = _parse_last_event_id(websocket.query_params.get("last_event_id"))
 
-    await realtime_manager.connect(websocket, user_id, last_event_id=last_event_id)
+    await realtime_manager.connect(websocket, user_id, org_id=org_id, last_event_id=last_event_id)
     try:
         while True:
             await websocket.receive_text()

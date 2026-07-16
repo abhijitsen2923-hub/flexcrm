@@ -21,6 +21,7 @@ from app.models.organization import Organization
 from app.models.user_permission_grant import UserPermissionGrant
 from app.repositories.users import UserRepository
 from app.schemas.common import PaginationParams
+from app.services.realtime import set_broadcast_org
 
 
 async def _resolve_org_context(session: AsyncSession, org_id: UUID) -> dict | None:
@@ -78,12 +79,17 @@ async def get_current_user(
 
     if user.is_platform_admin:
         # Platform admins query public tables only; no tenant schema routing needed.
+        # No org scope → realtime broadcasts from this request are dropped (safe).
+        set_broadcast_org(None)
         return user
 
     # Resolve org_id and activate tenant schema routing for this request.
     org_id_str = payload.get("org") or (str(user.organization_id) if user.organization_id else None)
     org_id = UUID(org_id_str) if org_id_str else None
     set_scope(session, org_id)
+    # Scope realtime broadcasts from this request to the caller's org so events
+    # never cross tenant boundaries (see RealtimeManager).
+    set_broadcast_org(org_id)
 
     if org_id:
         context = await _resolve_org_context(session, org_id)
