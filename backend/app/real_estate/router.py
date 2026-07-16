@@ -18,6 +18,7 @@ from app.database.enums import BookingStatus, UnitStatus, UnitType
 from app.database.session import get_db_session
 from app.models.customer import Customer
 from app.models.lead import Lead
+from app.models.user import User
 from app.real_estate.documents import render_booking_document, render_payment_receipt
 from app.real_estate.models import (
     Booking,
@@ -32,6 +33,7 @@ from app.real_estate.models import (
     Unit,
 )
 from app.services.customer_lifecycle import recompute_ltv
+from app.services.email import EmailService
 from app.services.notifications import NotificationService
 from app.real_estate.schemas import (
     BookingCancel,
@@ -86,6 +88,25 @@ async def _notify(session: AsyncSession, user_id: UUID | None, message: str) -> 
     """Best-effort in-app notification (no-op when there's no recipient)."""
     if user_id:
         await NotificationService(session).create_notification(user_id=user_id, message=message)
+
+
+_email_service = EmailService()
+
+
+def _fmt_inr(value) -> str:
+    try:
+        return "₹{:,.0f}".format(Decimal(str(value)))
+    except (InvalidOperation, TypeError, ValueError):
+        return str(value)
+
+
+def _unit_label(booking) -> str:
+    """Human unit label from an eager-loaded booking (unit.tower.project)."""
+    unit = booking.unit
+    if unit is None:
+        return "your unit"
+    parts = [unit.project_name, unit.tower_name, unit.unit_number]
+    return " · ".join(p for p in parts if p)
 
 
 # ---------------------------------------------------------------------------
@@ -505,7 +526,19 @@ async def create_site_visit(
             f"Site visit scheduled at {project.name if project else 'a project'}.",
         )
     await session.commit()
-    return await _site_visit_read(session, visit.id)
+    result = await _site_visit_read(session, visit.id)
+    # Email the assigned rep (best-effort).
+    if result.assigned_to_id:
+        rep = await session.get(User, result.assigned_to_id)
+        if rep and rep.email:
+            await _email_service.send_site_visit_notification(
+                rep.email,
+                rep_name=rep.first_name or "there",
+                project=result.project.name if result.project else "a project",
+                scheduled_at=result.scheduled_at.strftime("%d %b %Y, %H:%M"),
+                lead_name=result.lead.contact_name if result.lead else None,
+            )
+    return result
 
 
 @router.patch("/site-visits/{visit_id}", response_model=SiteVisitRead)
@@ -710,7 +743,19 @@ async def advance_booking_step(
         .where(Booking.id == booking_id)
         .options(selectinload(Booking.customer), selectinload(Booking.unit).selectinload(Unit.tower).selectinload(Tower.project), selectinload(Booking.kyc_documents), selectinload(Booking.payment_schedules), selectinload(Booking.payment_receipts))
     )
-    return (await session.execute(stmt)).scalar_one()
+    result = (await session.execute(stmt)).scalar_one()
+    # Email the customer their booking confirmation (only when a confirm just
+    # happened; best-effort, no-op if email/customer-email is missing).
+    if booked_unit is not None and result.customer and result.customer.email:
+        await _email_service.send_booking_confirmation(
+            result.customer.email,
+            customer_name=result.customer.contact_name or "there",
+            unit_label=_unit_label(result),
+            project=result.unit.project_name if result.unit else None,
+            amount=_fmt_inr(_booking_total(result)),
+            register_on=result.scheduled_date.isoformat() if result.scheduled_date else None,
+        )
+    return result
 
 
 @router.put("/bookings/{booking_id}/pricing", response_model=BookingRead)
@@ -967,7 +1012,19 @@ async def record_payment(
         f"Payment of ₹{payload.amount} recorded.",
     )
     await session.commit()
-    return await _booking_read(session, booking_id)
+    result = await _booking_read(session, booking_id)
+    # Email the customer a receipt (best-effort).
+    if result.customer and result.customer.email:
+        await _email_service.send_payment_receipt(
+            result.customer.email,
+            customer_name=result.customer.contact_name or "there",
+            amount=_fmt_inr(payload.amount),
+            mode=payload.mode,
+            paid_on=payload.paid_on.isoformat(),
+            unit_label=_unit_label(result),
+            reference=payload.reference,
+        )
+    return result
 
 
 @router.get("/bookings/{booking_id}/payments/{receipt_id}/receipt/pdf")
@@ -1119,7 +1176,17 @@ async def refund_booking(
             "status": UnitStatus.available.value,
             "project_id": str(unit.project_id),
         })
-    return await _booking_read(session, booking_id)
+    result = await _booking_read(session, booking_id)
+    # Email the customer their refund confirmation (best-effort).
+    if result.customer and result.customer.email:
+        await _email_service.send_refund_notice(
+            result.customer.email,
+            customer_name=result.customer.contact_name or "there",
+            refund_amount=_fmt_inr(refund_amount),
+            deduction=_fmt_inr(payload.deduction_amount) if payload.deduction_amount > 0 else None,
+            unit_label=_unit_label(result),
+        )
+    return result
 
 
 @router.post("/bookings/{booking_id}/register", response_model=BookingRead)

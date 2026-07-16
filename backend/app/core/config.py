@@ -67,6 +67,15 @@ class Settings(BaseSettings):
     smtp_sender: str = "noreply@flexcrm.local"
     smtp_use_tls: bool = True
 
+    # --- Email delivery (Resend transactional API over HTTPS) ---
+    # When `resend_api_key` is unset, every email is a logged no-op (so dev and
+    # not-yet-configured deploys stay fully functional). `email_from` must be a
+    # verified Resend sender ("Name <addr@your-domain>"). `app_base_url` is the
+    # frontend origin used to build "open in FlexCRM" links inside emails.
+    resend_api_key: str | None = None
+    email_from: str = "FlexCRM <onboarding@resend.dev>"
+    app_base_url: str = "https://flexcrm.example.com"
+
     # --- Object storage (S3-compatible: Backblaze B2 / Cloudflare R2 / AWS S3) ---
     # When these are unset, file upload/download endpoints return a clean 503
     # ("File storage is not configured") instead of 500ing — so local/dev and

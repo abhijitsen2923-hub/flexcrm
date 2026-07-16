@@ -7,9 +7,12 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import selectinload
 
 from app.core.exceptions import NotFoundError
-from app.database.enums import LeadIndustry
+from app.core.tenancy import current_org
+from app.database.enums import LeadIndustry, UserRole, UserStatus
 from app.models.channel_partner import BrokeragePayout, ChannelPartner
 from app.models.lead import Lead
+from app.models.user import User
+from app.services.email import EmailService
 from app.schemas.channel_partner import (
     ChannelPartnerCreate,
     ChannelPartnerStats,
@@ -238,8 +241,33 @@ class ChannelPartnerService(ServiceBase):
             budget_max=payload.budget_max,
             notes=payload.notes,
         )
-        return await LeadService(self.session).create_lead(
+        lead = await LeadService(self.session).create_lead(
             lead_payload, actor_id=actor_id, actor_business_type=LeadIndustry.real_estate
+        )
+        # Alert managers/owners — a partner referral lands unassigned and needs
+        # triage. Best-effort email (no-op if email unconfigured).
+        await self._alert_managers_of_referral(partner, payload)
+        return lead
+
+    async def _alert_managers_of_referral(self, partner: ChannelPartner, payload: PartnerLeadSubmit) -> None:
+        org_id = current_org(self.session)
+        if org_id is None:
+            return
+        emails = (
+            await self.session.execute(
+                select(User.email).where(
+                    User.organization_id == org_id,
+                    User.role.in_([UserRole.sales_manager, UserRole.owner]),
+                    User.status == UserStatus.active,
+                )
+            )
+        ).scalars().all()
+        emails = [e for e in emails if e]
+        if not emails:
+            return
+        requirement = " · ".join(x for x in [payload.property_type, payload.preferred_location] if x) or None
+        await EmailService().send_partner_referral_alert(
+            emails, partner=partner.company_name, contact_name=payload.contact_name, requirement=requirement
         )
 
     # --- brokerage accrual (called from the Sold transition) ---------------

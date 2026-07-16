@@ -22,7 +22,9 @@ from app.database.session import db_manager
 from app.models.customer import Customer
 from app.models.lead import Lead
 from app.models.organization import Organization
+from app.models.user import User
 from app.real_estate.models import Booking, Unit
+from app.services.email import EmailService
 from app.services.notifications import NotificationService
 
 
@@ -68,6 +70,7 @@ async def dispatch_registration_reminders(session) -> dict[str, int]:
             )
         ).all()
         service = NotificationService(session)
+        email_service = EmailService()
         for booking, unit in rows:
             owner = await _owner_id(session, booking)
             if owner:
@@ -79,6 +82,14 @@ async def dispatch_registration_reminders(session) -> dict[str, int]:
                     ),
                 )
                 counts["reminders"] += 1
+                # Also email the owner (best-effort; no-op if email unconfigured).
+                owner_user = await session.get(User, owner)
+                if owner_user and owner_user.email:
+                    await email_service.send_registration_reminder(
+                        owner_user.email,
+                        unit_label=unit.unit_number,
+                        register_on=booking.scheduled_date.isoformat(),
+                    )
         await session.commit()
     set_scope(session, None)
     return counts
