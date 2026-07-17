@@ -1,5 +1,5 @@
 import { RefreshCw } from "lucide-react";
-import { useCallback, useEffect } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   Bar,
   BarChart,
@@ -28,7 +28,10 @@ import { mergeModules } from "../config/features";
 import { CHART_AXIS, CHART_GRID, CHART_PALETTE, CHART_PRIMARY } from "../config/chartTheme";
 import { useOrg } from "../context/OrgContext";
 import { useDashboard } from "../hooks/useDashboard";
+import { usePermissions } from "../hooks/usePermissions";
 import { useRealtimeEvent } from "../realtime";
+import { channelPartnersService } from "../services/channelPartners";
+import type { ChannelPartnerListItem } from "../types/partner";
 import { formatCurrency, formatInr, formatNumber, formatRelative } from "../utils/format";
 
 
@@ -43,6 +46,34 @@ export default function DashboardPage() {
   const noModules = org !== null && Object.values(FEATURES).every((enabled) => !enabled);
   const dashboard = useDashboard();
   const toast = useToast();
+  const { has } = usePermissions();
+
+  // Segregated dashboard (FR-5): the Channel-Partner overview renders only for
+  // users who can view partners in a real-estate org. Direct-lead users (no
+  // USER_VIEW) and non-real-estate orgs never see it; brokers get their own
+  // portal dashboard.
+  const showChannelPartners = has("USER_VIEW") && (FEATURES.bookings || FEATURES.inventory);
+  const [partners, setPartners] = useState<ChannelPartnerListItem[] | null>(null);
+  useEffect(() => {
+    if (!showChannelPartners) return;
+    let cancelled = false;
+    void channelPartnersService
+      .list()
+      .then((rows) => { if (!cancelled) setPartners(rows); })
+      .catch(() => { if (!cancelled) setPartners([]); });
+    return () => { cancelled = true; };
+  }, [showChannelPartners]);
+
+  const cp = partners
+    ? {
+        total: partners.length,
+        active: partners.filter((p) => p.is_active).length,
+        referred: partners.reduce((n, p) => n + p.stats.leads_total, 0),
+        sold: partners.reduce((n, p) => n + p.stats.leads_sold, 0),
+        outstanding: partners.reduce((n, p) => n + Number(p.stats.brokerage_outstanding), 0),
+        top: [...partners].sort((a, b) => b.stats.leads_total - a.stats.leads_total).slice(0, 5),
+      }
+    : null;
 
   const refresh = useCallback(() => {
     void dashboard.refresh().catch(() => {
@@ -147,6 +178,36 @@ export default function DashboardPage() {
             value={formatInr(invSummary.collection_month ?? 0)}
           />
         </div>
+      )}
+
+      {showChannelPartners && cp && cp.total > 0 && (
+        <>
+          <div className="kpi-grid" style={{ marginTop: 0 }}>
+            <KpiCard label="Channel partners" value={formatNumber(cp.total)} />
+            <KpiCard label="Active partners" value={formatNumber(cp.active)} />
+            <KpiCard
+              label="Partner-referred leads"
+              value={formatNumber(cp.referred)}
+              hint={cp.sold > 0 ? `${cp.sold} sold` : undefined}
+            />
+            <KpiCard label="Brokerage outstanding" value={formatInr(cp.outstanding)} />
+          </div>
+          <div className="chart-grid">
+            <Card title="Top channel partners" subtitle="By referred leads">
+              <ul style={{ listStyle: "none", padding: 0, margin: 0, display: "flex", flexDirection: "column", gap: "0.6rem" }}>
+                {cp.top.map((p) => (
+                  <li key={p.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "1px solid var(--color-border)", paddingBottom: "0.5rem" }}>
+                    <div>
+                      <strong style={{ fontSize: "0.9rem" }}>{p.company_name}</strong>
+                      <div className="muted text-xs">{p.stats.leads_total} referred · {p.stats.leads_sold} sold</div>
+                    </div>
+                    <span className="text-sm">{formatInr(Number(p.stats.brokerage_outstanding))}</span>
+                  </li>
+                ))}
+              </ul>
+            </Card>
+          </div>
+        </>
       )}
 
       <div className={FEATURES.deals || FEATURES.finance ? "chart-grid chart-grid--2-1" : "chart-grid"}>
