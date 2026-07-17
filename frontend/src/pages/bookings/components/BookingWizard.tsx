@@ -18,9 +18,12 @@ interface Props {
   // When resuming an existing (e.g. draft) booking, pass it here — the wizard
   // opens at its current step instead of creating a new booking.
   initialBooking?: Booking | null;
+  // When a booking is started from a lead, link it so the lead becomes the
+  // source of truth for its registration + money.
+  leadId?: string | null;
 }
 
-export function BookingWizard({ unit, onClose, onComplete, initialBooking = null }: Props) {
+export function BookingWizard({ unit, onClose, onComplete, initialBooking = null, leadId = null }: Props) {
   const toast = useToast();
   // Backend booking.step is the LAST completed panel; resume opens the NEXT one
   // (clamped to 4) so a KYC-complete booking lands on Pricing, not back on KYC.
@@ -85,7 +88,7 @@ export function BookingWizard({ unit, onClose, onComplete, initialBooking = null
     }
     setSaving(true);
     try {
-      const created = await bookingsService.create({ unitId: unit.id });
+      const created = await bookingsService.create({ unitId: unit.id, leadId });
       setBooking(created);
       setStep(2);
     } catch {

@@ -662,6 +662,7 @@ async def collection_ledger(
 async def list_bookings(
     unit_id: UUID | None = Query(default=None),
     customer_id: UUID | None = Query(default=None),
+    lead_id: UUID | None = Query(default=None),
     booking_status: str | None = Query(default=None, alias="status"),
     _: object = Depends(require_permissions(PermissionCode.LEAD_VIEW)),
     session: AsyncSession = Depends(get_db_session),
@@ -674,6 +675,7 @@ async def list_bookings(
             selectinload(Booking.kyc_documents),
             selectinload(Booking.payment_schedules),
             selectinload(Booking.payment_receipts),
+            selectinload(Booking.refunds),
         )
         .where(Booking.is_deleted.is_(False))
         .order_by(Booking.created_at.desc())
@@ -682,6 +684,8 @@ async def list_bookings(
         stmt = stmt.where(Booking.unit_id == unit_id)
     if customer_id:
         stmt = stmt.where(Booking.customer_id == customer_id)
+    if lead_id:
+        stmt = stmt.where(Booking.lead_id == lead_id)
     if booking_status:
         stmt = stmt.where(Booking.status == booking_status)
     return list((await session.execute(stmt)).scalars().all())

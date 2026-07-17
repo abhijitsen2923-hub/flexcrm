@@ -9,9 +9,17 @@ import { leadsService } from "../../services/leads";
 import type { Lead, LeadCallLog, PipelineStage, StageTransition } from "../../types";
 import { formatCurrency, formatDate, formatDateTime, formatRelative } from "../../utils/format";
 import { industryInterestLabel, pipelineCategoryTone, titleCase } from "../../utils/options";
+import { LeadBookingsTab } from "./LeadBookingsTab";
 
 
-type TabKey = "overview" | "history" | "activity";
+type TabKey = "overview" | "bookings" | "history" | "activity";
+
+const TAB_LABELS: Record<TabKey, string> = {
+  overview: "Overview",
+  bookings: "Booking & Payments",
+  history: "Stage History",
+  activity: "Activity",
+};
 
 
 interface LeadDrawerProps {
@@ -99,6 +107,11 @@ export function LeadDrawer({ open, lead, onClose, onTransitionRequest, refreshKe
   const stages = byIndustry[lead.industry];
   const currentStage = getStage(lead.industry, lead.stage_code);
   const interestLabel = industryInterestLabel(lead.industry);
+  const isRealEstate = lead.industry === "real_estate";
+  const tabs: TabKey[] = isRealEstate
+    ? ["overview", "bookings", "history", "activity"]
+    : ["overview", "history", "activity"];
+  const activeTab: TabKey = tab === "bookings" && !isRealEstate ? "overview" : tab;
   const myFirstCall = calls.find((c) => c.user_id === user?.id && c.call_type === "first_call");
   const followUpCount = calls.filter((c) => c.call_type === "follow_up").length;
 
@@ -127,20 +140,23 @@ export function LeadDrawer({ open, lead, onClose, onTransitionRequest, refreshKe
         </header>
 
         <div className="drawer__tabs">
-          {(["overview", "history", "activity"] as TabKey[]).map((key) => (
+          {tabs.map((key) => (
             <button
               key={key}
               type="button"
-              className={`tab ${tab === key ? "tab--active" : ""}`}
+              className={`tab ${activeTab === key ? "tab--active" : ""}`}
               onClick={() => setTab(key)}
             >
-              {key === "overview" ? "Overview" : key === "history" ? "Stage History" : "Activity"}
+              {TAB_LABELS[key]}
             </button>
           ))}
         </div>
 
         <div className="drawer__body">
-          {tab === "overview" && (
+          {activeTab === "bookings" && isRealEstate && (
+            <LeadBookingsTab leadId={lead.id} customerId={lead.customer_id} refreshKey={refreshKey} />
+          )}
+          {activeTab === "overview" && (
             <div className="stack">
               <div className="card" style={{ padding: "0.75rem 1rem" }}>
                 <div className="muted text-xs" style={{ textTransform: "uppercase", letterSpacing: ".04em", marginBottom: "0.5rem" }}>
@@ -235,7 +251,7 @@ export function LeadDrawer({ open, lead, onClose, onTransitionRequest, refreshKe
             </div>
           )}
 
-          {tab === "history" && (
+          {activeTab === "history" && (
             <div className="stack">
               {historyLoading && history.length === 0 ? (
                 <LoadingBlock label="Loading history…" />
@@ -286,7 +302,7 @@ export function LeadDrawer({ open, lead, onClose, onTransitionRequest, refreshKe
             </div>
           )}
 
-          {tab === "activity" && (
+          {activeTab === "activity" && (
             <EmptyState
               title="Linked to customer"
               description="Activities are tracked at the customer level. Open the customer to see calls, emails, and notes."

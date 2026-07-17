@@ -185,10 +185,10 @@ function mapBooking(b: ApiBooking): Booking {
 }
 
 export const bookingsService = {
-  list(params?: { unitId?: string; customerId?: string; status?: string }): Promise<Booking[]> {
+  list(params?: { unitId?: string; customerId?: string; leadId?: string; status?: string }): Promise<Booking[]> {
     return apiClient
       .get<ApiBooking[]>("/bookings", {
-        params: { unit_id: params?.unitId, customer_id: params?.customerId, status: params?.status },
+        params: { unit_id: params?.unitId, customer_id: params?.customerId, lead_id: params?.leadId, status: params?.status },
       })
       .then((r) => r.data.map(mapBooking));
   },
