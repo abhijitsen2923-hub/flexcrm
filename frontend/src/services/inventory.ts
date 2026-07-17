@@ -123,6 +123,16 @@ export interface UnitBatchPayload {
   unit_prefix?: string | null;
 }
 
+export interface ProjectTowerPayload {
+  name: string;
+  total_floors: number;
+  units?: UnitBatchPayload | null;
+}
+
+export interface ProjectFullPayload extends ProjectCreatePayload {
+  towers: ProjectTowerPayload[];
+}
+
 export interface ProjectUpdatePayload {
   name?: string;
   builder_name?: string;
@@ -157,6 +167,11 @@ export const inventoryService = {
 
   createProject(payload: ProjectCreatePayload): Promise<Project> {
     return apiClient.post<ApiProject>("/inventory/projects", payload).then((r) => mapProject(r.data));
+  },
+
+  // Create a project + its towers + each tower's units in one atomic call.
+  createProjectFull(payload: ProjectFullPayload): Promise<Project> {
+    return apiClient.post<ApiProject>("/inventory/projects/full", payload).then((r) => mapProject(r.data));
   },
 
   createTower(projectId: string, payload: TowerCreatePayload): Promise<Tower> {

@@ -122,6 +122,19 @@ class UnitBatchCreate(ORMModel):
     unit_prefix: str | None = Field(default=None, max_length=8)
 
 
+class ProjectTowerCreate(ORMModel):
+    """One tower + its (optional) unit batch, for the combined Add-Project form."""
+    name: str = Field(min_length=1, max_length=100)
+    total_floors: int = Field(ge=1, le=200)
+    units: UnitBatchCreate | None = None
+
+
+class ProjectFullCreate(ProjectCreate):
+    """Create a project together with its towers and each tower's units in one
+    atomic call (the combined Add-Project wizard)."""
+    towers: list[ProjectTowerCreate] = Field(default_factory=list)
+
+
 class SiteVisitProjectMini(ORMModel):
     id: UUID
     name: str

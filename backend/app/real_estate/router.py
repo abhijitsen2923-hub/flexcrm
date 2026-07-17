@@ -50,6 +50,7 @@ from app.real_estate.schemas import (
     PossessionChecklistUpdate,
     PricingUpdate,
     ProjectCreate,
+    ProjectFullCreate,
     ProjectMediaRead,
     ProjectRead,
     ProjectUpdate,
@@ -142,6 +143,62 @@ async def create_project(
     await session.commit()
     await session.refresh(project)
     return project
+
+
+# Static path before /{project_id} so "full" isn't parsed as an id.
+@router.post("/inventory/projects/full", response_model=ProjectWithTowersRead, status_code=status.HTTP_201_CREATED)
+async def create_project_full(
+    payload: ProjectFullCreate,
+    _: object = Depends(require_permissions(PermissionCode.LEAD_MANAGE)),
+    session: AsyncSession = Depends(get_db_session),
+):
+    """Create a project + its towers + each tower's units atomically (combined
+    Add-Project wizard). All-or-nothing: a failure rolls the whole thing back."""
+    project = Project(
+        name=payload.name,
+        builder_name=payload.builder_name,
+        location=payload.location,
+        city=payload.city,
+        rera_number=payload.rera_number,
+    )
+    session.add(project)
+    await session.flush()
+
+    for tspec in payload.towers:
+        tower = Tower(project_id=project.id, name=tspec.name, total_floors=tspec.total_floors)
+        session.add(tower)
+        await session.flush()
+        if tspec.units is not None:
+            u = tspec.units
+            prefix = (u.unit_prefix or _TYPE_PREFIX.get(u.unit_type, "U")).strip()
+            for fu in u.floors:
+                for n in range(1, fu.count + 1):
+                    session.add(
+                        Unit(
+                            project_id=project.id,
+                            tower_id=tower.id,
+                            floor=fu.floor,
+                            unit_number=f"{prefix}{fu.floor}{n:02d}",
+                            unit_type=u.unit_type.value,
+                            area=u.area,
+                            base_price=u.base_price,
+                            area_unit=u.area_unit,
+                            facing=u.facing,
+                            status=UnitStatus.available,
+                        )
+                    )
+    await session.commit()
+
+    stmt = (
+        select(Project)
+        .where(Project.id == project.id, Project.is_deleted.is_(False))
+        .options(
+            selectinload(Project.towers.and_(Tower.is_deleted.is_(False)))
+            .selectinload(Tower.units.and_(Unit.is_deleted.is_(False))),
+            selectinload(Project.media),
+        )
+    )
+    return (await session.execute(stmt)).scalar_one()
 
 
 @router.get("/inventory/projects/{project_id}", response_model=ProjectWithTowersRead)

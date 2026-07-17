@@ -35,6 +35,29 @@ const EMPTY_PROJECT_FORM: ProjectFormState = {
   rera_number: "",
 };
 
+// One tower row in the combined Add-Project form (+ its optional unit batch).
+interface TowerBuilder {
+  name: string;
+  total_floors: string;
+  addUnits: boolean;
+  unit_type: UnitType;
+  units_per_floor: string;
+  area: string;
+  base_price: string;
+  unit_prefix: string;
+}
+
+const EMPTY_TOWER: TowerBuilder = {
+  name: "",
+  total_floors: "10",
+  addUnits: true,
+  unit_type: "residential",
+  units_per_floor: "4",
+  area: "1000",
+  base_price: "5000000",
+  unit_prefix: "",
+};
+
 const MEDIA_TYPE_OPTIONS: { value: ProjectMedia["type"]; label: string }[] = [
   { value: "brochure", label: "Brochure" },
   { value: "floor_plan", label: "Floor plan" },
@@ -164,8 +187,13 @@ export default function ProjectsPage() {
   const [formOpen, setFormOpen] = useState(false);
   const [editingProject, setEditingProject] = useState<Project | null>(null);
   const [form, setForm] = useState<ProjectFormState>(EMPTY_PROJECT_FORM);
+  const [towers, setTowers] = useState<TowerBuilder[]>([{ ...EMPTY_TOWER }]);
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
+
+  function setTower(i: number, patch: Partial<TowerBuilder>) {
+    setTowers((prev) => prev.map((t, idx) => (idx === i ? { ...t, ...patch } : t)));
+  }
   const [archiveProject, setArchiveProject] = useState<Project | null>(null);
   const [archiving, setArchiving] = useState(false);
 
@@ -180,6 +208,7 @@ export default function ProjectsPage() {
   function openCreate() {
     setEditingProject(null);
     setForm(EMPTY_PROJECT_FORM);
+    setTowers([{ ...EMPTY_TOWER }]);
     setFormError(null);
     setFormOpen(true);
   }
@@ -213,8 +242,26 @@ export default function ProjectsPage() {
         await inventoryService.updateProject(editingProject.id, payload);
         toast.success("Project updated", payload.name);
       } else {
-        await inventoryService.createProject(payload);
-        toast.success("Project created", payload.name);
+        // Combined create: project + towers + each tower's units, atomic.
+        const towersPayload = towers
+          .filter((t) => t.name.trim())
+          .map((t) => {
+            const floors = Math.max(1, Number(t.total_floors) || 1);
+            const perFloor = Number(t.units_per_floor) || 0;
+            const units =
+              t.addUnits && perFloor > 0
+                ? {
+                    unit_type: t.unit_type,
+                    floors: Array.from({ length: floors }, (_, i) => ({ floor: i + 1, count: perFloor })),
+                    area: Number(t.area) || 1,
+                    base_price: Number(t.base_price) || 0,
+                    unit_prefix: t.unit_prefix.trim() || undefined,
+                  }
+                : null;
+            return { name: t.name.trim(), total_floors: floors, units };
+          });
+        await inventoryService.createProjectFull({ ...payload, towers: towersPayload });
+        toast.success("Project created", `${payload.name}${towersPayload.length ? ` · ${towersPayload.length} tower(s)` : ""}`);
       }
       setFormOpen(false);
       await refresh();
@@ -318,6 +365,7 @@ export default function ProjectsPage() {
       <Modal
         open={formOpen}
         title={editingProject ? "Edit project" : "Add project"}
+        size="lg"
         onClose={() => setFormOpen(false)}
         footer={
           <>
@@ -372,6 +420,74 @@ export default function ProjectsPage() {
             onChange={(event) => setForm({ ...form, rera_number: event.target.value })}
             placeholder="Optional"
           />
+
+          {!editingProject && (
+            <div className="stack" style={{ gap: "0.6rem", borderTop: "1px solid var(--color-border)", paddingTop: "0.85rem" }}>
+              <div className="row row--between" style={{ alignItems: "center" }}>
+                <strong>Towers &amp; units</strong>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  icon={<Plus size={14} />}
+                  onClick={() => setTowers([...towers, { ...EMPTY_TOWER }])}
+                >
+                  Add tower
+                </Button>
+              </div>
+              <p className="muted text-xs" style={{ margin: 0 }}>
+                Add one or more towers now, each with its units. You can always add more later from the project.
+              </p>
+              {towers.map((t, i) => {
+                const count = (Number(t.total_floors) || 0) * (Number(t.units_per_floor) || 0);
+                return (
+                  <div key={i} className="card" style={{ padding: "0.75rem", background: "var(--color-surface-muted)" }}>
+                    <div className="row row--between" style={{ alignItems: "center", marginBottom: "0.4rem" }}>
+                      <span className="muted text-xs">Tower {i + 1}</span>
+                      {towers.length > 1 && (
+                        <button
+                          type="button"
+                          className="btn btn--ghost btn--icon"
+                          onClick={() => setTowers(towers.filter((_, idx) => idx !== i))}
+                          aria-label="Remove tower"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      )}
+                    </div>
+                    <div className="form-grid">
+                      <TextField id={`tower-name-${i}`} label="Tower name" value={t.name} onChange={(e) => setTower(i, { name: e.target.value })} placeholder="e.g. Tower A" />
+                      <TextField id={`tower-floors-${i}`} label="Total floors" type="number" min={1} value={t.total_floors} onChange={(e) => setTower(i, { total_floors: e.target.value })} />
+                    </div>
+                    <label className="row" style={{ gap: "0.4rem", alignItems: "center", margin: "0.55rem 0 0.3rem" }}>
+                      <input type="checkbox" checked={t.addUnits} onChange={(e) => setTower(i, { addUnits: e.target.checked })} />
+                      <span className="text-sm">Generate units for this tower</span>
+                    </label>
+                    {t.addUnits && (
+                      <>
+                        <div className="form-grid">
+                          <SelectField id={`tower-utype-${i}`} label="Unit type" value={t.unit_type} onChange={(e) => setTower(i, { unit_type: e.target.value as UnitType })} options={UNIT_TYPE_OPTIONS} />
+                          <TextField id={`tower-perfloor-${i}`} label="Units per floor" type="number" min={1} value={t.units_per_floor} onChange={(e) => setTower(i, { units_per_floor: e.target.value })} />
+                        </div>
+                        <div className="form-grid">
+                          <TextField id={`tower-area-${i}`} label="Area (sqft)" type="number" min={1} value={t.area} onChange={(e) => setTower(i, { area: e.target.value })} />
+                          <TextField id={`tower-price-${i}`} label="Base price (₹)" type="number" min={0} value={t.base_price} onChange={(e) => setTower(i, { base_price: e.target.value })} />
+                        </div>
+                        <TextField
+                          id={`tower-prefix-${i}`}
+                          label="Unit no. prefix (optional)"
+                          value={t.unit_prefix}
+                          onChange={(e) => setTower(i, { unit_prefix: e.target.value })}
+                          placeholder="e.g. A"
+                          hint={count > 0 ? `${count} units will be created` : undefined}
+                        />
+                      </>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
           {formError && <div className="error-banner">{formError}</div>}
         </form>
       </Modal>
