@@ -12,6 +12,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, status
 
 from app.core.config import get_settings
 from app.database.session import db_manager
+from app.jobs.followup_reminders import dispatch_followup_reminders
 from app.jobs.registration_reminders import dispatch_registration_reminders
 
 router = APIRouter()
@@ -30,4 +31,14 @@ async def trigger_registration_reminders(_: None = Depends(require_cron_secret))
     itself and commits per org."""
     async with db_manager.session_factory() as session:
         counts = await dispatch_registration_reminders(session)
+    return counts
+
+
+@router.post("/followup-reminders")
+async def trigger_followup_reminders(_: None = Depends(require_cron_secret)):
+    """Cross-org: email + notify each executive their due/overdue follow-ups
+    (based on each lead's latest next_action_date). Fresh session — dispatch
+    switches org scope itself and commits per org."""
+    async with db_manager.session_factory() as session:
+        counts = await dispatch_followup_reminders(session)
     return counts

@@ -11,6 +11,8 @@ const DEFAULT_KEEPALIVE_URL =
   "https://flexcrm-backend-539170436218.asia-south1.run.app/health/db";
 const DEFAULT_REMINDERS_URL =
   "https://flexcrm-backend-539170436218.asia-south1.run.app/api/v1/cron/registration-reminders";
+const DEFAULT_FOLLOWUP_URL =
+  "https://flexcrm-backend-539170436218.asia-south1.run.app/api/v1/cron/followup-reminders";
 
 // Must match the daily schedule in wrangler.jsonc triggers.crons.
 const REMINDERS_CRON = "30 3 * * *";
@@ -24,20 +26,20 @@ export default {
     // Daily: trigger registration reminders on the backend. Auth is the shared
     // secret in X-Cron-Key (Worker secret CRON_SECRET === backend CRON_SECRET).
     if (event.cron === REMINDERS_CRON) {
-      const url = env.REMINDERS_URL || DEFAULT_REMINDERS_URL;
-      ctx.waitUntil(
+      // Always send a body → a Content-Length header is present. Google's
+      // front-end (in front of Cloud Run) returns 411 for a body-less POST.
+      const post = (url) =>
         fetch(url, {
           method: "POST",
-          // Always send a body → a Content-Length header is present. Google's
-          // front-end (in front of Cloud Run) returns 411 for a body-less POST.
           body: "{}",
           headers: {
             "x-cron-key": env.CRON_SECRET || "",
             "content-type": "application/json",
             "user-agent": "flexcrm-cron",
           },
-        }).catch(() => {})
-      );
+        }).catch(() => {});
+      ctx.waitUntil(post(env.REMINDERS_URL || DEFAULT_REMINDERS_URL));
+      ctx.waitUntil(post(env.FOLLOWUP_URL || DEFAULT_FOLLOWUP_URL));
       return;
     }
 

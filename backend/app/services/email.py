@@ -168,6 +168,27 @@ class EmailService:
         )
         await self.send_email(recipient=recipient, subject=f"Refund processed — {refund_amount}", html=html)
 
+    async def send_followup_digest(self, recipient: str, *, rep_name: str, items: Sequence[dict]) -> None:
+        """Daily digest of a rep's due/overdue follow-ups. `items`: dicts with
+        keys lead (number), name, due (formatted), note."""
+        rows: list[tuple[str, str]] = []
+        for it in items:
+            label = f"#{it.get('lead', '')} {it.get('name', '')}".strip()
+            note = (it.get("note") or "").strip()
+            value = f"due {it.get('due', '')}" + (f" — {note}" if note else "")
+            rows.append((label, value))
+        n = len(items)
+        html = _shell(
+            heading=f"You have {n} follow-up{'s' if n != 1 else ''} due",
+            intro=f"Hi {rep_name}, these leads need a follow-up today. Log the call and set the next action so none slip.",
+            rows=rows, cta_label="Open my leads", cta_url=self._url("/leads"),
+        )
+        await self.send_email(
+            recipient=recipient,
+            subject=f"{n} follow-up{'s' if n != 1 else ''} due today",
+            html=html,
+        )
+
     # --- alerts (staff) ----------------------------------------------------
     async def send_partner_referral_alert(self, recipients: Sequence[str], *, partner: str,
                                           contact_name: str, requirement: str | None) -> None:
