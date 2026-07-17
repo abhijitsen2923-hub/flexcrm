@@ -1,13 +1,13 @@
 from uuid import UUID
 
-from fastapi import APIRouter, BackgroundTasks, Body, Depends, File, UploadFile, status
+from fastapi import APIRouter, BackgroundTasks, Body, Depends, File, HTTPException, UploadFile, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import pagination_params, require_permissions
 from app.core.exceptions import ValidationError
 from app.core.lead_csv import build_template_csv
-from app.core.permissions import PermissionCode
+from app.core.permissions import ASSIGNED_ONLY_LEAD_ROLES, PermissionCode
 from app.database.session import get_db_session
 from app.schemas.common import MessageResponse, PaginatedResponse, PaginationParams, build_page_meta
 from app.schemas.lead import (
@@ -31,13 +31,27 @@ from app.services.stage_transitions import StageTransitionService
 router = APIRouter()
 
 
+async def _enforce_lead_access(session: AsyncSession, lead_id: UUID, user) -> None:
+    """Assigned-only roles (front-line reps) may only touch leads assigned to
+    them — reaching another rep's lead by id returns 404 (not 403, so the id's
+    existence isn't leaked). Higher roles pass through."""
+    if user.role in ASSIGNED_ONLY_LEAD_ROLES:
+        lead = await get_lead_or_404(session, lead_id)
+        if lead.assigned_to_id != user.id:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Lead not found")
+
+
 @router.get("", response_model=PaginatedResponse[LeadRead])
 async def list_leads(
     filters: LeadFilterParams = Depends(),
     pagination: PaginationParams = Depends(pagination_params),
-    _: object = Depends(require_permissions(PermissionCode.LEAD_VIEW)),
+    current_user=Depends(require_permissions(PermissionCode.LEAD_VIEW)),
     session: AsyncSession = Depends(get_db_session),
 ):
+    # Front-line reps only ever see their own assigned leads — force the filter
+    # regardless of any client-supplied assigned_to_id (anti-poaching, BR-2).
+    if current_user.role in ASSIGNED_ONLY_LEAD_ROLES:
+        filters.assigned_to_id = current_user.id
     items, total = await LeadService(session).list_leads(pagination, filters)
     return PaginatedResponse[LeadRead](items=items, pagination=build_page_meta(total, pagination))
 
@@ -62,6 +76,10 @@ async def create_lead(
     current_user=Depends(require_permissions(PermissionCode.LEAD_MANAGE)),
     session: AsyncSession = Depends(get_db_session),
 ):
+    # A front-line rep's new lead is theirs by default — otherwise the scoped
+    # list would immediately hide it from them.
+    if current_user.role in ASSIGNED_ONLY_LEAD_ROLES and payload.assigned_to_id is None:
+        payload.assigned_to_id = current_user.id
     # Inherit the user's business_type so the New Lead form doesn't need to
     # ask which vertical (chosen once at registration).
     return await LeadService(session).create_lead(
@@ -96,6 +114,7 @@ async def update_lead(
     # Per spec §3.2, stage moves require a comment trail; they cannot ride along
     # a regular PUT. Reject early with a clear hint pointing at the transitions
     # endpoint.
+    await _enforce_lead_access(session, lead_id, current_user)
     if "stage_code" in raw_body:
         raise ValidationError(
             "stage_code cannot be updated via PUT. "
@@ -113,6 +132,7 @@ async def delete_lead(
     current_user=Depends(require_permissions(PermissionCode.LEAD_MANAGE)),
     session: AsyncSession = Depends(get_db_session),
 ):
+    await _enforce_lead_access(session, lead_id, current_user)
     await LeadService(session).delete_lead(lead_id, actor_id=current_user.id)
     return MessageResponse(message="Lead deleted successfully.")
 
@@ -122,10 +142,11 @@ async def delete_lead(
 @router.get("/{lead_id}/calls", response_model=list[LeadCallLogRead])
 async def list_lead_calls(
     lead_id: UUID,
-    _: object = Depends(require_permissions(PermissionCode.LEAD_VIEW)),
+    current_user=Depends(require_permissions(PermissionCode.LEAD_VIEW)),
     session: AsyncSession = Depends(get_db_session),
 ):
     await get_lead_or_404(session, lead_id)
+    await _enforce_lead_access(session, lead_id, current_user)
     return await LeadService(session).list_calls(lead_id)
 
 
@@ -137,6 +158,7 @@ async def log_lead_call(
     session: AsyncSession = Depends(get_db_session),
 ):
     await get_lead_or_404(session, lead_id)
+    await _enforce_lead_access(session, lead_id, current_user)
     return await LeadService(session).log_call(
         lead_id, payload.call_type, actor_id=current_user.id, notes=payload.notes
     )
@@ -147,9 +169,10 @@ async def log_lead_call(
 @router.get("/{lead_id}/transitions", response_model=list[StageTransitionRead])
 async def list_transitions(
     lead_id: UUID,
-    _: object = Depends(require_permissions(PermissionCode.LEAD_VIEW)),
+    current_user=Depends(require_permissions(PermissionCode.LEAD_VIEW)),
     session: AsyncSession = Depends(get_db_session),
 ):
+    await _enforce_lead_access(session, lead_id, current_user)
     return await StageTransitionService(session).list_transitions(lead_id)
 
 
@@ -164,6 +187,7 @@ async def create_transition(
     current_user=Depends(require_permissions(PermissionCode.LEAD_MANAGE)),
     session: AsyncSession = Depends(get_db_session),
 ):
+    await _enforce_lead_access(session, lead_id, current_user)
     return await StageTransitionService(session).create_transition(
         lead_id, payload, actor_id=current_user.id, actor_role=current_user.role
     )

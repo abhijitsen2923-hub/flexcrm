@@ -105,6 +105,16 @@ ROLE_INDUSTRIES: dict[UserRole, frozenset[LeadIndustry | None]] = {
 LEGACY_ROLES: frozenset[UserRole] = frozenset({UserRole.admin, UserRole.manager, UserRole.sales})
 
 
+# Roles that may only see and act on leads assigned to THEM — the front-line
+# reps. They can't browse the org pipeline (anti-poaching, BR-2). Everyone else
+# with LEAD_VIEW (owner, sales_manager, crm_team, receptionist, …) sees all
+# leads and does the assigning. Enforced server-side in the leads endpoints.
+ASSIGNED_ONLY_LEAD_ROLES: frozenset[UserRole] = frozenset({
+    UserRole.sales_executive,
+    UserRole.telecaller,
+})
+
+
 def role_is_valid_for_industry(role: UserRole, industry: LeadIndustry | None) -> bool:
     """True if `role` may be assigned to a user in an org of the given industry.
 
