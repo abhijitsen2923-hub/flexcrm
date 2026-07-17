@@ -16,8 +16,9 @@ from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import select
 
-from app.core.tenancy import bypass, set_scope
-from app.database.enums import BookingStatus, UnitStatus
+from app.core.logging import get_logger
+from app.core.tenancy import bypass, set_scope, set_tenant_schema
+from app.database.enums import BookingStatus, UnitStatus, UserStatus
 from app.database.session import db_manager
 from app.models.customer import Customer
 from app.models.lead import Lead
@@ -27,6 +28,7 @@ from app.real_estate.models import Booking, Unit
 from app.services.email import EmailService
 from app.services.notifications import NotificationService
 
+logger = get_logger(__name__)
 
 REMIND_WITHIN_DAYS = 3
 
@@ -54,26 +56,37 @@ async def dispatch_registration_reminders(session) -> dict[str, int]:
         orgs = (await session.execute(select(Organization))).scalars().all()
 
     for org in orgs:
+        # BOTH are required: set_scope stores the org id; set_tenant_schema is
+        # what actually routes tenant-model queries to the org's schema (without
+        # it every query hits a nonexistent literal "tenant" schema and errors).
         set_scope(session, org.id)
+        await set_tenant_schema(session, org.schema_name)
         counts["orgs"] += 1
-        rows = (
-            await session.execute(
-                select(Booking, Unit)
-                .join(Unit, Booking.unit_id == Unit.id)
-                .where(
-                    Booking.is_deleted.is_(False),
-                    Booking.status == BookingStatus.confirmed,
-                    Booking.scheduled_date >= today,
-                    Booking.scheduled_date <= horizon,
-                    Unit.status == UnitStatus.booked,
+        try:
+            rows = (
+                await session.execute(
+                    select(Booking, Unit)
+                    .join(Unit, Booking.unit_id == Unit.id)
+                    .where(
+                        Booking.is_deleted.is_(False),
+                        Booking.status == BookingStatus.confirmed,
+                        Booking.scheduled_date >= today,
+                        Booking.scheduled_date <= horizon,
+                        Unit.status == UnitStatus.booked,
+                    )
                 )
-            )
-        ).all()
-        service = NotificationService(session)
-        email_service = EmailService()
-        for booking, unit in rows:
-            owner = await _owner_id(session, booking)
-            if owner:
+            ).all()
+            service = NotificationService(session)
+            email_service = EmailService()
+            for booking, unit in rows:
+                owner = await _owner_id(session, booking)
+                if not owner:
+                    continue
+                owner_user = await session.get(User, owner)
+                # Skip deactivated / soft-deleted owners (they still own leads
+                # until a hard delete nulls assigned_to_id).
+                if owner_user is None or owner_user.status != UserStatus.active or owner_user.is_deleted:
+                    continue
                 await service.create_notification(
                     user_id=owner,
                     message=(
@@ -82,15 +95,17 @@ async def dispatch_registration_reminders(session) -> dict[str, int]:
                     ),
                 )
                 counts["reminders"] += 1
-                # Also email the owner (best-effort; no-op if email unconfigured).
-                owner_user = await session.get(User, owner)
-                if owner_user and owner_user.email:
+                if owner_user.email:
                     await email_service.send_registration_reminder(
                         owner_user.email,
                         unit_label=unit.unit_number,
                         register_on=booking.scheduled_date.isoformat(),
                     )
-        await session.commit()
+            await session.commit()
+        except Exception:
+            # Isolate failures: one bad org must not abort the rest.
+            await session.rollback()
+            logger.warning("registration reminders failed for org %s", org.id, exc_info=True)
     set_scope(session, None)
     return counts
 
