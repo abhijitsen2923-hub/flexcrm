@@ -38,13 +38,16 @@ function templateRows(key: TemplateKey): BuilderRow[] {
     ];
   }
   if (key === "construction") {
+    // RERA construction-linked plan (India): booking token → Bhumi Puja →
+    // structure milestones → registry. Percentages sum to 100.
     return [
-      { installmentName: "On Booking", percentage: "10", dueDate: isoAfter(0) },
-      { installmentName: "Foundation", percentage: "20", dueDate: isoAfter(60) },
-      { installmentName: "Superstructure", percentage: "30", dueDate: isoAfter(150) },
-      { installmentName: "Walls & Plastering", percentage: "20", dueDate: isoAfter(240) },
-      { installmentName: "Finishing", percentage: "10", dueDate: isoAfter(300) },
-      { installmentName: "On Possession", percentage: "10", dueDate: isoAfter(365) },
+      { installmentName: "On Booking (token)", percentage: "10", dueDate: isoAfter(0) },
+      { installmentName: "Bhumi Puja", percentage: "10", dueDate: isoAfter(30) },
+      { installmentName: "Plinth / Foundation", percentage: "15", dueDate: isoAfter(90) },
+      { installmentName: "Slab Casting (floor-wise)", percentage: "25", dueDate: isoAfter(180) },
+      { installmentName: "Brickwork & Plastering", percentage: "20", dueDate: isoAfter(270) },
+      { installmentName: "Flooring & Finishing", percentage: "10", dueDate: isoAfter(330) },
+      { installmentName: "On Registry", percentage: "10", dueDate: isoAfter(365) },
     ];
   }
   return [{ installmentName: "", percentage: "", dueDate: isoAfter(0) }];

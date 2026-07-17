@@ -83,10 +83,22 @@ export interface PricingSnapshot {
   floorRise: number;
   plc: number;
   parking: number;
+  // RERA "Box Price" components (optional; older snapshots omit them).
+  generator?: number;
+  amenities?: number;
+  sinkingFund?: number; // 1-year maintenance / corpus
   otherCharges: number;
+  // Box Price = flat + floor-rise + PLC + garage/parking + generator + amenities
+  //           + sinking fund + other (pre-tax). Kept in `subtotal` too for back-compat.
+  boxPrice?: number;
   gstRate: number;
-  subtotal: number;
   gstAmount: number;
+  // Statutory charges collected at registry (optional).
+  stampDutyRate?: number;
+  stampDutyAmount?: number;
+  registrationRate?: number;
+  registrationAmount?: number;
+  subtotal: number;
   total: number;
   lineItems: PricingLineItem[];
 }
