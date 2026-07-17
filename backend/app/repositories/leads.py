@@ -19,12 +19,18 @@ class LeadRepository(BaseRepository[Lead]):
         return [selectinload(Lead.customer), selectinload(Lead.assigned_to), selectinload(Lead.partner)]
 
     async def find_duplicates(
-        self, email: str | None, phone_digits: str | None, limit: int = 5
+        self,
+        email: str | None,
+        phone_digits: str | None,
+        limit: int = 5,
+        owner_id=None,
     ) -> list[Lead]:
         """Active leads whose (lowercased) email or digits-only phone matches.
 
         Per-tenant is automatic: this session's schema routing scopes the query
-        to the caller's tenant schema. Returns [] when both inputs are blank.
+        to the caller's tenant schema. When `owner_id` is set the match is further
+        restricted to that owner's leads (front-line reps must not discover other
+        reps' leads by probing contacts). Returns [] when both inputs are blank.
         """
         clauses = []
         if email:
@@ -35,11 +41,11 @@ class LeadRepository(BaseRepository[Lead]):
             )
         if not clauses:
             return []
+        where = [Lead.is_deleted.is_(False), or_(*clauses)]
+        if owner_id is not None:
+            where.append(Lead.assigned_to_id == owner_id)
         rows = await self.session.execute(
-            select(Lead)
-            .where(Lead.is_deleted.is_(False), or_(*clauses))
-            .order_by(Lead.created_at.desc())
-            .limit(limit)
+            select(Lead).where(*where).order_by(Lead.created_at.desc()).limit(limit)
         )
         return list(rows.scalars().all())
 

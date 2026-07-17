@@ -60,13 +60,16 @@ async def list_leads(
 async def check_duplicate_leads(
     email: str | None = None,
     phone: str | None = None,
-    _: object = Depends(require_permissions(PermissionCode.LEAD_VIEW)),
+    current_user=Depends(require_permissions(PermissionCode.LEAD_VIEW)),
     session: AsyncSession = Depends(get_db_session),
 ):
     """Warn-but-allow duplicate check for the New Lead form. Returns active
     leads in the caller's tenant matching the email (case-insensitive) or phone
-    (digits-only). Empty list when nothing matches or both inputs are blank."""
-    return await LeadService(session).find_duplicate_leads(email, phone)
+    (digits-only). Empty list when nothing matches or both inputs are blank.
+    Front-line reps only match against their OWN leads (same anti-poaching scope
+    as the list)."""
+    owner_id = current_user.id if current_user.role in ASSIGNED_ONLY_LEAD_ROLES else None
+    return await LeadService(session).find_duplicate_leads(email, phone, owner_id=owner_id)
 
 
 @router.post("", response_model=LeadRead, status_code=status.HTTP_201_CREATED)

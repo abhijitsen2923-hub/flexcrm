@@ -135,13 +135,14 @@ class LeadService(ServiceBase):
         return lead
 
     async def find_duplicate_leads(
-        self, email: str | None, phone: str | None
+        self, email: str | None, phone: str | None, owner_id=None
     ) -> list[LeadDuplicate]:
         """Warn-but-allow duplicate check: active leads in this tenant whose
-        email (case-insensitive) or phone (digits-only) matches. Never blocks."""
+        email (case-insensitive) or phone (digits-only) matches. Never blocks.
+        `owner_id` restricts the search to that owner (front-line rep scoping)."""
         norm_email = email.strip().lower() if email and email.strip() else None
         phone_digits = re.sub(r"\D", "", phone) if phone else ""
-        rows = await self.repository.find_duplicates(norm_email, phone_digits or None)
+        rows = await self.repository.find_duplicates(norm_email, phone_digits or None, owner_id=owner_id)
         return [LeadDuplicate.model_validate(row) for row in rows]
 
     async def create_lead(

@@ -706,7 +706,7 @@ async def create_booking(
     stmt = (
         select(Booking)
         .where(Booking.id == booking.id)
-        .options(selectinload(Booking.customer), selectinload(Booking.unit).selectinload(Unit.tower).selectinload(Tower.project), selectinload(Booking.kyc_documents), selectinload(Booking.payment_schedules), selectinload(Booking.payment_receipts))
+        .options(selectinload(Booking.customer), selectinload(Booking.unit).selectinload(Unit.tower).selectinload(Tower.project), selectinload(Booking.kyc_documents), selectinload(Booking.payment_schedules), selectinload(Booking.payment_receipts), selectinload(Booking.refunds))
     )
     return (await session.execute(stmt)).scalar_one()
 
@@ -720,7 +720,7 @@ async def get_booking(
     stmt = (
         select(Booking)
         .where(Booking.id == booking_id, Booking.is_deleted.is_(False))
-        .options(selectinload(Booking.customer), selectinload(Booking.unit).selectinload(Unit.tower).selectinload(Tower.project), selectinload(Booking.kyc_documents), selectinload(Booking.payment_schedules), selectinload(Booking.payment_receipts))
+        .options(selectinload(Booking.customer), selectinload(Booking.unit).selectinload(Unit.tower).selectinload(Tower.project), selectinload(Booking.kyc_documents), selectinload(Booking.payment_schedules), selectinload(Booking.payment_receipts), selectinload(Booking.refunds))
     )
     booking = (await session.execute(stmt)).scalar_one_or_none()
     if not booking:
@@ -802,7 +802,7 @@ async def advance_booking_step(
     stmt = (
         select(Booking)
         .where(Booking.id == booking_id)
-        .options(selectinload(Booking.customer), selectinload(Booking.unit).selectinload(Unit.tower).selectinload(Tower.project), selectinload(Booking.kyc_documents), selectinload(Booking.payment_schedules), selectinload(Booking.payment_receipts))
+        .options(selectinload(Booking.customer), selectinload(Booking.unit).selectinload(Unit.tower).selectinload(Tower.project), selectinload(Booking.kyc_documents), selectinload(Booking.payment_schedules), selectinload(Booking.payment_receipts), selectinload(Booking.refunds))
     )
     result = (await session.execute(stmt)).scalar_one()
     # Email the customer their booking confirmation (only when a confirm just
@@ -834,7 +834,7 @@ async def update_booking_pricing(
     stmt = (
         select(Booking)
         .where(Booking.id == booking_id)
-        .options(selectinload(Booking.customer), selectinload(Booking.unit).selectinload(Unit.tower).selectinload(Tower.project), selectinload(Booking.kyc_documents), selectinload(Booking.payment_schedules), selectinload(Booking.payment_receipts))
+        .options(selectinload(Booking.customer), selectinload(Booking.unit).selectinload(Unit.tower).selectinload(Tower.project), selectinload(Booking.kyc_documents), selectinload(Booking.payment_schedules), selectinload(Booking.payment_receipts), selectinload(Booking.refunds))
     )
     return (await session.execute(stmt)).scalar_one()
 
@@ -854,7 +854,7 @@ async def update_possession_checklist(
     stmt = (
         select(Booking)
         .where(Booking.id == booking_id)
-        .options(selectinload(Booking.customer), selectinload(Booking.unit).selectinload(Unit.tower).selectinload(Tower.project), selectinload(Booking.kyc_documents), selectinload(Booking.payment_schedules), selectinload(Booking.payment_receipts))
+        .options(selectinload(Booking.customer), selectinload(Booking.unit).selectinload(Unit.tower).selectinload(Tower.project), selectinload(Booking.kyc_documents), selectinload(Booking.payment_schedules), selectinload(Booking.payment_receipts), selectinload(Booking.refunds))
     )
     return (await session.execute(stmt)).scalar_one()
 
