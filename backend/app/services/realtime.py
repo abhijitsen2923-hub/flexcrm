@@ -58,12 +58,16 @@ class RealtimeManager:
         last_event_id: int | None = None,
     ) -> None:
         await websocket.accept()
+        # Replay the backlog BEFORE registering the socket for live broadcasts, so
+        # a concurrent broadcast can't send_json on this socket (interleaved / out
+        # of order) while replay is still in flight. A live event that arrives in
+        # the brief replay window is still buffered and re-delivered on reconnect.
+        if org_id is not None and last_event_id is not None:
+            await self._replay(websocket, org_id, last_event_id)
         self._user_connections[user_id].add(websocket)
         if org_id is not None:
             self._org_connections[org_id].add(websocket)
             self._socket_org[websocket] = org_id
-            if last_event_id is not None:
-                await self._replay(websocket, org_id, last_event_id)
 
     def disconnect(self, websocket: WebSocket, user_id: UUID) -> None:
         conns = self._user_connections.get(user_id)

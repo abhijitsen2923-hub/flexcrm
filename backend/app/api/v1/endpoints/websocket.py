@@ -35,6 +35,10 @@ async def websocket_updates(websocket: WebSocket):
         while True:
             await websocket.receive_text()
     except WebSocketDisconnect:
+        pass
+    finally:
+        # Always deregister — not just on a clean WebSocketDisconnect. Any other
+        # exit (receive error, cancellation) must not leak the socket.
         realtime_manager.disconnect(websocket, user_id)
 
 
