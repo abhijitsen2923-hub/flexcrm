@@ -1,9 +1,10 @@
-import { Plus, RefreshCw, ShieldCheck } from "lucide-react";
+import { Plus, Power, RefreshCw, ShieldCheck, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 
 import {
   Badge,
   Button,
+  ConfirmDialog,
   DataTable,
   EmptyState,
   LoadingBlock,
@@ -194,6 +195,40 @@ export default function UsersPage() {
 
   function closeDrawer() { setDrawerUser(null); setDrawerPerms(null); }
 
+  // --- Enable/disable + delete ------------------------------------------
+  const [statusBusyId, setStatusBusyId] = useState<string | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<User | null>(null);
+  const [deleting, setDeleting] = useState(false);
+
+  async function toggleStatus(user: User) {
+    const next = user.status === "active" ? "inactive" : "active";
+    setStatusBusyId(user.id);
+    try {
+      await usersService.update(user.id, { status: next });
+      toast.success(next === "active" ? "User enabled" : "User disabled", `${user.first_name} ${user.last_name}`);
+      await refresh();
+    } catch (error) {
+      toast.error("Could not update user", extractErrorMessage(error));
+    } finally {
+      setStatusBusyId(null);
+    }
+  }
+
+  async function confirmDelete() {
+    if (!deleteTarget) return;
+    setDeleting(true);
+    try {
+      await usersService.remove(deleteTarget.id);
+      toast.success("User deleted", `${deleteTarget.first_name} ${deleteTarget.last_name}`);
+      setDeleteTarget(null);
+      await refresh();
+    } catch (error) {
+      toast.error("Could not delete user", extractErrorMessage(error));
+    } finally {
+      setDeleting(false);
+    }
+  }
+
   async function togglePermission(code: string, shouldGrant: boolean) {
     if (!drawerUser) return;
     setDrawerSavingCode(code);
@@ -264,14 +299,33 @@ export default function UsersPage() {
       align: "right",
       render: (user) =>
         canManage && currentUser?.id !== user.id ? (
-          <Button
-            size="sm"
-            variant="ghost"
-            icon={<ShieldCheck size={14} />}
-            onClick={() => void openDrawer(user)}
-          >
-            Permissions
-          </Button>
+          <div style={{ display: "flex", gap: 4, justifyContent: "flex-end", flexWrap: "wrap" }}>
+            <Button
+              size="sm"
+              variant="ghost"
+              icon={<ShieldCheck size={14} />}
+              onClick={() => void openDrawer(user)}
+            >
+              Permissions
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              icon={<Power size={14} />}
+              loading={statusBusyId === user.id}
+              onClick={() => void toggleStatus(user)}
+            >
+              {user.status === "active" ? "Disable" : "Enable"}
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              icon={<Trash2 size={14} />}
+              onClick={() => setDeleteTarget(user)}
+            >
+              Delete
+            </Button>
+          </div>
         ) : (
           <span className="muted text-xs">—</span>
         )
@@ -505,6 +559,21 @@ export default function UsersPage() {
           </Modal>
         </>
       )}
+
+      <ConfirmDialog
+        open={deleteTarget !== null}
+        title="Delete user?"
+        description={
+          deleteTarget
+            ? `${deleteTarget.first_name} ${deleteTarget.last_name} (${deleteTarget.email}) will lose access immediately. This can't be undone.`
+            : ""
+        }
+        confirmLabel="Delete user"
+        cancelLabel="Cancel"
+        loading={deleting}
+        onCancel={() => setDeleteTarget(null)}
+        onConfirm={() => void confirmDelete()}
+      />
     </>
   );
 }

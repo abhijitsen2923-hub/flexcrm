@@ -133,6 +133,7 @@ export default function LeadsPage() {
   const [page, setPage] = useState(1);
   const [industryFilter, setIndustryFilter] = useState<LeadIndustry | "">(defaultIndustry);
   const [stageFilter, setStageFilter] = useState<string>("");
+  const [ownerFilter, setOwnerFilter] = useState<string>("");
 
   // If the auth context resolves AFTER the first render (it does — there's an
   // initial profile fetch), pick up the business_type once it lands.
@@ -170,9 +171,10 @@ export default function LeadsPage() {
       page,
       page_size: 20,
       industry: industryFilter || undefined,
-      stage_code: stageFilter || undefined
+      stage_code: stageFilter || undefined,
+      assigned_to_id: ownerFilter || undefined
     }),
-    [page, industryFilter, stageFilter]
+    [page, industryFilter, stageFilter, ownerFilter]
   );
 
   const { leads, pagination, loading, refresh, createLead, transitionLead } = useLeads(query);
@@ -736,6 +738,25 @@ export default function LeadsPage() {
               </option>
             ))}
           </select>
+          {canAssign && (
+            <select
+              className="select"
+              value={ownerFilter}
+              onChange={(event) => {
+                setOwnerFilter(event.target.value);
+                setPage(1);
+              }}
+              aria-label="Filter by owner"
+              style={{ minWidth: 200 }}
+            >
+              <option value="">All owners</option>
+              {assignableUsers.map((u) => (
+                <option key={u.id} value={u.id}>
+                  {u.first_name} {u.last_name}
+                </option>
+              ))}
+            </select>
+          )}
         </div>
 
         {view === "list" ? (
