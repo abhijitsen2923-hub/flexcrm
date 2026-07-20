@@ -143,6 +143,14 @@ export default function UsersPage() {
     setForm(emptyForm(defaultRole));
     setCreateError(null);
     setCreateOpen(true);
+    // Re-pull custom roles so one just created in the Roles tab (which keeps its
+    // own state) shows up in this dropdown without a full page reload.
+    if (canManage) {
+      void customRolesService
+        .list()
+        .then((roles) => setCustomRoles(roles.filter((r) => r.is_active)))
+        .catch(() => undefined);
+    }
   }
 
   async function handleCreateSubmit(event: FormEvent<HTMLFormElement>) {
