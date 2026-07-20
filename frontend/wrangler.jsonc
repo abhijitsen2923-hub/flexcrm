@@ -15,15 +15,19 @@
     "binding": "ASSETS"
   },
   // Crons (UTC):
-  //  - */4 * * * *  : ping the backend DB health endpoint to keep Neon warm.
-  //  - 30 3 * * *   : daily 03:30 UTC (~09:00 IST) — trigger registration reminders.
+  //  - 30 3 * * *   : daily 03:30 UTC (~09:00 IST) — reminder dispatch.
+  // NOTE: the old */4 keep-alive ping was REMOVED — on Neon's free tier it kept
+  // the compute awake 24/7 and burned the monthly compute allowance, which
+  // hard-suspends the DB for the rest of the cycle (total outage). We now let
+  // Neon auto-suspend when idle; the first request after idle wakes it (~2-5s,
+  // covered by the client's retry). Re-add a keep-alive only on a paid Neon plan.
   // The scheduled() handler branches on event.cron (worker/index.js).
   "triggers": {
-    "crons": ["*/4 * * * *", "30 3 * * *"]
+    "crons": ["30 3 * * *"]
   },
   "vars": {
-    "KEEPALIVE_URL": "https://flexcrm-backend-539170436218.asia-south1.run.app/health/db",
-    "REMINDERS_URL": "https://flexcrm-backend-539170436218.asia-south1.run.app/api/v1/cron/registration-reminders"
+    "REMINDERS_URL": "https://flexcrm-backend-539170436218.asia-south1.run.app/api/v1/cron/registration-reminders",
+    "FOLLOWUP_URL": "https://flexcrm-backend-539170436218.asia-south1.run.app/api/v1/cron/followup-reminders"
   }
   // NOTE: CRON_SECRET is a Worker *secret*, not a var — set it with
   // `npx wrangler secret put CRON_SECRET` (must match the backend CRON_SECRET).
