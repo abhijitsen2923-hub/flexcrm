@@ -1,5 +1,7 @@
 export type UnitStatus = "available" | "hold" | "booked" | "registered" | "sold";
 export type UnitType = "residential" | "parking" | "shop" | "godown";
+// Garage / parking types a project offers (Multi-Level, Covered, Independent, Open).
+export type GarageOption = "MLP" | "CP" | "IP" | "OP";
 export type UnitFacing = "north" | "south" | "east" | "west" | "north_east" | "north_west" | "south_east" | "south_west";
 export type SiteVisitFeedback = "hot" | "warm" | "cold";
 export type SiteVisitStatus = "scheduled" | "completed" | "cancelled";
@@ -46,6 +48,24 @@ export interface Project {
   location: string;
   city: string;
   reraNumber: string | null;
+  // --- Project detail (Phase B) — declared specs. ---
+  pinCode: string | null;
+  landmark: string | null;
+  totalTowers: number | null;
+  totalFloors: number | null;
+  flatsPerFloor: number | null;
+  totalGarages: number | null;
+  garageOptions: GarageOption[] | null;
+  // --- Default box-price components (Phase B). rate* are ₹/sqft; rest are lump sums. ---
+  rateA: number | null;
+  rateB: number | null;
+  rateC: number | null;
+  parkingCost: number | null;
+  legalFees: number | null;
+  overheadCost: number | null;
+  otherCharges: number | null;
+  sinkingFund: number | null;
+  amenitiesCharges: number | null;
   towers: Tower[];
   media: ProjectMedia[];
   totalUnits: number;
@@ -87,9 +107,12 @@ export interface PricingSnapshot {
   generator?: number;
   amenities?: number;
   sinkingFund?: number; // 1-year maintenance / corpus
+  legalFees?: number;   // legal / documentation charges (optional; older snapshots omit)
+  overhead?: number;    // builder overhead (optional; older snapshots omit)
   otherCharges: number;
   // Box Price = flat + floor-rise + PLC + garage/parking + generator + amenities
-  //           + sinking fund + other (pre-tax). Kept in `subtotal` too for back-compat.
+  //           + sinking fund + legal + overhead + other (pre-tax). Kept in
+  //           `subtotal` too for back-compat.
   boxPrice?: number;
   gstRate: number;
   gstAmount: number;

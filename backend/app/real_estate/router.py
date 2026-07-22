@@ -154,13 +154,9 @@ async def create_project_full(
 ):
     """Create a project + its towers + each tower's units atomically (combined
     Add-Project wizard). All-or-nothing: a failure rolls the whole thing back."""
-    project = Project(
-        name=payload.name,
-        builder_name=payload.builder_name,
-        location=payload.location,
-        city=payload.city,
-        rera_number=payload.rera_number,
-    )
+    # Everything except the nested towers maps 1:1 onto Project columns (incl. the
+    # Phase-B detail + default box-price fields).
+    project = Project(**payload.model_dump(exclude={"towers"}))
     session.add(project)
     await session.flush()
 

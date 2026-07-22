@@ -35,6 +35,29 @@ class Project(TenantBase, UUIDPrimaryKeyMixin, TimestampMixin, TenantAuditMixin,
     city: Mapped[str] = mapped_column(String(100), nullable=False)
     rera_number: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
+    # --- Project detail (Phase B) — declared specs from the brochure / RERA.
+    # Distinct from the derived tower/unit counts; these are the announced totals.
+    pin_code: Mapped[str | None] = mapped_column(String(12), nullable=True)
+    landmark: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    total_towers: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    total_floors: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    flats_per_floor: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    total_garages: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Garage / parking types offered — subset of MLP/CP/IP/OP (validated app-side).
+    garage_options: Mapped[list | None] = mapped_column(JSON, nullable=True)
+
+    # --- Default box-price components (Phase B) — seed the booking PriceCalculator
+    # so a new booking pre-fills from the project instead of every field at ₹0.
+    rate_a: Mapped[Decimal | None] = mapped_column(Numeric(12, 2), nullable=True)  # ₹/sqft — residential
+    rate_b: Mapped[Decimal | None] = mapped_column(Numeric(12, 2), nullable=True)  # ₹/sqft — shop / commercial
+    rate_c: Mapped[Decimal | None] = mapped_column(Numeric(12, 2), nullable=True)  # ₹/sqft — godown / other
+    parking_cost: Mapped[Decimal | None] = mapped_column(Numeric(14, 2), nullable=True)
+    legal_fees: Mapped[Decimal | None] = mapped_column(Numeric(14, 2), nullable=True)
+    overhead_cost: Mapped[Decimal | None] = mapped_column(Numeric(14, 2), nullable=True)
+    other_charges: Mapped[Decimal | None] = mapped_column(Numeric(14, 2), nullable=True)
+    sinking_fund: Mapped[Decimal | None] = mapped_column(Numeric(14, 2), nullable=True)
+    amenities_charges: Mapped[Decimal | None] = mapped_column(Numeric(14, 2), nullable=True)
+
     towers: Mapped[list["Tower"]] = relationship(
         "Tower", back_populates="project", cascade="all, delete-orphan"
     )

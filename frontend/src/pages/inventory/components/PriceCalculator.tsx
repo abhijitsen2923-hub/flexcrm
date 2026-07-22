@@ -11,6 +11,18 @@ const GST_OPTIONS = [
   { value: "18", label: "18% (Commercial)" },
 ];
 
+// Project-level defaults (Phase B) that seed the box-price fields so a booking
+// pre-fills from the project instead of every field at ₹0.
+export interface PriceDefaults {
+  rate?: number | null;
+  parking?: number | null;
+  amenities?: number | null;
+  sinkingFund?: number | null;
+  legalFees?: number | null;
+  overhead?: number | null;
+  otherCharges?: number | null;
+}
+
 interface Props {
   basePrice?: number;
   floor?: number;
@@ -18,24 +30,36 @@ interface Props {
   // ("box price") and derived as rate × area, matching how units are quoted.
   area?: number;
   readOnly?: boolean;
+  // Project defaults — used only to seed the initial input values (the unit's own
+  // base price still wins for the rate when the area is known).
+  defaults?: PriceDefaults;
   onPricingChange?: (snapshot: PricingSnapshot) => void;
 }
 
-export function PriceCalculator({ basePrice: initialBase = 0, floor: initialFloor = 1, area = 0, readOnly = false, onPricingChange }: Props) {
+// Seed a numeric input from an optional default: positive value → its string, else "0".
+function seedField(v: number | null | undefined): string {
+  return v != null && v > 0 ? String(v) : "0";
+}
+
+export function PriceCalculator({ basePrice: initialBase = 0, floor: initialFloor = 1, area = 0, readOnly = false, defaults, onPricingChange }: Props) {
   const areaNum = Number(area) || 0;
   const hasArea = areaNum > 0;
+  const d = defaults ?? {};
   const [base, setBase] = useState(String(initialBase));
-  // Seed the rate from the unit's base price when we know the area.
-  const [rate, setRate] = useState(hasArea && initialBase > 0 ? String(Math.round(initialBase / areaNum)) : "0");
+  // Seed the rate from the unit's base price when we know the area, else the
+  // project's default rate for this unit type.
+  const [rate, setRate] = useState(hasArea && initialBase > 0 ? String(Math.round(initialBase / areaNum)) : seedField(d.rate));
   const [floorRisePerFloor, setFloorRisePerFloor] = useState("0");
   const [floor, setFloor] = useState(String(initialFloor));
   const [plc, setPlc] = useState("0");
-  const [parking, setParking] = useState("0");
+  const [parking, setParking] = useState(seedField(d.parking));
   // RERA "Box Price" components.
   const [generator, setGenerator] = useState("0");
-  const [amenities, setAmenities] = useState("0");
-  const [sinkingFund, setSinkingFund] = useState("0");
-  const [otherCharges, setOtherCharges] = useState("0");
+  const [amenities, setAmenities] = useState(seedField(d.amenities));
+  const [sinkingFund, setSinkingFund] = useState(seedField(d.sinkingFund));
+  const [legalFees, setLegalFees] = useState(seedField(d.legalFees));
+  const [overhead, setOverhead] = useState(seedField(d.overhead));
+  const [otherCharges, setOtherCharges] = useState(seedField(d.otherCharges));
   const [gstRate, setGstRate] = useState("12");
   // Statutory charges at registry.
   const [stampDutyRate, setStampDutyRate] = useState("0");
@@ -53,6 +77,8 @@ export function PriceCalculator({ basePrice: initialBase = 0, floor: initialFloo
     const generatorVal = Number(generator) || 0;
     const amenitiesVal = Number(amenities) || 0;
     const sinkingVal = Number(sinkingFund) || 0;
+    const legalVal = Number(legalFees) || 0;
+    const overheadVal = Number(overhead) || 0;
     const otherVal = Number(otherCharges) || 0;
     const gst = Number(gstRate) || 0;
     const stampRate = Number(stampDutyRate) || 0;
@@ -60,7 +86,7 @@ export function PriceCalculator({ basePrice: initialBase = 0, floor: initialFloo
 
     const floorRiseTotal = floorRiseVal * (floorVal - 1);
     // Box Price = the all-inclusive flat value + components (pre-tax).
-    const boxPrice = baseVal + floorRiseTotal + plcVal + parkingVal + generatorVal + amenitiesVal + sinkingVal + otherVal;
+    const boxPrice = baseVal + floorRiseTotal + plcVal + parkingVal + generatorVal + amenitiesVal + sinkingVal + legalVal + overheadVal + otherVal;
     const gstAmount = Math.round((boxPrice * gst) / 100);
     const stampDutyAmount = Math.round((boxPrice * stampRate) / 100);
     const registrationAmount = Math.round((boxPrice * regRate) / 100);
@@ -74,6 +100,8 @@ export function PriceCalculator({ basePrice: initialBase = 0, floor: initialFloo
       ...(generatorVal ? [{ label: "Generator", amount: generatorVal }] : []),
       ...(amenitiesVal ? [{ label: "Amenities / Club", amount: amenitiesVal }] : []),
       ...(sinkingVal ? [{ label: "Sinking Fund (1-yr maint.)", amount: sinkingVal }] : []),
+      ...(legalVal ? [{ label: "Legal / Documentation", amount: legalVal }] : []),
+      ...(overheadVal ? [{ label: "Overhead", amount: overheadVal }] : []),
       ...(otherVal ? [{ label: "Other Charges", amount: otherVal }] : []),
     ];
 
@@ -81,14 +109,15 @@ export function PriceCalculator({ basePrice: initialBase = 0, floor: initialFloo
       ratePerSqft: hasArea ? rateVal : undefined,
       area: hasArea ? areaNum : undefined,
       basePrice: baseVal, floorRise: floorRiseTotal, plc: plcVal, parking: parkingVal,
-      generator: generatorVal, amenities: amenitiesVal, sinkingFund: sinkingVal, otherCharges: otherVal,
+      generator: generatorVal, amenities: amenitiesVal, sinkingFund: sinkingVal,
+      legalFees: legalVal, overhead: overheadVal, otherCharges: otherVal,
       boxPrice, gstRate: gst, gstAmount,
       stampDutyRate: stampRate, stampDutyAmount, registrationRate: regRate, registrationAmount,
       subtotal: boxPrice, total, lineItems,
     };
     onPricingChange?.(s);
     return s;
-  }, [base, rate, hasArea, areaNum, floor, floorRisePerFloor, plc, parking, generator, amenities, sinkingFund, otherCharges, gstRate, stampDutyRate, registrationRate]);
+  }, [base, rate, hasArea, areaNum, floor, floorRisePerFloor, plc, parking, generator, amenities, sinkingFund, legalFees, overhead, otherCharges, gstRate, stampDutyRate, registrationRate]);
 
   return (
     <div className="price-calculator">
@@ -106,6 +135,8 @@ export function PriceCalculator({ basePrice: initialBase = 0, floor: initialFloo
           <TextField label="Generator (₹)" type="number" min="0" value={generator} onChange={(e) => setGenerator(e.target.value)} />
           <TextField label="Amenities / Club (₹)" type="number" min="0" value={amenities} onChange={(e) => setAmenities(e.target.value)} />
           <TextField label="Sinking Fund / 1-yr Maint. (₹)" type="number" min="0" value={sinkingFund} onChange={(e) => setSinkingFund(e.target.value)} />
+          <TextField label="Legal / Documentation (₹)" type="number" min="0" value={legalFees} onChange={(e) => setLegalFees(e.target.value)} />
+          <TextField label="Overhead (₹)" type="number" min="0" value={overhead} onChange={(e) => setOverhead(e.target.value)} />
           <TextField label="Other Charges (₹)" type="number" min="0" value={otherCharges} onChange={(e) => setOtherCharges(e.target.value)} />
           <SelectField label="GST Rate" options={GST_OPTIONS} value={gstRate} onChange={(e) => setGstRate(e.target.value)} />
           <TextField label="Stamp Duty (%)" type="number" min="0" value={stampDutyRate} onChange={(e) => setStampDutyRate(e.target.value)} hint="At registry (e.g. 7%)" />

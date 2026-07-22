@@ -12,6 +12,8 @@ import { exportsService } from "../../services/exports";
 import { LoadingBlock } from "../../components/ui/Spinner";
 import { BookingWizard } from "./components/BookingWizard";
 import { PaymentPlanModal } from "./components/PaymentPlanModal";
+import type { PriceDefaults } from "../inventory/components/PriceCalculator";
+import { priceDefaultsForProject } from "../../utils/priceDefaults";
 import type { Booking, PaymentMode, Unit, UnitStatus } from "../../types/realestate";
 import { extractErrorMessage } from "../../utils/errors";
 import { formatDate, formatInr } from "../../utils/format";
@@ -26,6 +28,8 @@ const STATUS_TONE = {
 type WizardUnit = Pick<Unit, "id" | "unitNumber" | "floor" | "area" | "basePrice" | "status"> & {
   towerName: string;
   projectName: string;
+  // Project box-price defaults for this unit's type (Phase B) — seeds the calculator.
+  priceDefaults?: PriceDefaults | null;
 };
 
 export default function BookingsPage() {
@@ -64,7 +68,7 @@ export default function BookingsPage() {
     p.towers.flatMap((t) =>
       t.units
         .filter((u) => u.status === "available")
-        .map((u) => ({ ...u, towerName: t.name, projectName: p.name }))
+        .map((u) => ({ ...u, towerName: t.name, projectName: p.name, priceDefaults: priceDefaultsForProject(p, u.unitType) }))
     )
   );
 
@@ -74,7 +78,7 @@ export default function BookingsPage() {
     for (const p of projects) {
       for (const t of p.towers) {
         const u = t.units.find((x) => x.id === unitId);
-        if (u) return { ...u, towerName: t.name, projectName: p.name };
+        if (u) return { ...u, towerName: t.name, projectName: p.name, priceDefaults: priceDefaultsForProject(p, u.unitType) };
       }
     }
     return null;
@@ -90,6 +94,7 @@ export default function BookingsPage() {
         ...unit,
         towerName: navState?.towerName ?? ctx?.towerName ?? "Tower",
         projectName: navState?.projectName ?? ctx?.projectName ?? "Project",
+        priceDefaults: ctx?.priceDefaults ?? null,
       });
     }).catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -105,7 +110,7 @@ export default function BookingsPage() {
       const towerName = navState?.towerName ?? ctx.towerName;
       const projectName = navState?.projectName ?? ctx.projectName;
       if (towerName === prev.towerName && projectName === prev.projectName) return prev;
-      return { ...prev, towerName, projectName };
+      return { ...prev, towerName, projectName, priceDefaults: ctx.priceDefaults };
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projects]);
@@ -437,6 +442,7 @@ export default function BookingsPage() {
       {wizardUnit && (
         <BookingWizard
           unit={wizardUnit}
+          priceDefaults={wizardUnit.priceDefaults}
           initialBooking={wizardBooking}
           onClose={closeWizard}
           onComplete={() => {

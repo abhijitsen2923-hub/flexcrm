@@ -1,5 +1,5 @@
 import { apiClient } from "./http";
-import type { Project, ProjectMedia, Tower, Unit, UnitStatus, UnitType } from "../types/realestate";
+import type { GarageOption, Project, ProjectMedia, Tower, Unit, UnitStatus, UnitType } from "../types/realestate";
 
 // The API speaks snake_case and returns no computed inventory counts / media.
 // The app models are camelCase with totalUnits/availableUnits/media derived from
@@ -42,10 +42,33 @@ interface ApiProject {
   location: string;
   city: string;
   rera_number: string | null;
+  // Phase B — detail specs (nullable) + default box-price components. Numerics
+  // arrive as strings (Decimal) or numbers; coerced in mapProject.
+  pin_code?: string | null;
+  landmark?: string | null;
+  total_towers?: number | null;
+  total_floors?: number | null;
+  flats_per_floor?: number | null;
+  total_garages?: number | null;
+  garage_options?: string[] | null;
+  rate_a?: number | string | null;
+  rate_b?: number | string | null;
+  rate_c?: number | string | null;
+  parking_cost?: number | string | null;
+  legal_fees?: number | string | null;
+  overhead_cost?: number | string | null;
+  other_charges?: number | string | null;
+  sinking_fund?: number | string | null;
+  amenities_charges?: number | string | null;
   created_at: string;
   updated_at: string;
   towers?: ApiTower[];
   media?: ApiProjectMedia[];
+}
+
+// Decimal columns serialize to strings (or numbers); null stays null.
+function numOrNull(v: number | string | null | undefined): number | null {
+  return v === null || v === undefined || v === "" ? null : Number(v);
 }
 
 function mapUnit(u: ApiUnit): Unit {
@@ -86,6 +109,22 @@ function mapProject(p: ApiProject): Project {
     location: p.location,
     city: p.city,
     reraNumber: p.rera_number,
+    pinCode: p.pin_code ?? null,
+    landmark: p.landmark ?? null,
+    totalTowers: p.total_towers ?? null,
+    totalFloors: p.total_floors ?? null,
+    flatsPerFloor: p.flats_per_floor ?? null,
+    totalGarages: p.total_garages ?? null,
+    garageOptions: (p.garage_options as GarageOption[] | null | undefined) ?? null,
+    rateA: numOrNull(p.rate_a),
+    rateB: numOrNull(p.rate_b),
+    rateC: numOrNull(p.rate_c),
+    parkingCost: numOrNull(p.parking_cost),
+    legalFees: numOrNull(p.legal_fees),
+    overheadCost: numOrNull(p.overhead_cost),
+    otherCharges: numOrNull(p.other_charges),
+    sinkingFund: numOrNull(p.sinking_fund),
+    amenitiesCharges: numOrNull(p.amenities_charges),
     towers,
     media: (p.media ?? []).map((m) => ({
       id: m.id,
@@ -100,7 +139,28 @@ function mapProject(p: ApiProject): Project {
   };
 }
 
-export interface ProjectCreatePayload {
+// Phase-B detail + default box-price fields (snake_case, all optional). Shared by
+// the create and update payloads so both stay in sync with the backend schema.
+export interface ProjectDetailsPayload {
+  pin_code?: string | null;
+  landmark?: string | null;
+  total_towers?: number | null;
+  total_floors?: number | null;
+  flats_per_floor?: number | null;
+  total_garages?: number | null;
+  garage_options?: GarageOption[] | null;
+  rate_a?: number | null;
+  rate_b?: number | null;
+  rate_c?: number | null;
+  parking_cost?: number | null;
+  legal_fees?: number | null;
+  overhead_cost?: number | null;
+  other_charges?: number | null;
+  sinking_fund?: number | null;
+  amenities_charges?: number | null;
+}
+
+export interface ProjectCreatePayload extends ProjectDetailsPayload {
   name: string;
   builder_name: string;
   location: string;
@@ -133,7 +193,7 @@ export interface ProjectFullPayload extends ProjectCreatePayload {
   towers: ProjectTowerPayload[];
 }
 
-export interface ProjectUpdatePayload {
+export interface ProjectUpdatePayload extends ProjectDetailsPayload {
   name?: string;
   builder_name?: string;
   location?: string;

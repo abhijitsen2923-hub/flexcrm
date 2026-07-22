@@ -6,7 +6,7 @@ import { useInventory } from "../../hooks/useInventory";
 import { usePermissions } from "../../hooks/usePermissions";
 import { inventoryService } from "../../services/inventory";
 import { exportsService } from "../../services/exports";
-import type { Project, ProjectMedia, Tower, Unit, UnitType } from "../../types/realestate";
+import type { GarageOption, Project, ProjectMedia, Tower, Unit, UnitType } from "../../types/realestate";
 import { LoadingBlock } from "../../components/ui/Spinner";
 import { extractErrorMessage } from "../../utils/errors";
 import { formatInr } from "../../utils/format";
@@ -19,12 +19,37 @@ const UNIT_TYPE_OPTIONS: { value: UnitType; label: string }[] = [
   { value: "godown", label: "Godown / Warehouse" },
 ];
 
+const GARAGE_OPTIONS: { value: GarageOption; label: string }[] = [
+  { value: "MLP", label: "Multi-Level Parking (MLP)" },
+  { value: "CP", label: "Covered Parking (CP)" },
+  { value: "IP", label: "Independent Parking (IP)" },
+  { value: "OP", label: "Open Parking (OP)" },
+];
+
 interface ProjectFormState {
   name: string;
   builder_name: string;
   location: string;
   city: string;
   rera_number: string;
+  // Project detail (Phase B) — numeric fields kept as strings for the inputs.
+  pin_code: string;
+  landmark: string;
+  total_towers: string;
+  total_floors: string;
+  flats_per_floor: string;
+  total_garages: string;
+  garage_options: GarageOption[];
+  // Default box-price components.
+  rate_a: string;
+  rate_b: string;
+  rate_c: string;
+  parking_cost: string;
+  legal_fees: string;
+  overhead_cost: string;
+  other_charges: string;
+  sinking_fund: string;
+  amenities_charges: string;
 }
 
 const EMPTY_PROJECT_FORM: ProjectFormState = {
@@ -33,7 +58,35 @@ const EMPTY_PROJECT_FORM: ProjectFormState = {
   location: "",
   city: "",
   rera_number: "",
+  pin_code: "",
+  landmark: "",
+  total_towers: "",
+  total_floors: "",
+  flats_per_floor: "",
+  total_garages: "",
+  garage_options: [],
+  rate_a: "",
+  rate_b: "",
+  rate_c: "",
+  parking_cost: "",
+  legal_fees: "",
+  overhead_cost: "",
+  other_charges: "",
+  sinking_fund: "",
+  amenities_charges: "",
 };
+
+// Parse a numeric input string → number, or null when blank / invalid.
+function numOrNull(s: string): number | null {
+  const t = s.trim();
+  if (t === "") return null;
+  const n = Number(t);
+  return Number.isFinite(n) ? n : null;
+}
+function intOrNull(s: string): number | null {
+  const n = numOrNull(s);
+  return n === null ? null : Math.trunc(n);
+}
 
 // One tower row in the combined Add-Project form (+ its optional unit batch).
 interface TowerBuilder {
@@ -215,15 +268,41 @@ export default function ProjectsPage() {
 
   function openEdit(project: Project) {
     setEditingProject(project);
+    const str = (v: number | null) => (v != null ? String(v) : "");
     setForm({
       name: project.name,
       builder_name: project.builderName,
       location: project.location,
       city: project.city,
       rera_number: project.reraNumber ?? "",
+      pin_code: project.pinCode ?? "",
+      landmark: project.landmark ?? "",
+      total_towers: str(project.totalTowers),
+      total_floors: str(project.totalFloors),
+      flats_per_floor: str(project.flatsPerFloor),
+      total_garages: str(project.totalGarages),
+      garage_options: project.garageOptions ?? [],
+      rate_a: str(project.rateA),
+      rate_b: str(project.rateB),
+      rate_c: str(project.rateC),
+      parking_cost: str(project.parkingCost),
+      legal_fees: str(project.legalFees),
+      overhead_cost: str(project.overheadCost),
+      other_charges: str(project.otherCharges),
+      sinking_fund: str(project.sinkingFund),
+      amenities_charges: str(project.amenitiesCharges),
     });
     setFormError(null);
     setFormOpen(true);
+  }
+
+  function toggleGarage(opt: GarageOption) {
+    setForm((f) => ({
+      ...f,
+      garage_options: f.garage_options.includes(opt)
+        ? f.garage_options.filter((g) => g !== opt)
+        : [...f.garage_options, opt],
+    }));
   }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -236,6 +315,23 @@ export default function ProjectsPage() {
       location: form.location.trim(),
       city: form.city.trim(),
       rera_number: form.rera_number.trim() || null,
+      // Phase-B detail specs + default box-price components (blank → null).
+      pin_code: form.pin_code.trim() || null,
+      landmark: form.landmark.trim() || null,
+      total_towers: intOrNull(form.total_towers),
+      total_floors: intOrNull(form.total_floors),
+      flats_per_floor: intOrNull(form.flats_per_floor),
+      total_garages: intOrNull(form.total_garages),
+      garage_options: form.garage_options.length ? form.garage_options : null,
+      rate_a: numOrNull(form.rate_a),
+      rate_b: numOrNull(form.rate_b),
+      rate_c: numOrNull(form.rate_c),
+      parking_cost: numOrNull(form.parking_cost),
+      legal_fees: numOrNull(form.legal_fees),
+      overhead_cost: numOrNull(form.overhead_cost),
+      other_charges: numOrNull(form.other_charges),
+      sinking_fund: numOrNull(form.sinking_fund),
+      amenities_charges: numOrNull(form.amenities_charges),
     };
     try {
       if (editingProject) {
@@ -420,6 +516,61 @@ export default function ProjectsPage() {
             onChange={(event) => setForm({ ...form, rera_number: event.target.value })}
             placeholder="Optional"
           />
+
+          {/* Project details (Phase B) — declared specs, all optional. */}
+          <div className="stack" style={{ gap: "0.6rem", borderTop: "1px solid var(--color-border)", paddingTop: "0.85rem" }}>
+            <strong>Project details</strong>
+            <div className="form-grid">
+              <TextField id="project-pincode" label="PIN code" value={form.pin_code} onChange={(e) => setForm({ ...form, pin_code: e.target.value })} placeholder="e.g. 560066" />
+              <TextField id="project-landmark" label="Landmark" value={form.landmark} onChange={(e) => setForm({ ...form, landmark: e.target.value })} placeholder="e.g. Near ITPL" />
+            </div>
+            <div className="form-grid">
+              <TextField id="project-total-towers" label="Total towers" type="number" min={0} value={form.total_towers} onChange={(e) => setForm({ ...form, total_towers: e.target.value })} />
+              <TextField id="project-total-floors" label="Total floors" type="number" min={0} value={form.total_floors} onChange={(e) => setForm({ ...form, total_floors: e.target.value })} />
+            </div>
+            <div className="form-grid">
+              <TextField id="project-flats-per-floor" label="Flats per floor" type="number" min={0} value={form.flats_per_floor} onChange={(e) => setForm({ ...form, flats_per_floor: e.target.value })} />
+              <TextField id="project-total-garages" label="Total garages" type="number" min={0} value={form.total_garages} onChange={(e) => setForm({ ...form, total_garages: e.target.value })} />
+            </div>
+            <div>
+              <span className="muted text-xs">Garage / parking types offered</span>
+              <div className="row" style={{ flexWrap: "wrap", gap: "0.75rem", marginTop: "0.35rem" }}>
+                {GARAGE_OPTIONS.map((g) => (
+                  <label key={g.value} style={{ display: "flex", gap: 6, alignItems: "center", cursor: "pointer" }}>
+                    <input type="checkbox" checked={form.garage_options.includes(g.value)} onChange={() => toggleGarage(g.value)} />
+                    <span className="text-sm">{g.label}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          {/* Default pricing (Phase B) — seeds the booking Price Calculator. */}
+          <div className="stack" style={{ gap: "0.6rem", borderTop: "1px solid var(--color-border)", paddingTop: "0.85rem" }}>
+            <div>
+              <strong>Default pricing</strong>
+              <p className="muted text-xs" style={{ margin: "0.15rem 0 0" }}>
+                Optional — pre-fills the box-price calculator when booking a unit in this project.
+              </p>
+            </div>
+            <div className="form-grid">
+              <TextField id="project-rate-a" label="Rate A — Residential (₹/sqft)" type="number" min={0} value={form.rate_a} onChange={(e) => setForm({ ...form, rate_a: e.target.value })} />
+              <TextField id="project-rate-b" label="Rate B — Shop / Commercial (₹/sqft)" type="number" min={0} value={form.rate_b} onChange={(e) => setForm({ ...form, rate_b: e.target.value })} />
+            </div>
+            <div className="form-grid">
+              <TextField id="project-rate-c" label="Rate C — Godown / Other (₹/sqft)" type="number" min={0} value={form.rate_c} onChange={(e) => setForm({ ...form, rate_c: e.target.value })} />
+              <TextField id="project-parking-cost" label="Garage / Parking (₹)" type="number" min={0} value={form.parking_cost} onChange={(e) => setForm({ ...form, parking_cost: e.target.value })} />
+            </div>
+            <div className="form-grid">
+              <TextField id="project-amenities" label="Amenities / Club (₹)" type="number" min={0} value={form.amenities_charges} onChange={(e) => setForm({ ...form, amenities_charges: e.target.value })} />
+              <TextField id="project-sinking-fund" label="Sinking Fund (₹)" type="number" min={0} value={form.sinking_fund} onChange={(e) => setForm({ ...form, sinking_fund: e.target.value })} />
+            </div>
+            <div className="form-grid">
+              <TextField id="project-legal-fees" label="Legal / Documentation (₹)" type="number" min={0} value={form.legal_fees} onChange={(e) => setForm({ ...form, legal_fees: e.target.value })} />
+              <TextField id="project-overhead" label="Overhead (₹)" type="number" min={0} value={form.overhead_cost} onChange={(e) => setForm({ ...form, overhead_cost: e.target.value })} />
+            </div>
+            <TextField id="project-other-charges" label="Other Charges (₹)" type="number" min={0} value={form.other_charges} onChange={(e) => setForm({ ...form, other_charges: e.target.value })} />
+          </div>
 
           {!editingProject && (
             <div className="stack" style={{ gap: "0.6rem", borderTop: "1px solid var(--color-border)", paddingTop: "0.85rem" }}>

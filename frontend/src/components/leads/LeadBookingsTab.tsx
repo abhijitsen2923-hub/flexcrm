@@ -4,7 +4,9 @@ import { bookingsService } from "../../services/bookings";
 import { inventoryService } from "../../services/inventory";
 import { BookingWizard } from "../../pages/bookings/components/BookingWizard";
 import { PaymentPlanModal } from "../../pages/bookings/components/PaymentPlanModal";
+import type { PriceDefaults } from "../../pages/inventory/components/PriceCalculator";
 import type { Booking } from "../../types/realestate";
+import { priceDefaultsForProject } from "../../utils/priceDefaults";
 import { extractErrorMessage } from "../../utils/errors";
 import { formatDate, formatInr } from "../../utils/format";
 
@@ -17,6 +19,7 @@ type WizardUnit = {
   status: string;
   towerName: string;
   projectName: string;
+  priceDefaults?: PriceDefaults | null;
 };
 
 const STATUS_TONE = { draft: "warning", confirmed: "success", cancelled: "neutral" } as const;
@@ -84,6 +87,7 @@ export function LeadBookingsTab({ leadId, customerId, refreshKey }: Props) {
               status: u.status,
               towerName: t.name,
               projectName: p.name,
+              priceDefaults: priceDefaultsForProject(p, u.unitType),
             }))
         )
       );
@@ -203,6 +207,7 @@ export function LeadBookingsTab({ leadId, customerId, refreshKey }: Props) {
         <BookingWizard
           unit={wizardUnit}
           leadId={leadId}
+          priceDefaults={wizardUnit.priceDefaults}
           onClose={() => setWizardUnit(null)}
           onComplete={() => {
             setWizardUnit(null);

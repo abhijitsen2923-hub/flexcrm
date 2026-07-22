@@ -2,7 +2,7 @@ import { useRef, useState } from "react";
 import { Button, Modal, TextField, useToast } from "../../../components";
 import { bookingsService } from "../../../services/bookings";
 import { customersService } from "../../../services/customers";
-import { PriceCalculator } from "../../inventory/components/PriceCalculator";
+import { PriceCalculator, type PriceDefaults } from "../../inventory/components/PriceCalculator";
 import { DocumentPreview } from "./DocumentPreview";
 import type { Booking, PricingSnapshot, Unit } from "../../../types/realestate";
 import type { Customer } from "../../../types";
@@ -21,9 +21,11 @@ interface Props {
   // When a booking is started from a lead, link it so the lead becomes the
   // source of truth for its registration + money.
   leadId?: string | null;
+  // Project defaults that seed the box-price calculator (Phase B).
+  priceDefaults?: PriceDefaults | null;
 }
 
-export function BookingWizard({ unit, onClose, onComplete, initialBooking = null, leadId = null }: Props) {
+export function BookingWizard({ unit, onClose, onComplete, initialBooking = null, leadId = null, priceDefaults = null }: Props) {
   const toast = useToast();
   // Backend booking.step is the LAST completed panel; resume opens the NEXT one
   // (clamped to 4) so a KYC-complete booking lands on Pricing, not back on KYC.
@@ -334,6 +336,7 @@ export function BookingWizard({ unit, onClose, onComplete, initialBooking = null
                 basePrice={unit.basePrice}
                 floor={unit.floor}
                 area={unit.area}
+                defaults={priceDefaults ?? undefined}
                 onPricingChange={setPricing}
               />
               <div className="bw-footer">

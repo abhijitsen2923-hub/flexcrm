@@ -45,7 +45,33 @@ class TowerRead(ORMModel):
     updated_at: datetime
 
 
-class ProjectRead(ORMModel):
+# Garage / parking types a project offers (Multi-Level, Covered, Independent, Open).
+GarageOption = Literal["MLP", "CP", "IP", "OP"]
+
+
+class ProjectDetailsMixin(ORMModel):
+    """Phase-B project detail + default box-price fields — shared, all optional,
+    so ProjectRead exposes them and ProjectCreate/Update accept them uniformly."""
+    pin_code: str | None = Field(default=None, max_length=12)
+    landmark: str | None = Field(default=None, max_length=255)
+    total_towers: int | None = Field(default=None, ge=0)
+    total_floors: int | None = Field(default=None, ge=0)
+    flats_per_floor: int | None = Field(default=None, ge=0)
+    total_garages: int | None = Field(default=None, ge=0)
+    garage_options: list[GarageOption] | None = None
+    # Default box-price components (₹). rate_* are per-sqft; the rest are lump sums.
+    rate_a: Decimal | None = Field(default=None, ge=0)
+    rate_b: Decimal | None = Field(default=None, ge=0)
+    rate_c: Decimal | None = Field(default=None, ge=0)
+    parking_cost: Decimal | None = Field(default=None, ge=0)
+    legal_fees: Decimal | None = Field(default=None, ge=0)
+    overhead_cost: Decimal | None = Field(default=None, ge=0)
+    other_charges: Decimal | None = Field(default=None, ge=0)
+    sinking_fund: Decimal | None = Field(default=None, ge=0)
+    amenities_charges: Decimal | None = Field(default=None, ge=0)
+
+
+class ProjectRead(ProjectDetailsMixin):
     id: UUID
     name: str
     builder_name: str
@@ -68,7 +94,7 @@ class ProjectWithTowersRead(ProjectRead):
     media: list[ProjectMediaRead] = []
 
 
-class ProjectCreate(ORMModel):
+class ProjectCreate(ProjectDetailsMixin):
     name: str = Field(min_length=1, max_length=255)
     builder_name: str = Field(min_length=1, max_length=255)
     location: str = Field(min_length=1, max_length=255)
@@ -76,7 +102,7 @@ class ProjectCreate(ORMModel):
     rera_number: str | None = Field(default=None, max_length=64)
 
 
-class ProjectUpdate(ORMModel):
+class ProjectUpdate(ProjectDetailsMixin):
     name: str | None = Field(default=None, min_length=1, max_length=255)
     builder_name: str | None = Field(default=None, min_length=1, max_length=255)
     location: str | None = Field(default=None, min_length=1, max_length=255)
