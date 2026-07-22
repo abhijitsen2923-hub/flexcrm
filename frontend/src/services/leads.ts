@@ -25,6 +25,7 @@ export interface LeadCreatePayload {
   // business_type when omitted (set at registration).
   industry?: LeadIndustry;
   title: string;
+  salutation?: string | null;
   contact_name: string;
   contact_email?: string | null;
   contact_phone?: string | null;
@@ -148,7 +149,7 @@ export const leadsService = {
     return data;
   },
 
-  async logCall(leadId: string, callType: "first_call" | "follow_up", notes?: string | null): Promise<LeadCallLog> {
+  async logCall(leadId: string, callType: "first_call" | "follow_up" | "dnp", notes?: string | null): Promise<LeadCallLog> {
     const { data } = await apiClient.post<LeadCallLog>(`/leads/${leadId}/calls`, {
       call_type: callType,
       notes: notes ?? null,

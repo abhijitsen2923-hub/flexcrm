@@ -9,7 +9,7 @@ import { extractErrorMessage } from "../../utils/errors";
 
 const MIN_COMMENT_LENGTH = 10;
 // Real-estate stage that schedules a site visit on the calendar.
-const SITE_VISIT_STAGE = "site_visit_scheduled";
+const SITE_VISIT_STAGE = "site_visit_confirmed";
 
 
 interface StageTransitionModalProps {

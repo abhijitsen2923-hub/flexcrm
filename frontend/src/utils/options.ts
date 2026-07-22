@@ -58,6 +58,18 @@ export const propertyInterestOptions: Option<string>[] = [
   "Duplex", "Plot / Land", "Villa", "Commercial", "Other"
 ].map((v) => ({ value: v, label: v }));
 
+// Real-estate property TYPE (value-keyed; label differs). "Other" → free text.
+export const propertyTypeOptions: Option<string>[] = [
+  { value: "apartment", label: "Apartment" },
+  { value: "villa", label: "Villa / Independent house" },
+  { value: "plot", label: "Plot / Land" },
+  { value: "commercial", label: "Commercial" },
+  { value: "Other", label: "Other…" },
+];
+
+// Contact salutation for the New Lead form.
+export const salutationOptions: Option<string>[] = ["Mr", "Mrs", "Ms", "Master"].map((v) => ({ value: v, label: v }));
+
 // Sentinel that triggers the "please specify" free-text input.
 export const OTHER_OPTION = "Other";
 

@@ -197,6 +197,7 @@ class LeadService(ServiceBase):
                 "stage_code": initial_code,
                 "lead_number": lead_number,
                 "title": payload.title,
+                "salutation": payload.salutation,
                 "contact_name": payload.contact_name,
                 "contact_email": payload.contact_email,
                 "contact_phone": payload.contact_phone,

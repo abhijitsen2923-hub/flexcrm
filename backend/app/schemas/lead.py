@@ -17,6 +17,7 @@ class LeadCreate(ORMModel):
     # admins/managers who need to create leads outside their own vertical.
     industry: LeadIndustry | None = None
     title: str = Field(min_length=1, max_length=255)
+    salutation: str | None = Field(default=None, max_length=16)
     # Contact fields live on the Lead so a prospect can be captured before
     # a Customer record exists. `contact_name` is the only required identity
     # field; the others are optional and populate the auto-created Customer
@@ -61,6 +62,7 @@ class LeadUpdate(ORMModel):
     """
     customer_id: UUID | None = None
     title: str | None = Field(default=None, min_length=1, max_length=255)
+    salutation: str | None = Field(default=None, max_length=16)
     industry: LeadIndustry | None = None
     contact_name: str | None = Field(default=None, min_length=1, max_length=255)
     contact_email: EmailStr | None = None
@@ -88,7 +90,8 @@ class LeadBulkReassign(ORMModel):
 
 
 class LeadCallLogCreate(ORMModel):
-    call_type: Literal["first_call", "follow_up"]
+    # "dnp" (did-not-pick) stacks like follow_up — only first_call is idempotent.
+    call_type: Literal["first_call", "follow_up", "dnp"]
     notes: str | None = Field(default=None, max_length=500)
 
 
@@ -116,6 +119,7 @@ class LeadRead(ORMModel):
     stage_code: str
     lead_number: int
     title: str
+    salutation: str | None = None
     contact_name: str
     contact_email: EmailStr | None = None
     contact_phone: str | None = None

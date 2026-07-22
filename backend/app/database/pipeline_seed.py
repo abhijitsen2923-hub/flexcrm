@@ -52,19 +52,24 @@ TRAVEL_STAGES: list[PipelineStageSeed] = [
 ]
 
 
+# Real-estate lifecycle v2 (13 stages). Codes are stable identifiers; `sold` is
+# kept as the closed_won terminal so the promotion / sales-order / brokerage
+# side-effects keyed off SOLD_STAGE_CODE keep working. `not_interested` +
+# `disqualified` reuse the shared closed_lost codes so reopen logic works.
 REAL_ESTATE_STAGES: list[PipelineStageSeed] = [
-    ("real_estate", 1,  "new_enquiry",        "New Enquiry",          "active",      False),
-    ("real_estate", 2,  "prospect",            "Prospect",             "active",      True),
-    ("real_estate", 3,  "site_visit_scheduled","Site Visit Scheduled", "active",      True),
-    ("real_estate", 4,  "site_visit_done",     "Site Visit Done",      "active",      True),
-    ("real_estate", 5,  "negotiation",         "Negotiation",          "active",      True),
-    ("real_estate", 6,  "booking_initiated",   "Booking Initiated",    "active",      True),
-    ("real_estate", 7,  "token_collected",     "Token Collected",      "active",      True),
-    ("real_estate", 8,  "agreement_signed",    "Agreement Signed",     "active",      True),
-    ("real_estate", 9,  "loan_processing",     "Loan Processing",      "active",      True),
-    ("real_estate", 10, "registration",        "Registration",         "active",      True),
-    ("real_estate", 11, "sold",                "Sold",                 "closed_won",  True),
-    ("real_estate", 12, "lost",                "Lost",                 "closed_lost", True),
+    ("real_estate", 1,  "new_enquiry",          "New Enquiry",          "active",      False),
+    ("real_estate", 2,  "call",                 "Call",                 "active",      True),
+    ("real_estate", 3,  "follow_up",            "Follow-up",            "active",      True),
+    ("real_estate", 4,  "site_visit_confirmed", "Site Visit Confirmed", "active",      True),
+    ("real_estate", 5,  "site_visit_done",      "Site Visit Done",      "active",      True),
+    ("real_estate", 6,  "interested",           "Interested",           "active",      True),
+    ("real_estate", 7,  "booked",               "Booked / Token",       "active",      True),
+    ("real_estate", 8,  "agreement_payment",    "Agreement / Payment",  "active",      True),
+    ("real_estate", 9,  "registration",         "Registration",         "active",      True),
+    ("real_estate", 10, "possession",           "Possession",           "active",      True),
+    ("real_estate", 11, "sold",                 "Sold / Closed",        "closed_won",  True),
+    ("real_estate", 12, "not_interested",       "Not Interested",       "closed_lost", True),
+    ("real_estate", 13, "disqualified",         "Disqualified",         "closed_lost", True),
 ]
 
 

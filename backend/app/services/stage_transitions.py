@@ -2,6 +2,7 @@ from datetime import UTC, datetime
 from uuid import UUID
 
 from app.core.exceptions import AuthorizationError, NotFoundError, ValidationError
+from app.core.permissions import STAGE_MANAGER_ROLES, can_set_stage
 from app.database.enums import LeadIndustry, PipelineStageCategory, UserRole
 from app.models.lead import Lead
 from app.models.pipeline_stage import PipelineStage  # noqa: F401  (kept for type hinting context)
@@ -92,18 +93,27 @@ class StageTransitionService(ServiceBase):
         # records the reopen explicitly.
         is_reopen = lead.stage_code in CLOSED_LOST_STAGE_CODES and target_stage.category == PipelineStageCategory.active
 
-        # Spec Open Q #1: forward skips allowed for sales+, backward moves manager-only.
-        # Position-based comparison handles closed-lost stages (13-15) gracefully:
-        # going to a closed-lost stage from any position is "forward" in the sense
-        # the spec intends (it's an exit, not a regression). Reopen flows skip the
-        # role gate entirely.
+        # Role-based access to stages (real-estate lifecycle v2). A restricted
+        # role can only move a lead to the stages its role allows (e.g. a
+        # telecaller can't set `booked`; only managers can `sold`). Unrestricted
+        # roles pass. Reopen flows still honour this (you can only reopen into a
+        # stage your role can set).
+        if not can_set_stage(actor_role, target_stage.code):
+            raise AuthorizationError(
+                f"Your role is not allowed to move a lead to '{target_stage.name}'."
+            )
+
+        # Backward moves (to an earlier active stage) are manager-only. Reopen
+        # flows (out of a closed-lost stage) skip this. Fixed to use the real
+        # manager roles — the old {admin, manager} set is legacy and unassignable,
+        # so backward moves were silently blocked for every real user.
         if (
             not is_reopen
             and target_stage.position < current_stage.position
             and target_stage.category == PipelineStageCategory.active
+            and actor_role not in STAGE_MANAGER_ROLES
         ):
-            if actor_role not in {UserRole.admin, UserRole.manager}:
-                raise AuthorizationError("Only managers can move a lead backward in the pipeline.")
+            raise AuthorizationError("Only managers can move a lead backward in the pipeline.")
 
         # Travel-only gate: if leaving `visa_documentation_pending`, every
         # required document must be uploaded first.

@@ -56,6 +56,8 @@ class Lead(TenantBase, UUIDPrimaryKeyMixin, TimestampMixin, TenantAuditMixin, Te
     stage_code: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     lead_number: Mapped[int] = mapped_column(Integer, nullable=False)
     title: Mapped[str] = mapped_column(String(255), nullable=False)
+    # Contact salutation (Mr / Mrs / Ms / Master) — free string, validated app-side.
+    salutation: Mapped[str | None] = mapped_column(String(16), nullable=True)
     value: Mapped[float] = mapped_column(Numeric(12, 2), nullable=False, default=0)
     currency: Mapped[str] = mapped_column(String(3), nullable=False, default="INR")
     probability: Mapped[int] = mapped_column(Integer, nullable=False, default=0)

@@ -9,6 +9,7 @@ import { leadsService } from "../../services/leads";
 import type { Lead, LeadCallLog, PipelineStage, StageTransition } from "../../types";
 import { formatCurrency, formatDate, formatDateTime, formatRelative } from "../../utils/format";
 import { industryInterestLabel, pipelineCategoryTone, titleCase } from "../../utils/options";
+import { canSetStage } from "../../utils/stageAccess";
 import { LeadBookingsTab } from "./LeadBookingsTab";
 
 
@@ -89,7 +90,7 @@ export function LeadDrawer({ open, lead, onClose, onTransitionRequest, refreshKe
     return () => { cancelled = true; };
   }, [open, lead?.id, refreshKey]);
 
-  async function handleLogCall(callType: "first_call" | "follow_up") {
+  async function handleLogCall(callType: "first_call" | "follow_up" | "dnp") {
     if (!lead) return;
     setCallBusy(true);
     try {
@@ -114,6 +115,7 @@ export function LeadDrawer({ open, lead, onClose, onTransitionRequest, refreshKe
   const activeTab: TabKey = tab === "bookings" && !isRealEstate ? "overview" : tab;
   const myFirstCall = calls.find((c) => c.user_id === user?.id && c.call_type === "first_call");
   const followUpCount = calls.filter((c) => c.call_type === "follow_up").length;
+  const dnpCount = calls.filter((c) => c.call_type === "dnp").length;
 
   return createPortal(
     // No backdrop-tap close: the drawer holds editable content (comments,
@@ -173,15 +175,21 @@ export function LeadDrawer({ open, lead, onClose, onTransitionRequest, refreshKe
                   <Button size="sm" variant="secondary" loading={callBusy} onClick={() => void handleLogCall("follow_up")}>
                     Follow-up Call Done
                   </Button>
+                  <Button size="sm" variant="ghost" loading={callBusy} onClick={() => void handleLogCall("dnp")}>
+                    Did Not Pick
+                  </Button>
                   {followUpCount > 0 && (
-                    <span className="muted text-sm">{followUpCount} follow-up call{followUpCount === 1 ? "" : "s"}</span>
+                    <span className="muted text-sm">{followUpCount} follow-up{followUpCount === 1 ? "" : "s"}</span>
+                  )}
+                  {dnpCount > 0 && (
+                    <span className="muted text-sm">· {dnpCount} DNP</span>
                   )}
                 </div>
                 {calls.length > 0 && (
                   <div className="stack" style={{ gap: "0.2rem", marginTop: "0.6rem" }}>
                     {calls.slice().reverse().slice(0, 5).map((c) => (
                       <div key={c.id} className="text-xs muted">
-                        {c.call_type === "first_call" ? "First call" : "Follow-up"}
+                        {c.call_type === "first_call" ? "First call" : c.call_type === "dnp" ? "Did not pick" : "Follow-up"}
                         {" · "}{c.user ? `${c.user.first_name} ${c.user.last_name}` : "—"}
                         {" · "}{formatDateTime(c.created_at)}
                       </div>
@@ -231,21 +239,23 @@ export function LeadDrawer({ open, lead, onClose, onTransitionRequest, refreshKe
                   <span className="muted text-sm">Each move opens a comment box (min 10 chars).</span>
                 </div>
                 <div className="row" style={{ flexWrap: "wrap", gap: "0.4rem" }}>
-                  {stages.map((stage) => {
-                    const isCurrent = stage.code === lead.stage_code;
-                    return (
-                      <button
-                        key={stage.id}
-                        type="button"
-                        className={`btn btn--sm ${isCurrent ? "btn--secondary" : "btn--ghost"}`}
-                        disabled={isCurrent}
-                        onClick={() => onTransitionRequest(lead, stage)}
-                      >
-                        {stage.position}. {stage.name}
-                        {isCurrent && <Sparkles size={12} style={{ marginLeft: "0.35rem" }} />}
-                      </button>
-                    );
-                  })}
+                  {stages
+                    .filter((stage) => stage.code === lead.stage_code || canSetStage(user?.role, stage.code))
+                    .map((stage) => {
+                      const isCurrent = stage.code === lead.stage_code;
+                      return (
+                        <button
+                          key={stage.id}
+                          type="button"
+                          className={`btn btn--sm ${isCurrent ? "btn--secondary" : "btn--ghost"}`}
+                          disabled={isCurrent}
+                          onClick={() => onTransitionRequest(lead, stage)}
+                        >
+                          {stage.position}. {stage.name}
+                          {isCurrent && <Sparkles size={12} style={{ marginLeft: "0.35rem" }} />}
+                        </button>
+                      );
+                    })}
                 </div>
               </div>
             </div>

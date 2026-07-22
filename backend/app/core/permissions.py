@@ -115,6 +115,36 @@ ASSIGNED_ONLY_LEAD_ROLES: frozenset[UserRole] = frozenset({
 })
 
 
+# --- Role-based access to lead stages (real-estate lifecycle v2) ------------
+# Managers who may close a lead (set `sold`) and move it BACKWARD in the pipeline.
+STAGE_MANAGER_ROLES: frozenset[UserRole] = frozenset({UserRole.owner, UserRole.sales_manager})
+
+# Which lead stage codes each RESTRICTED role may move a lead TO. Roles not listed
+# here — owner, sales_manager (managers), and the education/travel roles — are
+# unrestricted. Restricted roles are all real-estate-only, so these RE stage codes
+# are the only ones they ever encounter. receptionist = intake + hand-off only;
+# telecaller = calling-phase + lost outcomes; sales_executive/crm_team = the full
+# active flow EXCEPT `new_enquiry` (intake) and `sold` (closing is manager-only).
+_FULL_ACTIVE_EXCEPT_INTAKE_AND_CLOSE = frozenset({
+    "call", "follow_up", "site_visit_confirmed", "site_visit_done", "interested",
+    "booked", "agreement_payment", "registration", "possession",
+    "not_interested", "disqualified",
+})
+ROLE_STAGE_ACCESS: dict[UserRole, frozenset[str]] = {
+    UserRole.receptionist: frozenset({"new_enquiry", "call"}),
+    UserRole.telecaller: frozenset({"call", "follow_up", "not_interested", "disqualified"}),
+    UserRole.sales_executive: _FULL_ACTIVE_EXCEPT_INTAKE_AND_CLOSE,
+    UserRole.crm_team: _FULL_ACTIVE_EXCEPT_INTAKE_AND_CLOSE,
+}
+
+
+def can_set_stage(role: UserRole, stage_code: str) -> bool:
+    """True if `role` may move a lead to `stage_code`. Unrestricted roles
+    (managers, owner, non-RE roles) always pass."""
+    allowed = ROLE_STAGE_ACCESS.get(role)
+    return allowed is None or stage_code in allowed
+
+
 def role_is_valid_for_industry(role: UserRole, industry: LeadIndustry | None) -> bool:
     """True if `role` may be assigned to a user in an org of the given industry.
 

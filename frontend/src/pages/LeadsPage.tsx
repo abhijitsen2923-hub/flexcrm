@@ -30,7 +30,8 @@ import { usersService } from "../services/users";
 import type { Lead, LeadIndustry, Organization, PipelineStage, User } from "../types";
 import { extractErrorMessage } from "../utils/errors";
 import { formatCurrency } from "../utils/format";
-import { OTHER_OPTION, industryInterestLabel, leadIndustryOptions, leadSourceOptions, pipelineCategoryTone, propertyInterestOptions, titleCase } from "../utils/options";
+import { OTHER_OPTION, industryInterestLabel, leadIndustryOptions, leadSourceOptions, pipelineCategoryTone, propertyInterestOptions, propertyTypeOptions, salutationOptions, titleCase } from "../utils/options";
+import { canSetStage } from "../utils/stageAccess";
 
 
 type ViewMode = "list" | "kanban";
@@ -67,6 +68,7 @@ function DuplicateMark() {
 interface CreateFormState {
   industry: LeadIndustry;
   title: string;
+  salutation: string;
   contact_name: string;
   contact_email: string;
   contact_phone: string;
@@ -98,6 +100,7 @@ function makeEmptyForm(
   return {
     industry: defaultIndustry,
     title: "",
+    salutation: "",
     contact_name: "",
     contact_email: "",
     contact_phone: "",
@@ -317,8 +320,13 @@ export default function LeadsPage() {
     // Mandatory controlled fields (meeting: prevent free-text fragmentation).
     const resolvedSource = form.source === OTHER_OPTION ? form.source_other.trim() : form.source;
     const resolvedInterest = form.interest === OTHER_OPTION ? form.interest_other.trim() : form.interest.trim();
+    const resolvedPropertyType = form.property_type === OTHER_OPTION ? form.property_type_other.trim() : form.property_type;
     if (!resolvedSource) {
       setFormError("Please select a valid Source.");
+      return;
+    }
+    if (form.industry === "real_estate" && !resolvedPropertyType) {
+      setFormError("Please select a valid Property Type.");
       return;
     }
     if (form.industry === "real_estate" && !resolvedInterest) {
@@ -347,6 +355,7 @@ export default function LeadsPage() {
         // only fall through with an explicit value if the user has none set.
         ...(user?.business_type ? {} : { industry: form.industry }),
         title: form.title.trim(),
+        salutation: form.salutation || null,
         contact_name: form.contact_name.trim(),
         contact_email: form.contact_email.trim() || null,
         contact_phone: form.contact_phone.trim() || null,
@@ -526,11 +535,13 @@ export default function LeadsPage() {
             title="Move to a different stage — opens the comment box"
             aria-label={`Stage for lead ${lead.lead_number}`}
           >
-            {industryStages.map((s) => (
-              <option key={s.id} value={s.code}>
-                {s.position}. {s.name}
-              </option>
-            ))}
+            {industryStages
+              .filter((s) => s.code === lead.stage_code || canSetStage(user?.role, s.code))
+              .map((s) => (
+                <option key={s.id} value={s.code}>
+                  {s.position}. {s.name}
+                </option>
+              ))}
           </select>
         );
       }
@@ -854,13 +865,22 @@ export default function LeadsPage() {
               hint="Your account has no business type set — pick one for this lead."
             />
           )}
+          {form.industry === "real_estate" && (
+            <SelectField
+              id="lead-salutation"
+              label="Title"
+              value={form.salutation}
+              onChange={(event) => setForm({ ...form, salutation: event.target.value })}
+              options={[{ value: "", label: "—" }, ...salutationOptions]}
+            />
+          )}
           <TextField
             id="lead-title"
-            label="Title"
+            label="Subject"
             value={form.title}
             onChange={(event) => setForm({ ...form, title: event.target.value })}
             required
-            placeholder="Short headline e.g. 'MBA Marketing applicant'"
+            placeholder="Short headline e.g. '2BHK walk-in — Whitefield'"
           />
           <TextField
             id="lead-contact-name"
@@ -924,6 +944,27 @@ export default function LeadsPage() {
             onChange={(event) => setForm({ ...form, company_name: event.target.value })}
             placeholder="Optional"
           />
+          {form.industry === "real_estate" && (
+            <>
+              <SelectField
+                id="lead-property-type"
+                label="Property type *"
+                value={form.property_type}
+                onChange={(event) => setForm({ ...form, property_type: event.target.value })}
+                required
+                options={[{ value: "", label: "Select…" }, ...propertyTypeOptions]}
+              />
+              {form.property_type === OTHER_OPTION && (
+                <TextField
+                  id="lead-property-type-other"
+                  label="Please specify property type"
+                  value={form.property_type_other}
+                  onChange={(event) => setForm({ ...form, property_type_other: event.target.value })}
+                  required
+                />
+              )}
+            </>
+          )}
           {form.industry === "real_estate" ? (
             <>
               <SelectField
@@ -955,27 +996,6 @@ export default function LeadsPage() {
           )}
           {form.industry === "real_estate" && (
             <>
-              <SelectField
-                id="lead-property-type"
-                label="Property type"
-                value={form.property_type}
-                onChange={(event) => setForm({ ...form, property_type: event.target.value })}
-                options={[
-                  { value: "apartment", label: "Apartment" },
-                  { value: "villa", label: "Villa / Independent house" },
-                  { value: "plot", label: "Plot / Land" },
-                  { value: "commercial", label: "Commercial" },
-                  { value: OTHER_OPTION, label: "Other…" }
-                ]}
-              />
-              {form.property_type === OTHER_OPTION && (
-                <TextField
-                  id="lead-property-type-other"
-                  label="Please specify property type"
-                  value={form.property_type_other}
-                  onChange={(event) => setForm({ ...form, property_type_other: event.target.value })}
-                />
-              )}
               <div className="form-grid">
                 <TextField
                   id="lead-budget-min"
