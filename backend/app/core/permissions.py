@@ -116,8 +116,16 @@ ASSIGNED_ONLY_LEAD_ROLES: frozenset[UserRole] = frozenset({
 
 
 # --- Role-based access to lead stages (real-estate lifecycle v2) ------------
-# Managers who may close a lead (set `sold`) and move it BACKWARD in the pipeline.
-STAGE_MANAGER_ROLES: frozenset[UserRole] = frozenset({UserRole.owner, UserRole.sales_manager})
+# Managers who may close a lead (set `sold`) and move it BACKWARD in the pipeline
+# — one per vertical (owner is cross-vertical). The old backward gate used the
+# legacy {admin, manager} set that no real user has, so backward moves were
+# silently blocked for everyone; this restores them for the real manager roles.
+STAGE_MANAGER_ROLES: frozenset[UserRole] = frozenset({
+    UserRole.owner,
+    UserRole.sales_manager,   # real estate
+    UserRole.academic_admin,  # education
+    UserRole.ops_manager,     # travel
+})
 
 # Which lead stage codes each RESTRICTED role may move a lead TO. Roles not listed
 # here — owner, sales_manager (managers), and the education/travel roles — are

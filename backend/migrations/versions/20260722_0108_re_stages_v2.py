@@ -69,6 +69,13 @@ REMAP = {
 def upgrade() -> None:
     conn = op.get_bind()
 
+    # 0. The 1..15 position CHECK would reject the temporary +100 parking
+    #    positions used below, so drop it for the duration of the reseed and
+    #    re-add it at the end (the final state is positions 1..13, in range).
+    conn.execute(sa.text(
+        "ALTER TABLE public.pipeline_stages DROP CONSTRAINT IF EXISTS ck_pipeline_stages_position_range;"
+    ))
+
     # 1. Free the final positions: park existing RE rows at +100 (avoids the
     #    UNIQUE(industry, position) collision while we insert/reposition).
     conn.execute(sa.text(
@@ -123,6 +130,12 @@ def upgrade() -> None:
             "WHERE industry = 'real_estate' AND code = ANY(:codes);"
         ).bindparams(codes=list(REMAP.keys()))
     )
+
+    # 6. Re-add the position CHECK — every row is now within 1..15.
+    conn.execute(sa.text(
+        "ALTER TABLE public.pipeline_stages "
+        "ADD CONSTRAINT ck_pipeline_stages_position_range CHECK (position BETWEEN 1 AND 15);"
+    ))
 
 
 def downgrade() -> None:
