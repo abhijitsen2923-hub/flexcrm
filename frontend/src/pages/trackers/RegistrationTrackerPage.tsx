@@ -29,7 +29,11 @@ export default function RegistrationTrackerPage() {
     ],
     [groups],
   );
-  const visibleGroups = projectFilter === "all" ? groups : groups.filter((g) => g.projectId === projectFilter);
+  // Fall back to "all" when the selected project no longer exists among the current
+  // groups (e.g. its bookings became non-locatable after an inventory refresh), so
+  // the page never renders a blank body with a stale filter.
+  const effectiveFilter = projectFilter === "all" || groups.some((g) => g.projectId === projectFilter) ? projectFilter : "all";
+  const visibleGroups = effectiveFilter === "all" ? groups : groups.filter((g) => g.projectId === effectiveFilter);
 
   if (loading) return <LoadingBlock label="Loading registration tracker…" />;
 
@@ -45,7 +49,7 @@ export default function RegistrationTrackerPage() {
             <SelectField
               id="registration-project-filter"
               label="Project"
-              value={projectFilter}
+              value={effectiveFilter}
               onChange={(e) => setProjectFilter(e.target.value)}
               options={projectOptions}
             />

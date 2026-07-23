@@ -61,7 +61,10 @@ export default function PossessionTrackerPage() {
     ],
     [groups],
   );
-  const visibleGroups = projectFilter === "all" ? groups : groups.filter((g) => g.projectId === projectFilter);
+  // Fall back to "all" when the selected project no longer exists among the current
+  // groups, so the page never renders a blank body with a stale filter.
+  const effectiveFilter = projectFilter === "all" || groups.some((g) => g.projectId === projectFilter) ? projectFilter : "all";
+  const visibleGroups = effectiveFilter === "all" ? groups : groups.filter((g) => g.projectId === effectiveFilter);
   const totalCount = groups.reduce((n, g) => n + g.items.length, 0);
 
   function getList(id: string): boolean[] {
@@ -98,7 +101,7 @@ export default function PossessionTrackerPage() {
             <SelectField
               id="possession-project-filter"
               label="Project"
-              value={projectFilter}
+              value={effectiveFilter}
               onChange={(e) => setProjectFilter(e.target.value)}
               options={projectOptions}
             />
