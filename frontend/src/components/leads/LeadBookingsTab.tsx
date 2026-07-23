@@ -219,7 +219,11 @@ export function LeadBookingsTab({ leadId, customerId, refreshKey }: Props) {
           const total = Number(b.pricingSnapshot?.total ?? b.unit?.basePrice ?? 0);
           const paid = b.paymentReceipts.reduce((n, r) => n + r.amount, 0);
           const demand = b.paymentSchedules.reduce((n, p) => n + p.demandAmount, 0);
+          const outstanding = Math.max(0, demand - paid);
           const registered = !!b.registrationNumber;
+          const possChecklist = b.possessionChecklist ?? [];
+          const possDone = possChecklist.filter(Boolean).length;
+          const possTotal = possChecklist.length;
           return (
             <div key={b.id} className="card" style={{ padding: "0.85rem 1rem" }}>
               <div className="row row--between" style={{ alignItems: "center", marginBottom: "0.4rem" }}>
@@ -233,6 +237,9 @@ export function LeadBookingsTab({ leadId, customerId, refreshKey }: Props) {
               <div className="row" style={{ gap: "1.25rem", flexWrap: "wrap", marginBottom: "0.5rem" }}>
                 <span className="text-sm"><span className="muted">Total</span> <strong>{formatInr(total)}</strong></span>
                 <span className="text-sm"><span className="muted">Collected</span> <strong>{formatInr(paid)}</strong>{demand ? <span className="muted"> / {formatInr(demand)}</span> : null}</span>
+                {demand > 0 && (
+                  <span className="text-sm"><span className="muted">Outstanding</span> <strong>{formatInr(outstanding)}</strong></span>
+                )}
                 <span className="text-sm">
                   <span className="muted">Registration</span>{" "}
                   {registered ? (
@@ -252,6 +259,13 @@ export function LeadBookingsTab({ leadId, customerId, refreshKey }: Props) {
                   )}
                   {b.tokenReceivedOn ? <span className="muted"> · {formatDate(b.tokenReceivedOn)}</span> : null}
                 </span>
+                {b.status === "confirmed" && possTotal > 0 && (
+                  <span className="text-sm">
+                    <span className="muted">Possession</span>{" "}
+                    <strong>{possDone}/{possTotal}</strong>
+                    {possDone === possTotal ? <span className="muted"> · handed over</span> : null}
+                  </span>
+                )}
               </div>
               <div className="row" style={{ gap: "0.5rem", flexWrap: "wrap" }}>
                 <Button size="sm" variant="secondary" onClick={() => setPayBooking(b)}>
