@@ -204,6 +204,52 @@ def render_booking_document(
     return _shell(title, builder, proj_name, location, rera, "Ref", ref, body), title
 
 
+def render_token_receipt(
+    booking: Booking,
+    unit: Unit | None,
+    project: Project | None,
+    tower: Tower | None,
+    customer: Customer | None,
+) -> tuple[str, str]:
+    """Return (html, title) for a booking's token / booking-amount receipt."""
+    title = "Token Receipt"
+
+    builder = project.builder_name if project else "Builder"
+    proj_name = project.name if project else "Project"
+    location = f"{project.location}, {project.city}" if project else ""
+    rera = project.rera_number if project and project.rera_number else None
+
+    unit_no = unit.unit_number if unit else "—"
+    tower_name = tower.name if tower else "—"
+    cust_name = customer.contact_name if customer else "—"
+
+    amount = _inr(booking.token_amount)
+    mode = _MODE_LABELS.get(booking.token_mode, booking.token_mode or "—")
+    ref_no = booking.token_reference or "—"
+    receipt_no = str(booking.id)[:8].upper()
+
+    details = "<table class='kv'>" + "".join([
+        _row("Receipt No.", receipt_no),
+        _row("Date", _fmt_date(booking.token_received_on)),
+        _row("Token Amount", amount),
+        _row("Payment Mode", mode),
+        _row("Reference", ref_no),
+        _row("Project", proj_name),
+        _row("Tower / Unit", f"{tower_name} · {unit_no}"),
+    ]) + "</table>"
+
+    body = f"""
+      <p>Received with thanks from <strong>{escape(cust_name)}</strong> the sum of
+      <strong>{escape(amount)}</strong> as token / booking amount towards Unit
+      <strong>{escape(unit_no)}</strong> in {escape(proj_name)}.</p>
+      <h3>Token Details</h3>
+      {details}
+      {_sign("Received By", "For " + builder)}
+    """
+
+    return _shell(title, builder, proj_name, location, rera, "Receipt", receipt_no, body), title
+
+
 def render_payment_receipt(
     booking: Booking,
     unit: Unit | None,

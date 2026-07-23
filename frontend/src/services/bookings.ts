@@ -39,6 +39,13 @@ export interface RefundBookingPayload {
   reason?: string | null;
 }
 
+export interface RecordTokenPayload {
+  token_amount: number;
+  token_received_on: string;
+  token_mode: PaymentMode;
+  token_reference?: string | null;
+}
+
 // The API speaks snake_case; the app models are camelCase. Map at the boundary
 // (same pattern as the inventory service).
 interface ApiBooking {
@@ -54,6 +61,10 @@ interface ApiBooking {
   cancellation_reason?: string | null;
   registration_number?: string | null;
   sub_registrar_office?: string | null;
+  token_amount?: number | string | null;
+  token_received_on?: string | null;
+  token_mode?: PaymentMode | null;
+  token_reference?: string | null;
   created_at: string;
   updated_at: string;
   unit?: {
@@ -163,6 +174,10 @@ function mapBooking(b: ApiBooking): Booking {
     cancellationReason: b.cancellation_reason ?? null,
     registrationNumber: b.registration_number ?? null,
     subRegistrarOffice: b.sub_registrar_office ?? null,
+    tokenAmount: b.token_amount != null && b.token_amount !== "" ? Number(b.token_amount) : null,
+    tokenReceivedOn: b.token_received_on ?? null,
+    tokenMode: b.token_mode ?? null,
+    tokenReference: b.token_reference ?? null,
     unit: b.unit
       ? {
           id: b.unit.id,
@@ -306,5 +321,15 @@ export const bookingsService = {
     payload: { registration_date: string; registration_number?: string | null; sub_registrar_office?: string | null }
   ): Promise<Booking> {
     return apiClient.post<ApiBooking>(`/bookings/${id}/register`, payload).then((r) => mapBooking(r.data));
+  },
+
+  // Record / update the token (booking amount) on a booking (Phase C).
+  recordToken(id: string, payload: RecordTokenPayload): Promise<Booking> {
+    return apiClient.put<ApiBooking>(`/bookings/${id}/token`, payload).then((r) => mapBooking(r.data));
+  },
+
+  // Presigned URL to the generated PDF token receipt.
+  getTokenReceiptPdfUrl(id: string): Promise<{ url: string }> {
+    return apiClient.get<{ url: string }>(`/bookings/${id}/token-receipt/pdf`).then((r) => r.data);
   },
 };

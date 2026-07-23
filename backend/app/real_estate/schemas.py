@@ -330,6 +330,10 @@ class BookingRead(ORMModel):
     cancellation_reason: str | None = None
     registration_number: str | None = None
     sub_registrar_office: str | None = None
+    token_amount: Decimal | None = None
+    token_received_on: date | None = None
+    token_mode: str | None = None
+    token_reference: str | None = None
     created_at: datetime
     updated_at: datetime
     customer: CustomerCompact | None = None
@@ -363,6 +367,14 @@ class BookingRegister(ORMModel):
     registration_date: date
     registration_number: str | None = Field(default=None, max_length=120)
     sub_registrar_office: str | None = Field(default=None, max_length=255)
+
+
+class BookingTokenUpdate(ORMModel):
+    """Record (or update) the token / booking amount on a booking."""
+    token_amount: Decimal = Field(gt=0)
+    token_received_on: date
+    token_mode: PaymentMode
+    token_reference: str | None = Field(default=None, max_length=120)
 
 
 class PricingUpdate(ORMModel):

@@ -1,11 +1,11 @@
 import { useEffect, useState } from "react";
-import { Badge, Button, EmptyState, LoadingBlock, Modal, TextField, useToast } from "../../components";
+import { Badge, Button, EmptyState, LoadingBlock, Modal, SelectField, TextField, useToast } from "../../components";
 import { bookingsService } from "../../services/bookings";
 import { inventoryService } from "../../services/inventory";
 import { BookingWizard } from "../../pages/bookings/components/BookingWizard";
 import { PaymentPlanModal } from "../../pages/bookings/components/PaymentPlanModal";
 import type { PriceDefaults } from "../../pages/inventory/components/PriceCalculator";
-import type { Booking } from "../../types/realestate";
+import type { Booking, PaymentMode } from "../../types/realestate";
 import { priceDefaultsForProject } from "../../utils/priceDefaults";
 import { extractErrorMessage } from "../../utils/errors";
 import { formatDate, formatInr } from "../../utils/format";
@@ -23,6 +23,15 @@ type WizardUnit = {
 };
 
 const STATUS_TONE = { draft: "warning", confirmed: "success", cancelled: "neutral" } as const;
+
+const PAYMENT_MODES: { value: PaymentMode; label: string }[] = [
+  { value: "upi", label: "UPI" },
+  { value: "neft", label: "NEFT / RTGS" },
+  { value: "cheque", label: "Cheque" },
+  { value: "cash", label: "Cash" },
+  { value: "card", label: "Card" },
+  { value: "other", label: "Other" },
+];
 
 interface Props {
   leadId: string;
@@ -53,6 +62,16 @@ export function LeadBookingsTab({ leadId, customerId, refreshKey }: Props) {
   const [registerTarget, setRegisterTarget] = useState<Booking | null>(null);
   const [regForm, setRegForm] = useState({ date: "", number: "", office: "" });
   const [registering, setRegistering] = useState(false);
+
+  // Token / booking amount.
+  const [tokenTarget, setTokenTarget] = useState<Booking | null>(null);
+  const [tokenForm, setTokenForm] = useState<{ amount: string; date: string; mode: PaymentMode; reference: string }>({
+    amount: "",
+    date: "",
+    mode: "neft",
+    reference: "",
+  });
+  const [savingToken, setSavingToken] = useState(false);
 
   async function load() {
     setLoading(true);
@@ -131,6 +150,54 @@ export function LeadBookingsTab({ leadId, customerId, refreshKey }: Props) {
     }
   }
 
+  function openToken(b: Booking) {
+    setTokenForm({
+      amount: b.tokenAmount != null ? String(b.tokenAmount) : "",
+      date: b.tokenReceivedOn ?? new Date().toISOString().slice(0, 10),
+      mode: b.tokenMode ?? "neft",
+      reference: b.tokenReference ?? "",
+    });
+    setTokenTarget(b);
+  }
+
+  async function confirmToken() {
+    if (!tokenTarget) return;
+    const amount = Number(tokenForm.amount);
+    if (!(amount > 0)) {
+      toast.error("Enter a token amount greater than 0");
+      return;
+    }
+    if (!tokenForm.date) {
+      toast.error("Token date is required");
+      return;
+    }
+    setSavingToken(true);
+    try {
+      await bookingsService.recordToken(tokenTarget.id, {
+        token_amount: amount,
+        token_received_on: tokenForm.date,
+        token_mode: tokenForm.mode,
+        token_reference: tokenForm.reference.trim() || null,
+      });
+      toast.success("Token recorded", formatInr(amount));
+      setTokenTarget(null);
+      await load();
+    } catch (err) {
+      toast.error("Could not record token", extractErrorMessage(err));
+    } finally {
+      setSavingToken(false);
+    }
+  }
+
+  async function downloadTokenReceipt(b: Booking) {
+    try {
+      const { url } = await bookingsService.getTokenReceiptPdfUrl(b.id);
+      window.open(url, "_blank", "noopener");
+    } catch (err) {
+      toast.error("Could not generate receipt", extractErrorMessage(err));
+    }
+  }
+
   if (loading) return <LoadingBlock label="Loading bookings…" />;
 
   return (
@@ -176,11 +243,28 @@ export function LeadBookingsTab({ leadId, customerId, refreshKey }: Props) {
                     <span className="muted">—</span>
                   )}
                 </span>
+                <span className="text-sm">
+                  <span className="muted">Token</span>{" "}
+                  {b.tokenAmount != null ? (
+                    <strong>{formatInr(b.tokenAmount)}</strong>
+                  ) : (
+                    <span className="muted">—</span>
+                  )}
+                  {b.tokenReceivedOn ? <span className="muted"> · {formatDate(b.tokenReceivedOn)}</span> : null}
+                </span>
               </div>
               <div className="row" style={{ gap: "0.5rem", flexWrap: "wrap" }}>
                 <Button size="sm" variant="secondary" onClick={() => setPayBooking(b)}>
                   Manage payments
                 </Button>
+                <Button size="sm" variant="ghost" onClick={() => openToken(b)}>
+                  {b.tokenAmount != null ? "Update token" : "Record token"}
+                </Button>
+                {b.tokenAmount != null && (
+                  <Button size="sm" variant="ghost" onClick={() => void downloadTokenReceipt(b)}>
+                    Token receipt
+                  </Button>
+                )}
                 {b.status === "confirmed" && !registered && (
                   <Button size="sm" variant="ghost" onClick={() => openRegister(b)}>
                     Mark registered
@@ -263,6 +347,27 @@ export function LeadBookingsTab({ leadId, customerId, refreshKey }: Props) {
             <TextField id="lead-reg-date" label="Registration date" type="date" value={regForm.date} onChange={(e) => setRegForm({ ...regForm, date: e.target.value })} required />
             <TextField id="lead-reg-number" label="Registration / deed no. (optional)" value={regForm.number} onChange={(e) => setRegForm({ ...regForm, number: e.target.value })} placeholder="e.g. SRO-2026-12345" />
             <TextField id="lead-reg-office" label="Sub-registrar office (optional)" value={regForm.office} onChange={(e) => setRegForm({ ...regForm, office: e.target.value })} placeholder="e.g. SRO Whitefield" />
+          </div>
+        </Modal>
+      )}
+
+      {tokenTarget && (
+        <Modal
+          open
+          title="Record token / booking amount"
+          onClose={() => setTokenTarget(null)}
+          footer={
+            <>
+              <Button variant="secondary" onClick={() => setTokenTarget(null)} disabled={savingToken}>Cancel</Button>
+              <Button loading={savingToken} onClick={() => void confirmToken()}>Save token</Button>
+            </>
+          }
+        >
+          <div className="stack" style={{ gap: "0.75rem" }}>
+            <TextField id="lead-token-amount" label="Token amount (₹)" type="number" min="0" value={tokenForm.amount} onChange={(e) => setTokenForm({ ...tokenForm, amount: e.target.value })} required />
+            <TextField id="lead-token-date" label="Received on" type="date" value={tokenForm.date} onChange={(e) => setTokenForm({ ...tokenForm, date: e.target.value })} required />
+            <SelectField id="lead-token-mode" label="Payment mode" value={tokenForm.mode} onChange={(e) => setTokenForm({ ...tokenForm, mode: e.target.value as PaymentMode })} options={PAYMENT_MODES} />
+            <TextField id="lead-token-reference" label="Reference (optional)" value={tokenForm.reference} onChange={(e) => setTokenForm({ ...tokenForm, reference: e.target.value })} placeholder="e.g. UPI txn / cheque no." />
           </div>
         </Modal>
       )}

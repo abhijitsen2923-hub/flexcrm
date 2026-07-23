@@ -19,7 +19,7 @@ from app.database.session import get_db_session
 from app.models.customer import Customer
 from app.models.lead import Lead
 from app.models.user import User
-from app.real_estate.documents import render_booking_document, render_payment_receipt
+from app.real_estate.documents import render_booking_document, render_payment_receipt, render_token_receipt
 from app.real_estate.models import (
     Booking,
     BookingKycDoc,
@@ -43,6 +43,7 @@ from app.real_estate.schemas import (
     BookingRefundCreate,
     BookingRegister,
     BookingStepAdvance,
+    BookingTokenUpdate,
     CollectionLedgerEntry,
     PaymentPlanCreate,
     PaymentReceiptCreate,
@@ -855,6 +856,30 @@ async def update_possession_checklist(
     return (await session.execute(stmt)).scalar_one()
 
 
+@router.put("/bookings/{booking_id}/token", response_model=BookingRead)
+async def record_booking_token(
+    booking_id: UUID,
+    payload: BookingTokenUpdate,
+    _: object = Depends(require_permissions(PermissionCode.LEAD_MANAGE)),
+    session: AsyncSession = Depends(get_db_session),
+):
+    """Record (or update) the token / booking amount on a booking (Phase C)."""
+    booking = await session.get(Booking, booking_id)
+    if not booking or booking.is_deleted:
+        raise HTTPException(status_code=404, detail="Booking not found")
+    booking.token_amount = payload.token_amount
+    booking.token_received_on = payload.token_received_on
+    booking.token_mode = payload.token_mode
+    booking.token_reference = payload.token_reference
+    await session.commit()
+    stmt = (
+        select(Booking)
+        .where(Booking.id == booking_id)
+        .options(selectinload(Booking.customer), selectinload(Booking.unit).selectinload(Unit.tower).selectinload(Tower.project), selectinload(Booking.kyc_documents), selectinload(Booking.payment_schedules), selectinload(Booking.payment_receipts), selectinload(Booking.refunds))
+    )
+    return (await session.execute(stmt)).scalar_one()
+
+
 @router.get("/bookings/{booking_id}/documents/{doc_type}")
 async def get_booking_document_url(
     booking_id: UUID,
@@ -1106,6 +1131,34 @@ async def get_payment_receipt_pdf(
     pdf = html_to_pdf(html)
     key = storage.put_object(
         storage.receipt_key(current_user.organization_id, booking_id, receipt_id),
+        pdf,
+        "application/pdf",
+    )
+    return {"url": storage.presigned_get_url(key)}
+
+
+@router.get("/bookings/{booking_id}/token-receipt/pdf")
+async def get_token_receipt_pdf(
+    booking_id: UUID,
+    current_user=Depends(require_permissions(PermissionCode.FINANCE_VIEW)),
+    session: AsyncSession = Depends(get_db_session),
+):
+    """Render a PDF token receipt, store it, and return a presigned URL."""
+    booking = await session.get(Booking, booking_id)
+    if not booking or booking.is_deleted:
+        raise HTTPException(status_code=404, detail="Booking not found")
+    if booking.token_amount is None:
+        raise HTTPException(status_code=404, detail="No token recorded for this booking")
+    unit = await session.get(Unit, booking.unit_id)
+    project = await session.get(Project, unit.project_id) if unit else None
+    tower = await session.get(Tower, unit.tower_id) if unit else None
+    customer = (
+        await session.get(Customer, booking.customer_id) if booking.customer_id else None
+    )
+    html, _title = render_token_receipt(booking, unit, project, tower, customer)
+    pdf = html_to_pdf(html)
+    key = storage.put_object(
+        storage.token_receipt_key(current_user.organization_id, booking_id),
         pdf,
         "application/pdf",
     )

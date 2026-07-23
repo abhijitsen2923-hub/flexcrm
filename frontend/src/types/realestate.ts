@@ -194,6 +194,11 @@ export interface Booking {
   cancellationReason: string | null;
   registrationNumber: string | null;
   subRegistrarOffice: string | null;
+  // Token / booking amount (Phase C).
+  tokenAmount: number | null;
+  tokenReceivedOn: string | null;
+  tokenMode: PaymentMode | null;
+  tokenReference: string | null;
   bookingFormUrl: string | null;
   allotmentLetterUrl: string | null;
   createdAt: string;

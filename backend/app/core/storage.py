@@ -102,5 +102,10 @@ def receipt_key(org_id: UUID, booking_id: UUID, receipt_id: UUID) -> str:
     return f"org/{org_id}/bookings/{booking_id}/receipts/{receipt_id}.pdf"
 
 
+def token_receipt_key(org_id: UUID, booking_id: UUID) -> str:
+    # Deterministic per booking: re-recording the token overwrites the receipt.
+    return f"org/{org_id}/bookings/{booking_id}/token-receipt.pdf"
+
+
 def media_key(org_id: UUID, project_id: UUID, media_id: UUID, filename: str) -> str:
     return f"org/{org_id}/projects/{project_id}/media/{media_id}_{_safe_name(filename)}"

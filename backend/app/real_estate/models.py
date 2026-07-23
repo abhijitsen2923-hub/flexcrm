@@ -219,6 +219,14 @@ class Booking(TenantBase, UUIDPrimaryKeyMixin, TimestampMixin, TenantAuditMixin,
     registration_number: Mapped[str | None] = mapped_column(String(120), nullable=True)
     sub_registrar_office: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
+    # Token / booking amount (Phase C) — the initial money that confirms the booking
+    # (the "Booked / Token" stage). Kept first-class on the booking so the lead is the
+    # source of truth for it without digging through payment receipts.
+    token_amount: Mapped[Decimal | None] = mapped_column(Numeric(14, 2), nullable=True)
+    token_received_on: Mapped[date | None] = mapped_column(Date, nullable=True)
+    token_mode: Mapped[str | None] = mapped_column(String(20), nullable=True)  # upi/neft/cheque/cash/card/other
+    token_reference: Mapped[str | None] = mapped_column(String(120), nullable=True)
+
     unit: Mapped["Unit"] = relationship("Unit", back_populates="bookings")
     # Read-only link to the customer for display (name on lists/trackers/docs).
     customer = relationship("Customer", foreign_keys=[customer_id], viewonly=True)
