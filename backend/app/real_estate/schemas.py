@@ -6,7 +6,7 @@ from uuid import UUID
 
 from pydantic import Field, computed_field
 
-from app.database.enums import BookingStatus, SiteVisitFeedback, UnitStatus, UnitType
+from app.database.enums import BookingStatus, InvoiceStatus, SiteVisitFeedback, UnitStatus, UnitType
 from app.schemas.common import ORMModel
 from app.schemas.customer import CustomerCompact
 
@@ -375,6 +375,31 @@ class BookingTokenUpdate(ORMModel):
     token_received_on: date
     token_mode: PaymentMode
     token_reference: str | None = Field(default=None, max_length=120)
+
+
+class BookingInvoiceRead(ORMModel):
+    id: UUID
+    booking_id: UUID
+    schedule_id: UUID | None = None
+    invoice_number: str
+    installment_name: str
+    amount: Decimal
+    due_date: date | None = None
+    status: InvoiceStatus
+    created_at: datetime
+
+
+class BookingInvoiceCreate(ORMModel):
+    """Raise an invoice. Either bind to an existing installment (copies its name /
+    amount / due date) or supply the details directly for an ad-hoc invoice."""
+    schedule_id: UUID | None = None
+    installment_name: str | None = Field(default=None, max_length=120)
+    amount: Decimal | None = Field(default=None, ge=0)
+    due_date: date | None = None
+
+
+class BookingInvoiceStatusUpdate(ORMModel):
+    status: InvoiceStatus
 
 
 class PricingUpdate(ORMModel):

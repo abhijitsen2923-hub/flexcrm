@@ -1,8 +1,8 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { FileDown, Plus, Trash2 } from "lucide-react";
 import { Badge, Button, Modal, SelectField, TextField, useToast } from "../../../components";
 import { bookingsService } from "../../../services/bookings";
-import type { Booking, PaymentMode, PaymentScheduleEntry } from "../../../types/realestate";
+import type { Booking, BookingInvoice, PaymentMode, PaymentScheduleEntry } from "../../../types/realestate";
 import { extractErrorMessage } from "../../../utils/errors";
 import { formatDate, formatInr } from "../../../utils/format";
 
@@ -77,6 +77,9 @@ export function PaymentPlanModal({ booking: initial, onClose, onChanged }: Props
   const [payMode, setPayMode] = useState<PaymentMode>("upi");
   const [payRef, setPayRef] = useState("");
   const [saving, setSaving] = useState(false);
+
+  // Invoices (demand notes) raised against this booking's installments.
+  const [invoices, setInvoices] = useState<BookingInvoice[]>([]);
 
   const pctSum = useMemo(() => rows.reduce((n, r) => n + (Number(r.percentage) || 0), 0), [rows]);
 
@@ -155,6 +158,47 @@ export function PaymentPlanModal({ booking: initial, onClose, onChanged }: Props
       window.open(url, "_blank", "noopener");
     } catch {
       toast.error("Receipt unavailable", "File storage isn't configured yet.");
+    }
+  }
+
+  async function loadInvoices() {
+    try {
+      setInvoices(await bookingsService.listInvoices(booking.id));
+    } catch {
+      /* ignore — an invoice-list error shouldn't break the plan/collections view */
+    }
+  }
+
+  useEffect(() => {
+    if (hasPlan) void loadInvoices();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [booking.id, hasPlan]);
+
+  async function raiseInvoice(schedule: PaymentScheduleEntry) {
+    try {
+      await bookingsService.createInvoice(booking.id, { schedule_id: schedule.id });
+      toast.success("Invoice raised", schedule.installmentName);
+      await loadInvoices();
+    } catch (e) {
+      toast.error("Could not raise invoice", extractErrorMessage(e));
+    }
+  }
+
+  async function openInvoicePdf(invoiceId: string) {
+    try {
+      const { url } = await bookingsService.getInvoicePdfUrl(booking.id, invoiceId);
+      window.open(url, "_blank", "noopener");
+    } catch {
+      toast.error("Invoice unavailable", "File storage isn't configured yet.");
+    }
+  }
+
+  async function toggleInvoicePaid(inv: BookingInvoice) {
+    try {
+      await bookingsService.updateInvoiceStatus(booking.id, inv.id, inv.status === "paid" ? "issued" : "paid");
+      await loadInvoices();
+    } catch (e) {
+      toast.error("Could not update invoice", extractErrorMessage(e));
     }
   }
 
@@ -286,10 +330,11 @@ export function PaymentPlanModal({ booking: initial, onClose, onChanged }: Props
                     <td data-label="Demand" style={{ textAlign: "right" }}>{formatInr(p.demandAmount)}</td>
                     <td data-label="Paid" style={{ textAlign: "right" }}>{formatInr(p.paidAmount)}</td>
                     <td data-label="Outstanding" style={{ textAlign: "right" }}>{formatInr(p.outstanding)}</td>
-                    <td style={{ textAlign: "right" }}>
+                    <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>
                       {p.outstanding > 0 && (
                         <Button size="sm" variant="secondary" onClick={() => openRecord(p)}>Record</Button>
-                      )}
+                      )}{" "}
+                      <Button size="sm" variant="ghost" onClick={() => void raiseInvoice(p)}>Invoice</Button>
                     </td>
                   </tr>
                 ))}
@@ -336,6 +381,33 @@ export function PaymentPlanModal({ booking: initial, onClose, onChanged }: Props
                       <Button size="sm" variant="ghost" icon={<FileDown size={14} />} onClick={() => void openReceipt(r.id)}>
                         Receipt
                       </Button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {invoices.length > 0 && (
+              <div>
+                <div className="muted text-xs" style={{ textTransform: "uppercase", letterSpacing: ".04em", margin: "0.5rem 0" }}>
+                  Invoices
+                </div>
+                <div className="stack" style={{ gap: "0.4rem" }}>
+                  {invoices.map((inv) => (
+                    <div key={inv.id} className="row row--between" style={{ alignItems: "center", padding: "0.4rem 0.6rem", border: "1px solid var(--color-border)", borderRadius: "var(--radius-sm)" }}>
+                      <span className="text-sm">
+                        <strong>{inv.invoiceNumber}</strong> · {inv.installmentName} · {formatInr(inv.amount)}
+                        {inv.dueDate ? <span className="muted"> · due {formatDate(inv.dueDate)}</span> : null}{" "}
+                        <Badge tone={inv.status === "paid" ? "success" : inv.status === "void" ? "neutral" : "warning"}>{inv.status}</Badge>
+                      </span>
+                      <span className="row" style={{ gap: 4, alignItems: "center" }}>
+                        <Button size="sm" variant="ghost" onClick={() => void toggleInvoicePaid(inv)}>
+                          {inv.status === "paid" ? "Mark issued" : "Mark paid"}
+                        </Button>
+                        <Button size="sm" variant="ghost" icon={<FileDown size={14} />} onClick={() => void openInvoicePdf(inv.id)}>
+                          PDF
+                        </Button>
+                      </span>
                     </div>
                   ))}
                 </div>

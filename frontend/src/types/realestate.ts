@@ -176,6 +176,20 @@ export interface BookingRefund {
   createdAt: string;
 }
 
+export type BookingInvoiceStatus = "draft" | "issued" | "paid" | "refunded" | "void";
+
+export interface BookingInvoice {
+  id: string;
+  bookingId: string;
+  scheduleId: string | null;
+  invoiceNumber: string;
+  installmentName: string;
+  amount: number;
+  dueDate: string | null;
+  status: BookingInvoiceStatus;
+  createdAt: string;
+}
+
 export interface Booking {
   id: string;
   unitId: string;

@@ -107,5 +107,9 @@ def token_receipt_key(org_id: UUID, booking_id: UUID) -> str:
     return f"org/{org_id}/bookings/{booking_id}/token-receipt.pdf"
 
 
+def invoice_key(org_id: UUID, booking_id: UUID, invoice_id: UUID) -> str:
+    return f"org/{org_id}/bookings/{booking_id}/invoices/{invoice_id}.pdf"
+
+
 def media_key(org_id: UUID, project_id: UUID, media_id: UUID, filename: str) -> str:
     return f"org/{org_id}/projects/{project_id}/media/{media_id}_{_safe_name(filename)}"

@@ -12,7 +12,7 @@ from datetime import date
 from html import escape
 
 from app.models.customer import Customer
-from app.real_estate.models import Booking, PaymentReceipt, Project, Tower, Unit
+from app.real_estate.models import Booking, BookingInvoice, PaymentReceipt, Project, Tower, Unit
 
 
 _MODE_LABELS = {
@@ -28,6 +28,14 @@ _TITLES = {
     "allotment_letter": "Allotment Letter",
     "booking_form": "Booking Form",
     "receipt": "Payment Receipt",
+}
+
+_INVOICE_STATUS_LABELS = {
+    "draft": "Draft",
+    "issued": "Issued",
+    "paid": "Paid",
+    "refunded": "Refunded",
+    "void": "Void",
 }
 
 
@@ -202,6 +210,62 @@ def render_booking_document(
         """
 
     return _shell(title, builder, proj_name, location, rera, "Ref", ref, body), title
+
+
+def render_installment_invoice(
+    booking: Booking,
+    unit: Unit | None,
+    project: Project | None,
+    tower: Tower | None,
+    customer: Customer | None,
+    invoice: BookingInvoice,
+) -> tuple[str, str]:
+    """Return (html, title) for a per-installment demand invoice."""
+    title = "Invoice"
+
+    builder = project.builder_name if project else "Builder"
+    proj_name = project.name if project else "Project"
+    location = f"{project.location}, {project.city}" if project else ""
+    rera = project.rera_number if project and project.rera_number else None
+
+    unit_no = unit.unit_number if unit else "—"
+    tower_name = tower.name if tower else "—"
+    cust_name = customer.contact_name if customer else "—"
+    cust_email = customer.email if customer and customer.email else ""
+    cust_phone = customer.phone if customer and customer.phone else ""
+
+    amount = _inr(invoice.amount)
+    status = _INVOICE_STATUS_LABELS.get(invoice.status, str(invoice.status))
+
+    details = "<table class='kv'>" + "".join([
+        _row("Invoice No.", invoice.invoice_number),
+        _row("Invoice Date", _fmt_date(invoice.created_at.date() if invoice.created_at else None)),
+        _row("Installment", invoice.installment_name),
+        _row("Amount Due", amount),
+        _row("Due Date", _fmt_date(invoice.due_date)),
+        _row("Status", status),
+        _row("Project", proj_name),
+        _row("Tower / Unit", f"{tower_name} · {unit_no}"),
+    ]) + "</table>"
+
+    bill_to = "<table class='kv'>" + "".join([
+        _row("Name", cust_name),
+        *( [_row("Email", cust_email)] if cust_email else [] ),
+        *( [_row("Phone", cust_phone)] if cust_phone else [] ),
+    ]) + "</table>"
+
+    body = f"""
+      <p>This is a demand for the installment <strong>{escape(invoice.installment_name)}</strong>
+      towards Unit <strong>{escape(unit_no)}</strong> in {escape(proj_name)}.
+      Amount payable: <strong>{escape(amount)}</strong>.</p>
+      <h3>Bill To</h3>
+      {bill_to}
+      <h3>Invoice Details</h3>
+      {details}
+      {_sign("Authorised Signatory", "For " + builder)}
+    """
+
+    return _shell(title, builder, proj_name, location, rera, "Invoice", invoice.invoice_number, body), title
 
 
 def render_token_receipt(

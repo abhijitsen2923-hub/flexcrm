@@ -1,6 +1,8 @@
 import { apiClient } from "./http";
 import type {
   Booking,
+  BookingInvoice,
+  BookingInvoiceStatus,
   BookingStatus,
   BookingStep,
   PaymentMode,
@@ -44,6 +46,39 @@ export interface RecordTokenPayload {
   token_received_on: string;
   token_mode: PaymentMode;
   token_reference?: string | null;
+}
+
+export interface CreateInvoicePayload {
+  schedule_id?: string | null;
+  installment_name?: string | null;
+  amount?: number | null;
+  due_date?: string | null;
+}
+
+interface ApiBookingInvoice {
+  id: string;
+  booking_id: string;
+  schedule_id: string | null;
+  invoice_number: string;
+  installment_name: string;
+  amount: number | string;
+  due_date: string | null;
+  status: BookingInvoiceStatus;
+  created_at: string;
+}
+
+function mapInvoice(i: ApiBookingInvoice): BookingInvoice {
+  return {
+    id: i.id,
+    bookingId: i.booking_id,
+    scheduleId: i.schedule_id,
+    invoiceNumber: i.invoice_number,
+    installmentName: i.installment_name,
+    amount: Number(i.amount),
+    dueDate: i.due_date,
+    status: i.status,
+    createdAt: i.created_at,
+  };
 }
 
 // The API speaks snake_case; the app models are camelCase. Map at the boundary
@@ -331,5 +366,24 @@ export const bookingsService = {
   // Presigned URL to the generated PDF token receipt.
   getTokenReceiptPdfUrl(id: string): Promise<{ url: string }> {
     return apiClient.get<{ url: string }>(`/bookings/${id}/token-receipt/pdf`).then((r) => r.data);
+  },
+
+  // Per-installment demand invoices (Phase C).
+  listInvoices(bookingId: string): Promise<BookingInvoice[]> {
+    return apiClient.get<ApiBookingInvoice[]>(`/bookings/${bookingId}/invoices`).then((r) => r.data.map(mapInvoice));
+  },
+
+  createInvoice(bookingId: string, payload: CreateInvoicePayload): Promise<BookingInvoice> {
+    return apiClient.post<ApiBookingInvoice>(`/bookings/${bookingId}/invoices`, payload).then((r) => mapInvoice(r.data));
+  },
+
+  updateInvoiceStatus(bookingId: string, invoiceId: string, status: BookingInvoiceStatus): Promise<BookingInvoice> {
+    return apiClient
+      .patch<ApiBookingInvoice>(`/bookings/${bookingId}/invoices/${invoiceId}`, { status })
+      .then((r) => mapInvoice(r.data));
+  },
+
+  getInvoicePdfUrl(bookingId: string, invoiceId: string): Promise<{ url: string }> {
+    return apiClient.get<{ url: string }>(`/bookings/${bookingId}/invoices/${invoiceId}/pdf`).then((r) => r.data);
   },
 };

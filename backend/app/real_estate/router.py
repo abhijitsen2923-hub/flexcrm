@@ -14,14 +14,20 @@ from app.core import storage
 from app.core.exceptions import NotFoundError
 from app.core.pdf import html_to_pdf
 from app.core.permissions import PermissionCode
-from app.database.enums import BookingStatus, UnitStatus, UnitType
+from app.database.enums import BookingStatus, InvoiceStatus, UnitStatus, UnitType
 from app.database.session import get_db_session
 from app.models.customer import Customer
 from app.models.lead import Lead
 from app.models.user import User
-from app.real_estate.documents import render_booking_document, render_payment_receipt, render_token_receipt
+from app.real_estate.documents import (
+    render_booking_document,
+    render_installment_invoice,
+    render_payment_receipt,
+    render_token_receipt,
+)
 from app.real_estate.models import (
     Booking,
+    BookingInvoice,
     BookingKycDoc,
     BookingRefund,
     PaymentReceipt,
@@ -41,6 +47,9 @@ from app.real_estate.schemas import (
     BookingKycDocRead,
     BookingRead,
     BookingRefundCreate,
+    BookingInvoiceCreate,
+    BookingInvoiceRead,
+    BookingInvoiceStatusUpdate,
     BookingRegister,
     BookingStepAdvance,
     BookingTokenUpdate,
@@ -1159,6 +1168,132 @@ async def get_token_receipt_pdf(
     pdf = html_to_pdf(html)
     key = storage.put_object(
         storage.token_receipt_key(current_user.organization_id, booking_id),
+        pdf,
+        "application/pdf",
+    )
+    return {"url": storage.presigned_get_url(key)}
+
+
+# ---------------------------------------------------------------------------
+# Bookings — per-installment invoices (demand notes)
+# ---------------------------------------------------------------------------
+
+@router.get("/bookings/{booking_id}/invoices", response_model=list[BookingInvoiceRead])
+async def list_booking_invoices(
+    booking_id: UUID,
+    _: object = Depends(require_permissions(PermissionCode.FINANCE_VIEW)),
+    session: AsyncSession = Depends(get_db_session),
+):
+    stmt = (
+        select(BookingInvoice)
+        .where(BookingInvoice.booking_id == booking_id, BookingInvoice.is_deleted.is_(False))
+        .order_by(BookingInvoice.created_at)
+    )
+    return list((await session.execute(stmt)).scalars().all())
+
+
+@router.post(
+    "/bookings/{booking_id}/invoices",
+    response_model=BookingInvoiceRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_booking_invoice(
+    booking_id: UUID,
+    payload: BookingInvoiceCreate,
+    _: object = Depends(require_permissions(PermissionCode.FINANCE_RECORD_PAYMENT)),
+    session: AsyncSession = Depends(get_db_session),
+):
+    """Raise a demand invoice for a booking. Bind to an installment (copies its
+    name / amount / due date) or supply them directly for an ad-hoc invoice."""
+    # Reuse finance's per-tenant sequence primitive (own table + prefix → its own
+    # independent series). Imported locally to avoid any cross-domain import cycle.
+    from app.finance.services import _next_sequence
+
+    booking = await session.get(Booking, booking_id)
+    if not booking or booking.is_deleted:
+        raise HTTPException(status_code=404, detail="Booking not found")
+
+    installment_name = payload.installment_name
+    amount = payload.amount
+    due_date = payload.due_date
+    if payload.schedule_id is not None:
+        schedule = await session.get(PaymentSchedule, payload.schedule_id)
+        if not schedule or schedule.booking_id != booking_id:
+            raise HTTPException(status_code=404, detail="Installment not found for this booking")
+        installment_name = installment_name or schedule.installment_name
+        amount = amount if amount is not None else schedule.demand_amount
+        due_date = due_date or schedule.due_date
+    if not installment_name or amount is None:
+        raise HTTPException(
+            status_code=400,
+            detail="installment_name and amount are required (or provide a schedule_id).",
+        )
+
+    async def _build() -> BookingInvoice:
+        number = await _next_sequence(session, BookingInvoice, "invoice_number", "INV-RE")
+        inv = BookingInvoice(
+            booking_id=booking_id,
+            schedule_id=payload.schedule_id,
+            invoice_number=number,
+            installment_name=installment_name,
+            amount=amount,
+            due_date=due_date,
+            status=InvoiceStatus.issued,
+        )
+        session.add(inv)
+        return inv
+
+    invoice = await _build()
+    try:
+        await session.commit()
+    except IntegrityError:
+        # A concurrent mint grabbed the same invoice_number — re-mint once.
+        await session.rollback()
+        invoice = await _build()
+        await session.commit()
+    await session.refresh(invoice)
+    return invoice
+
+
+@router.patch("/bookings/{booking_id}/invoices/{invoice_id}", response_model=BookingInvoiceRead)
+async def update_booking_invoice(
+    booking_id: UUID,
+    invoice_id: UUID,
+    payload: BookingInvoiceStatusUpdate,
+    _: object = Depends(require_permissions(PermissionCode.FINANCE_RECORD_PAYMENT)),
+    session: AsyncSession = Depends(get_db_session),
+):
+    invoice = await session.get(BookingInvoice, invoice_id)
+    if not invoice or invoice.is_deleted or invoice.booking_id != booking_id:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+    invoice.status = payload.status
+    await session.commit()
+    await session.refresh(invoice)
+    return invoice
+
+
+@router.get("/bookings/{booking_id}/invoices/{invoice_id}/pdf")
+async def get_booking_invoice_pdf(
+    booking_id: UUID,
+    invoice_id: UUID,
+    current_user=Depends(require_permissions(PermissionCode.FINANCE_VIEW)),
+    session: AsyncSession = Depends(get_db_session),
+):
+    """Render a PDF for one invoice, store it, and return a presigned URL."""
+    invoice = await session.get(BookingInvoice, invoice_id)
+    if not invoice or invoice.is_deleted or invoice.booking_id != booking_id:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+    booking = await session.get(Booking, booking_id)
+    unit = await session.get(Unit, booking.unit_id) if booking else None
+    project = await session.get(Project, unit.project_id) if unit else None
+    tower = await session.get(Tower, unit.tower_id) if unit else None
+    customer = (
+        await session.get(Customer, booking.customer_id) if booking and booking.customer_id else None
+    )
+    html, _title = render_installment_invoice(booking, unit, project, tower, customer, invoice)
+    pdf = html_to_pdf(html)
+    key = storage.put_object(
+        storage.invoice_key(current_user.organization_id, booking_id, invoice_id),
         pdf,
         "application/pdf",
     )

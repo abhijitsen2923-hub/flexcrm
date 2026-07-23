@@ -5,6 +5,7 @@ from uuid import UUID
 
 from sqlalchemy import (
     Boolean,
+    CheckConstraint,
     Date,
     DateTime,
     Enum,
@@ -15,13 +16,14 @@ from sqlalchemy import (
     Numeric,
     String,
     Text,
+    UniqueConstraint,
     Uuid,
     func,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database.base import TenantBase
-from app.database.enums import BookingStatus, SiteVisitFeedback, UnitStatus
+from app.database.enums import BookingStatus, InvoiceStatus, SiteVisitFeedback, UnitStatus
 from app.models.base import TenantAuditMixin, TenantSoftDeleteMixin, TimestampMixin, UUIDPrimaryKeyMixin
 
 
@@ -248,6 +250,12 @@ class Booking(TenantBase, UUIDPrimaryKeyMixin, TimestampMixin, TenantAuditMixin,
         cascade="all, delete-orphan",
         order_by="BookingRefund.refunded_on",
     )
+    invoices: Mapped[list["BookingInvoice"]] = relationship(
+        "BookingInvoice",
+        back_populates="booking",
+        cascade="all, delete-orphan",
+        order_by="BookingInvoice.created_at",
+    )
 
 
 class BookingKycDoc(TenantBase, UUIDPrimaryKeyMixin, TimestampMixin):
@@ -332,3 +340,38 @@ class BookingRefund(TenantBase, UUIDPrimaryKeyMixin, TimestampMixin):
     reason: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     booking: Mapped["Booking"] = relationship("Booking", back_populates="refunds")
+
+
+class BookingInvoice(TenantBase, UUIDPrimaryKeyMixin, TimestampMixin, TenantAuditMixin, TenantSoftDeleteMixin):
+    """A demand-note invoice for one booking installment (Phase C).
+
+    Distinct from PaymentReceipt: an invoice is a DEMAND raised *before* collection,
+    a receipt acknowledges money *received*. Numbered with a per-tenant sequential
+    series via finance._next_sequence (prefix INV-RE) — its own table + prefix make
+    the series independent from the finance INV series."""
+    __tablename__ = "booking_invoices"
+    __table_args__ = (
+        CheckConstraint("amount >= 0", name="ck_booking_invoices_amount_non_negative"),
+        # Schema isolation removes the need for org_id in the uniqueness constraint.
+        UniqueConstraint("invoice_number", name="uq_booking_invoices_invoice_number"),
+        {"schema": "tenant"},
+    )
+
+    invoice_number: Mapped[str] = mapped_column(String(32), nullable=False)
+    booking_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("bookings.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    # The installment this invoice bills (nullable → ad-hoc / retained on schedule delete).
+    schedule_id: Mapped[UUID | None] = mapped_column(
+        Uuid, ForeignKey("payment_schedules.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    installment_name: Mapped[str] = mapped_column(String(120), nullable=False)
+    amount: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False, default=0)
+    due_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    status: Mapped[InvoiceStatus] = mapped_column(
+        Enum(InvoiceStatus, name="invoice_status_enum"),
+        nullable=False,
+        default=InvoiceStatus.issued,
+    )
+
+    booking: Mapped["Booking"] = relationship("Booking", back_populates="invoices")
