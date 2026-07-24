@@ -1,4 +1,5 @@
 from datetime import date, datetime
+from decimal import Decimal
 from uuid import UUID
 
 from sqlalchemy import DateTime, Enum, ForeignKey, Index, Integer, Numeric, String, Text, UniqueConstraint, Uuid
@@ -42,6 +43,10 @@ class Customer(TenantBase, UUIDPrimaryKeyMixin, TimestampMixin, TenantAuditMixin
     onboarding_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     renewal_due_at: Mapped[date | None] = mapped_column(nullable=True, index=True)
     ltv: Mapped[float] = mapped_column(Numeric(12, 2), nullable=False, default=0)
+    # Deal value snapshotted from the source lead at close/promotion (Phase C4).
+    # Point-in-time — distinct from `ltv`, which is a running aggregate of
+    # confirmed bookings/deals/renewals (often 0 at promotion, before any booking).
+    sale_value: Mapped[Decimal | None] = mapped_column(Numeric(14, 2), nullable=True)
     churn_reason: Mapped[str | None] = mapped_column(String(255), nullable=True)
     original_owner_id: Mapped[UUID | None] = mapped_column(
         Uuid,

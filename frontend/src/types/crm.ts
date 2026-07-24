@@ -154,6 +154,7 @@ export interface Customer {
   onboarding_started_at: string | null;
   renewal_due_at: string | null;
   ltv: string;
+  sale_value: string | null;
   churn_reason: string | null;
   original_owner_id: string | null;
   current_owner_id: string | null;

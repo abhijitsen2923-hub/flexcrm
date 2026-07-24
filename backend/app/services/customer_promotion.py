@@ -37,6 +37,9 @@ class CustomerPromotionService(ServiceBase):
                     existing.original_owner_id = lead.assigned_to_id
                 if existing.current_owner_id is None and lead.assigned_to_id is not None:
                     existing.current_owner_id = lead.assigned_to_id
+                # Snapshot the (re-)closed deal value from the lead (Phase C4).
+                if lead.value and lead.value > 0:
+                    existing.sale_value = lead.value
                 await self.session.flush()
                 await realtime_manager.broadcast(
                     {
@@ -59,6 +62,7 @@ class CustomerPromotionService(ServiceBase):
                 "email": lead.contact_email,
                 "phone": lead.contact_phone,
                 "source": lead.source,
+                "sale_value": lead.value if lead.value and lead.value > 0 else None,
                 "status": CustomerStatus.active,
                 "lifecycle_stage": CustomerLifecycleStage.onboarding,
                 "customer_number": await claim_customer_number(self.session),

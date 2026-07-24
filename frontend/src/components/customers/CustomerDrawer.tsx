@@ -193,6 +193,7 @@ export function CustomerDrawer({ open, customer, onClose }: Props) {
                         }
                       />
                       <DetailRow label="Lifetime value" value={formatCurrency(c.ltv ?? "0", "INR")} />
+                      <DetailRow label="Sale value (at close)" value={c.sale_value ? formatCurrency(c.sale_value, "INR") : "—"} />
                       <DetailRow
                         label="Origin"
                         value={c.source_lead ? `Lead #${c.source_lead.lead_number} — ${c.source_lead.title}` : "Added manually"}

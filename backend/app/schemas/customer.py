@@ -56,6 +56,7 @@ class CustomerRead(CustomerCompact):
     onboarding_started_at: datetime | None = None
     renewal_due_at: date | None = None
     ltv: Decimal = Decimal("0")
+    sale_value: Decimal | None = None
     churn_reason: str | None = None
     original_owner_id: UUID | None = None
     current_owner_id: UUID | None = None
