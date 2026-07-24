@@ -1,5 +1,14 @@
 import { apiClient } from "./http";
-import type { GarageOption, Project, ProjectMedia, Tower, Unit, UnitStatus, UnitType } from "../types/realestate";
+import type {
+  GarageOption,
+  Project,
+  ProjectMedia,
+  ProjectPossessionRollup,
+  Tower,
+  Unit,
+  UnitStatus,
+  UnitType,
+} from "../types/realestate";
 
 // The API speaks snake_case and returns no computed inventory counts / media.
 // The app models are camelCase with totalUnits/availableUnits/media derived from
@@ -69,6 +78,27 @@ interface ApiProject {
 // Decimal columns serialize to strings (or numbers); null stays null.
 function numOrNull(v: number | string | null | undefined): number | null {
   return v === null || v === undefined || v === "" ? null : Number(v);
+}
+
+interface ApiPossessionUnit {
+  unit_id: string;
+  unit_number: string;
+  tower_name: string | null;
+  floor: number;
+  unit_status: string;
+  booking_id: string | null;
+  customer_name: string | null;
+  registration_number: string | null;
+  registered: boolean;
+  possession_done: number;
+  possession_total: number;
+}
+
+interface ApiPossessionRollup {
+  project_id: string;
+  project_name: string;
+  summary: { total_units: number; booked: number; registered: number; possession_complete: number };
+  units: ApiPossessionUnit[];
 }
 
 function mapUnit(u: ApiUnit): Unit {
@@ -223,6 +253,33 @@ export const inventoryService = {
 
   getProject(id: string): Promise<Project> {
     return apiClient.get<ApiProject>(`/inventory/projects/${id}`).then((r) => mapProject(r.data));
+  },
+
+  // Project-wise possession & registration rollup (Phase C3).
+  getProjectPossession(id: string): Promise<ProjectPossessionRollup> {
+    return apiClient.get<ApiPossessionRollup>(`/inventory/projects/${id}/possession`).then((r) => ({
+      projectId: r.data.project_id,
+      projectName: r.data.project_name,
+      summary: {
+        totalUnits: r.data.summary.total_units,
+        booked: r.data.summary.booked,
+        registered: r.data.summary.registered,
+        possessionComplete: r.data.summary.possession_complete,
+      },
+      units: r.data.units.map((u) => ({
+        unitId: u.unit_id,
+        unitNumber: u.unit_number,
+        towerName: u.tower_name,
+        floor: u.floor,
+        unitStatus: u.unit_status as UnitStatus,
+        bookingId: u.booking_id,
+        customerName: u.customer_name,
+        registrationNumber: u.registration_number,
+        registered: u.registered,
+        possessionDone: u.possession_done,
+        possessionTotal: u.possession_total,
+      })),
+    }));
   },
 
   createProject(payload: ProjectCreatePayload): Promise<Project> {

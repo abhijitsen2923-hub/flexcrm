@@ -6,7 +6,7 @@ import { useInventory } from "../../hooks/useInventory";
 import { usePermissions } from "../../hooks/usePermissions";
 import { inventoryService } from "../../services/inventory";
 import { exportsService } from "../../services/exports";
-import type { GarageOption, Project, ProjectMedia, Tower, Unit, UnitType } from "../../types/realestate";
+import type { GarageOption, Project, ProjectMedia, ProjectPossessionRollup, Tower, Unit, UnitType } from "../../types/realestate";
 import { LoadingBlock } from "../../components/ui/Spinner";
 import { extractErrorMessage } from "../../utils/errors";
 import { formatInr } from "../../utils/format";
@@ -661,6 +661,9 @@ export default function ProjectsPage() {
               <span><strong>Total Units:</strong> {selectedProject.totalUnits}</span>
             </div>
 
+            <h3 className="project-detail__section-title">Possession &amp; Registration</h3>
+            <PossessionSummary projectId={selectedProject.id} />
+
             <h3 className="project-detail__section-title">Towers &amp; Units</h3>
             <TowerManager project={selectedProject} onChanged={refresh} />
 
@@ -684,6 +687,38 @@ export default function ProjectsPage() {
         onCancel={() => setArchiveProject(null)}
         onConfirm={() => void confirmArchiveProject()}
       />
+    </div>
+  );
+}
+
+// --- Project-wise possession & registration rollup (Phase C3) --------------
+
+function PossessionSummary({ projectId }: { projectId: string }) {
+  const [rollup, setRollup] = useState<ProjectPossessionRollup | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let alive = true;
+    setLoading(true);
+    inventoryService
+      .getProjectPossession(projectId)
+      .then((r) => alive && setRollup(r))
+      .catch(() => alive && setRollup(null))
+      .finally(() => alive && setLoading(false));
+    return () => {
+      alive = false;
+    };
+  }, [projectId]);
+
+  if (loading) return <p className="muted text-sm">Loading possession status…</p>;
+  if (!rollup) return <p className="muted text-sm">Possession status unavailable.</p>;
+  const s = rollup.summary;
+  return (
+    <div className="row" style={{ gap: "1.5rem", flexWrap: "wrap" }}>
+      <span className="text-sm"><span className="muted">Total units</span> <strong>{s.totalUnits}</strong></span>
+      <span className="text-sm"><span className="muted">Booked</span> <strong>{s.booked}</strong></span>
+      <span className="text-sm"><span className="muted">Registered</span> <strong>{s.registered}</strong></span>
+      <span className="text-sm"><span className="muted">Possession complete</span> <strong>{s.possessionComplete}</strong></span>
     </div>
   );
 }

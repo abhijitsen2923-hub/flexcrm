@@ -94,6 +94,36 @@ class ProjectWithTowersRead(ProjectRead):
     media: list[ProjectMediaRead] = []
 
 
+class ProjectPossessionUnit(ORMModel):
+    """One unit's registration + possession status within a project rollup."""
+    unit_id: UUID
+    unit_number: str
+    tower_name: str | None = None
+    floor: int
+    unit_status: UnitStatus
+    booking_id: UUID | None = None
+    customer_name: str | None = None
+    registration_number: str | None = None
+    registered: bool = False
+    possession_done: int = 0
+    possession_total: int = 0
+
+
+class ProjectPossessionSummary(ORMModel):
+    total_units: int = 0
+    booked: int = 0
+    registered: int = 0
+    possession_complete: int = 0
+
+
+class ProjectPossessionRollup(ORMModel):
+    """Project-wise possession & registration rollup (Phase C3)."""
+    project_id: UUID
+    project_name: str
+    summary: ProjectPossessionSummary
+    units: list[ProjectPossessionUnit] = []
+
+
 class ProjectCreate(ProjectDetailsMixin):
     name: str = Field(min_length=1, max_length=255)
     builder_name: str = Field(min_length=1, max_length=255)

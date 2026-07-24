@@ -74,6 +74,34 @@ export interface Project {
   updatedAt: string;
 }
 
+export interface ProjectPossessionUnit {
+  unitId: string;
+  unitNumber: string;
+  towerName: string | null;
+  floor: number;
+  unitStatus: UnitStatus;
+  bookingId: string | null;
+  customerName: string | null;
+  registrationNumber: string | null;
+  registered: boolean;
+  possessionDone: number;
+  possessionTotal: number;
+}
+
+export interface ProjectPossessionSummary {
+  totalUnits: number;
+  booked: number;
+  registered: number;
+  possessionComplete: number;
+}
+
+export interface ProjectPossessionRollup {
+  projectId: string;
+  projectName: string;
+  summary: ProjectPossessionSummary;
+  units: ProjectPossessionUnit[];
+}
+
 export interface SiteVisit {
   id: string;
   leadId: string;

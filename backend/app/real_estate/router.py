@@ -62,6 +62,9 @@ from app.real_estate.schemas import (
     ProjectCreate,
     ProjectFullCreate,
     ProjectMediaRead,
+    ProjectPossessionRollup,
+    ProjectPossessionSummary,
+    ProjectPossessionUnit,
     ProjectRead,
     ProjectUpdate,
     ProjectWithTowersRead,
@@ -226,6 +229,86 @@ async def get_project(
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
     return project
+
+
+@router.get("/inventory/projects/{project_id}/possession", response_model=ProjectPossessionRollup)
+async def get_project_possession(
+    project_id: UUID,
+    _: object = Depends(require_permissions(PermissionCode.LEAD_VIEW)),
+    session: AsyncSession = Depends(get_db_session),
+):
+    """Project-wise possession & registration rollup (Phase C3): every unit + its
+    confirmed booking's registration/possession status + summary counts."""
+    project = await session.get(Project, project_id)
+    if not project or project.is_deleted:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    units = (
+        await session.execute(
+            select(Unit)
+            .where(Unit.project_id == project_id, Unit.is_deleted.is_(False))
+            .options(selectinload(Unit.tower))
+            .order_by(Unit.floor, Unit.unit_number)
+        )
+    ).scalars().all()
+
+    # At most one CONFIRMED booking per unit (partial unique index), so unit→booking is 1:1.
+    by_unit: dict[UUID, Booking] = {}
+    unit_ids = [u.id for u in units]
+    if unit_ids:
+        bookings = (
+            await session.execute(
+                select(Booking)
+                .where(
+                    Booking.unit_id.in_(unit_ids),
+                    Booking.is_deleted.is_(False),
+                    Booking.status == BookingStatus.confirmed,
+                )
+                .options(selectinload(Booking.customer))
+            )
+        ).scalars().all()
+        by_unit = {b.unit_id: b for b in bookings}
+
+    rows: list[ProjectPossessionUnit] = []
+    booked = registered = possession_complete = 0
+    for u in units:
+        b = by_unit.get(u.id)
+        checklist = (b.possession_checklist if b else None) or []
+        done = sum(1 for x in checklist if x)
+        total = len(checklist)
+        is_registered = u.status in (UnitStatus.registered, UnitStatus.sold) or bool(b and b.registration_number)
+        if b is not None:
+            booked += 1
+        if is_registered:
+            registered += 1
+        if total > 0 and done == total:
+            possession_complete += 1
+        rows.append(
+            ProjectPossessionUnit(
+                unit_id=u.id,
+                unit_number=u.unit_number,
+                tower_name=u.tower.name if u.tower else None,
+                floor=u.floor,
+                unit_status=u.status,
+                booking_id=b.id if b else None,
+                customer_name=(b.customer.contact_name if b and b.customer else None),
+                registration_number=(b.registration_number if b else None),
+                registered=is_registered,
+                possession_done=done,
+                possession_total=total,
+            )
+        )
+    return ProjectPossessionRollup(
+        project_id=project.id,
+        project_name=project.name,
+        summary=ProjectPossessionSummary(
+            total_units=len(units),
+            booked=booked,
+            registered=registered,
+            possession_complete=possession_complete,
+        ),
+        units=rows,
+    )
 
 
 # ---------------------------------------------------------------------------
