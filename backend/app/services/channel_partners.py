@@ -201,6 +201,16 @@ class ChannelPartnerService(ServiceBase):
         rows = await self.session.execute(stmt)
         return list(rows.scalars().all())
 
+    async def payouts_for_lead(self, lead_id: UUID) -> list[BrokeragePayout]:
+        """Brokerage payout(s) accrued for a specific lead (Phase C4 lead tab)."""
+        stmt = (
+            select(BrokeragePayout)
+            .where(BrokeragePayout.lead_id == lead_id)
+            .order_by(BrokeragePayout.created_at.desc())
+        )
+        rows = await self.session.execute(stmt)
+        return list(rows.scalars().all())
+
     async def get_payout(self, payout_id: UUID) -> BrokeragePayout:
         payout = await self.session.get(BrokeragePayout, payout_id)
         if payout is None:

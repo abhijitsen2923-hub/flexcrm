@@ -20,8 +20,10 @@ from app.schemas.lead import (
     LeadRead,
     LeadUpdate,
 )
+from app.schemas.channel_partner import BrokeragePayoutRead
 from app.schemas.lead_document import LeadDocumentRead, LeadDocumentUpload
 from app.schemas.stage_transition import StageTransitionCreate, StageTransitionRead
+from app.services.channel_partners import ChannelPartnerService
 from app.services.lead_documents import LeadDocumentService, get_lead_or_404
 from app.services.lead_import import LeadImportService
 from app.services.leads import LeadService
@@ -39,6 +41,19 @@ async def _enforce_lead_access(session: AsyncSession, lead_id: UUID, user) -> No
         lead = await get_lead_or_404(session, lead_id)
         if lead.assigned_to_id != user.id:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Lead not found")
+
+
+@router.get("/{lead_id}/brokerage", response_model=list[BrokeragePayoutRead])
+async def list_lead_brokerage(
+    lead_id: UUID,
+    current_user=Depends(require_permissions(PermissionCode.FINANCE_VIEW)),
+    session: AsyncSession = Depends(get_db_session),
+):
+    """Brokerage payout(s) accrued for this lead's referring partner (Phase C4).
+    Financial data — gated by FINANCE_VIEW; the partner's NAME is already on
+    LeadRead for any lead viewer."""
+    await _enforce_lead_access(session, lead_id, current_user)
+    return await ChannelPartnerService(session).payouts_for_lead(lead_id)
 
 
 @router.get("", response_model=PaginatedResponse[LeadRead])

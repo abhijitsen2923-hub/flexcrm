@@ -8,6 +8,7 @@ import type {
   SearchSortQuery,
   StageTransition
 } from "../types";
+import type { BrokeragePayout } from "../types/partner";
 import { buildQueryString } from "../utils/queryString";
 import { apiClient } from "./http";
 
@@ -146,6 +147,13 @@ export const leadsService = {
   // Per-(lead, user) call tracking.
   async calls(leadId: string): Promise<LeadCallLog[]> {
     const { data } = await apiClient.get<LeadCallLog[]>(`/leads/${leadId}/calls`);
+    return data;
+  },
+
+  // Brokerage payout(s) accrued for this lead's referring partner (Phase C4).
+  // FINANCE_VIEW-gated server-side — callers should tolerate a 403 (hide the section).
+  async brokerage(leadId: string): Promise<BrokeragePayout[]> {
+    const { data } = await apiClient.get<BrokeragePayout[]>(`/leads/${leadId}/brokerage`);
     return data;
   },
 

@@ -5,7 +5,9 @@ import { inventoryService } from "../../services/inventory";
 import { BookingWizard } from "../../pages/bookings/components/BookingWizard";
 import { PaymentPlanModal } from "../../pages/bookings/components/PaymentPlanModal";
 import type { PriceDefaults } from "../../pages/inventory/components/PriceCalculator";
+import { leadsService } from "../../services/leads";
 import type { Booking, PaymentMode } from "../../types/realestate";
+import type { BrokeragePayout } from "../../types/partner";
 import { priceDefaultsForProject } from "../../utils/priceDefaults";
 import { extractErrorMessage } from "../../utils/errors";
 import { formatDate, formatInr } from "../../utils/format";
@@ -49,6 +51,7 @@ export function LeadBookingsTab({ leadId, customerId, refreshKey }: Props) {
   const toast = useToast();
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [loading, setLoading] = useState(true);
+  const [brokerage, setBrokerage] = useState<BrokeragePayout[]>([]);
 
   const [payBooking, setPayBooking] = useState<Booking | null>(null);
 
@@ -81,6 +84,12 @@ export function LeadBookingsTab({ leadId, customerId, refreshKey }: Props) {
       toast.error("Could not load bookings", extractErrorMessage(err));
     } finally {
       setLoading(false);
+    }
+    // Brokerage is FINANCE_VIEW-gated — a 403 for non-finance roles just hides it.
+    try {
+      setBrokerage(await leadsService.brokerage(leadId));
+    } catch {
+      setBrokerage([]);
     }
   }
 
@@ -288,6 +297,31 @@ export function LeadBookingsTab({ leadId, customerId, refreshKey }: Props) {
             </div>
           );
         })
+      )}
+
+      {brokerage.length > 0 && (
+        <div className="card" style={{ padding: "0.85rem 1rem" }}>
+          <div className="muted text-xs" style={{ textTransform: "uppercase", letterSpacing: ".04em", marginBottom: "0.4rem" }}>
+            Brokerage
+          </div>
+          <div className="stack" style={{ gap: "0.4rem" }}>
+            {brokerage.map((p) => (
+              <div key={p.id} className="row row--between" style={{ alignItems: "center" }}>
+                <span className="text-sm">
+                  <strong>{formatInr(Number(p.amount))}</strong>{" "}
+                  <span className="muted">
+                    · {p.rate_type === "percent" ? `${p.rate_snapshot}%` : "flat"}
+                    {p.deal_value ? ` of ${formatInr(Number(p.deal_value))}` : ""}
+                  </span>{" "}
+                  <Badge tone={p.status === "paid" ? "success" : p.status === "reversed" ? "neutral" : "warning"}>
+                    {p.status}
+                  </Badge>
+                </span>
+                {p.paid_on ? <span className="muted text-xs">paid {formatDate(p.paid_on)}</span> : null}
+              </div>
+            ))}
+          </div>
+        </div>
       )}
 
       {payBooking && (
