@@ -30,11 +30,17 @@ import { usersService } from "../services/users";
 import type { Lead, LeadIndustry, Organization, PipelineStage, User } from "../types";
 import { extractErrorMessage } from "../utils/errors";
 import { formatCurrency } from "../utils/format";
-import { OTHER_OPTION, industryInterestLabel, leadIndustryOptions, leadSourceOptions, pipelineCategoryTone, propertyInterestOptions, propertyTypeOptions, salutationOptions, titleCase } from "../utils/options";
+import { OTHER_OPTION, industryInterestLabel, leadCampaignOptions, leadIndustryOptions, leadSourceOptions, pipelineCategoryTone, propertyInterestOptions, propertyTypeOptions, salutationOptions, titleCase } from "../utils/options";
 import { canSetStage } from "../utils/stageAccess";
 
 
 type ViewMode = "list" | "kanban";
+
+// Stages whose move triggers heavy / needs-input side-effects keep the comment
+// modal: `sold` promotes a customer + accrues brokerage; `site_visit_confirmed`
+// books a visit on the calendar. Every other stage changes instantly from the
+// dropdown (like the Owner column), recording an auto-comment.
+const QUICK_STAGE_MODAL_CODES = new Set<string>(["sold", "site_visit_confirmed"]);
 
 
 // Red "!" marker shown on any lead that shares an email or phone with another
@@ -80,6 +86,8 @@ interface CreateFormState {
   expected_close_date: string;
   source: string;
   source_other: string;
+  campaign: string;
+  campaign_other: string;
   interest: string;
   interest_other: string;
   // Real-estate specific (only submitted when industry === "real_estate")
@@ -112,6 +120,8 @@ function makeEmptyForm(
     expected_close_date: "",
     source: "",
     source_other: "",
+    campaign: "",
+    campaign_other: "",
     interest: "",
     interest_other: "",
     property_type: "",
@@ -137,6 +147,21 @@ export default function LeadsPage() {
   const [industryFilter, setIndustryFilter] = useState<LeadIndustry | "">(defaultIndustry);
   const [stageFilter, setStageFilter] = useState<string>("");
   const [ownerFilter, setOwnerFilter] = useState<string>("");
+  const [sourceFilter, setSourceFilter] = useState<string>("");
+  const [campaignFilter, setCampaignFilter] = useState<string>("");
+  // Raw search box value + its debounced counterpart (the latter drives the query
+  // so typing doesn't fire a request per keystroke).
+  const [searchInput, setSearchInput] = useState("");
+  const [search, setSearch] = useState("");
+
+  // Debounce the search box (~300ms); reset to page 1 whenever the term changes.
+  useEffect(() => {
+    const handle = setTimeout(() => {
+      setSearch(searchInput.trim());
+      setPage(1);
+    }, 300);
+    return () => clearTimeout(handle);
+  }, [searchInput]);
 
   // If the auth context resolves AFTER the first render (it does — there's an
   // initial profile fetch), pick up the business_type once it lands.
@@ -175,9 +200,12 @@ export default function LeadsPage() {
       page_size: 20,
       industry: industryFilter || undefined,
       stage_code: stageFilter || undefined,
-      assigned_to_id: ownerFilter || undefined
+      source: sourceFilter || undefined,
+      campaign: campaignFilter || undefined,
+      assigned_to_id: ownerFilter || undefined,
+      search: search || undefined
     }),
-    [page, industryFilter, stageFilter, ownerFilter]
+    [page, industryFilter, stageFilter, sourceFilter, campaignFilter, ownerFilter, search]
   );
 
   const { leads, pagination, loading, refresh, createLead, transitionLead } = useLeads(query);
@@ -366,6 +394,7 @@ export default function LeadsPage() {
         probability: Number(form.probability) || 0,
         expected_close_date: form.expected_close_date || null,
         source: (form.source === OTHER_OPTION ? form.source_other.trim() : form.source) || null,
+        campaign: (form.campaign === OTHER_OPTION ? form.campaign_other.trim() : form.campaign) || null,
         interest: (form.interest === OTHER_OPTION ? form.interest_other.trim() : form.interest.trim()) || null,
         ...(form.industry === "real_estate" ? {
           property_type: (form.property_type === OTHER_OPTION ? form.property_type_other.trim() : form.property_type) || null,
@@ -395,6 +424,26 @@ export default function LeadsPage() {
     setTransitionLeadState(lead);
     setTransitionTarget(target);
     setTransitionOpen(true);
+  }
+
+  // Instant stage change from the list dropdown (like the Owner column), with an
+  // auto-comment so the backend's mandatory-comment rule, role gates, backward-move
+  // gate and side-effects all still apply. Consequential stages route to the modal
+  // instead (see QUICK_STAGE_MODAL_CODES).
+  async function handleQuickStage(lead: Lead, target: PipelineStage) {
+    try {
+      await transitionLead(lead.id, {
+        to_stage_code: target.code,
+        comment: `Moved to ${target.name} via quick change`,
+      });
+      toast.success("Stage updated", `Moved to ${target.name}`);
+      // transitionLead already refreshes on success.
+    } catch (err) {
+      toast.error("Stage change failed", extractErrorMessage(err));
+      // Re-sync the controlled <select> to the true stage after a rejected move
+      // (e.g. a non-manager backward move) so it snaps back.
+      await refresh();
+    }
   }
 
   // --- CSV import -------------------------------------------------------
@@ -497,7 +546,7 @@ export default function LeadsPage() {
     {
       key: "email",
       header: "Email",
-      width: "16%",
+      width: "14%",
       render: (lead) => (
         <span className="text-sm cell-truncate" title={lead.contact_email ?? lead.customer?.email ?? ""}>
           {lead.contact_email ?? lead.customer?.email ?? "—"}
@@ -507,7 +556,7 @@ export default function LeadsPage() {
     {
       key: "stage",
       header: "Stage",
-      width: "18%",
+      width: "15%",
       render: (lead) => {
         const stage = getStage(lead.industry, lead.stage_code);
         const tone = stage ? pipelineCategoryTone(stage.category) : "neutral";
@@ -528,11 +577,15 @@ export default function LeadsPage() {
             onChange={(event) => {
               const target = industryStages.find((s) => s.code === event.target.value);
               if (target && target.code !== lead.stage_code) {
-                openTransition(lead, target);
+                if (QUICK_STAGE_MODAL_CODES.has(target.code)) {
+                  openTransition(lead, target);
+                } else {
+                  void handleQuickStage(lead, target);
+                }
               }
             }}
             onClick={(event) => event.stopPropagation()}
-            title="Move to a different stage — opens the comment box"
+            title="Change stage — Sold / Site-visit ask for a comment; others change instantly"
             aria-label={`Stage for lead ${lead.lead_number}`}
           >
             {industryStages
@@ -549,13 +602,19 @@ export default function LeadsPage() {
     {
       key: "source",
       header: "Source",
-      width: "9%",
+      width: "8%",
       render: (lead) => <span className="cell-truncate" title={lead.source ?? ""}>{lead.source ?? "—"}</span>
+    },
+    {
+      key: "campaign",
+      header: "Campaign",
+      width: "8%",
+      render: (lead) => <span className="cell-truncate" title={lead.campaign ?? ""}>{lead.campaign ?? "—"}</span>
     },
     {
       key: "interest",
       header: industryInterestLabel((industryFilter || user?.business_type || "education") as LeadIndustry),
-      width: "12%",
+      width: "10%",
       render: (lead) => (
         <span className="cell-truncate" title={lead.interest ?? ""}>{lead.interest ?? "—"}</span>
       )
@@ -563,7 +622,7 @@ export default function LeadsPage() {
     {
       key: "owner",
       header: "Owner",
-      width: "13%",
+      width: "12%",
       render: (lead) =>
         canAssign ? (
           <select
@@ -702,6 +761,15 @@ export default function LeadsPage() {
 
       <div className="card" style={{ padding: 0 }}>
         <div className="row" style={{ gap: "0.75rem", padding: "1rem 1.25rem", borderBottom: "1px solid var(--color-border)", flexWrap: "wrap" }}>
+          <input
+            className="input"
+            type="search"
+            value={searchInput}
+            onChange={(event) => setSearchInput(event.target.value)}
+            placeholder="Search name, phone, email, lead #"
+            aria-label="Search leads"
+            style={{ minWidth: 240, flex: "1 1 240px" }}
+          />
           {user?.business_type ? (
             // Single-vertical orgs (the default since Phase 7) — the industry
             // is implicit. Show it as a read-only chip instead of a dropdown
@@ -745,6 +813,40 @@ export default function LeadsPage() {
             <option value="">All stages</option>
             {stageOptionsForFilter.map((option) => (
               <option key={`${option.value}-${option.label}`} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+          <select
+            className="select"
+            value={sourceFilter}
+            onChange={(event) => {
+              setSourceFilter(event.target.value);
+              setPage(1);
+            }}
+            aria-label="Filter by source"
+            style={{ minWidth: 170 }}
+          >
+            <option value="">All sources</option>
+            {leadSourceOptions.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+          <select
+            className="select"
+            value={campaignFilter}
+            onChange={(event) => {
+              setCampaignFilter(event.target.value);
+              setPage(1);
+            }}
+            aria-label="Filter by campaign"
+            style={{ minWidth: 180 }}
+          >
+            <option value="">All campaigns</option>
+            {leadCampaignOptions.map((option) => (
+              <option key={option.value} value={option.value}>
                 {option.label}
               </option>
             ))}
@@ -1065,6 +1167,22 @@ export default function LeadsPage() {
               label="Please specify source"
               value={form.source_other}
               onChange={(event) => setForm({ ...form, source_other: event.target.value })}
+              required
+            />
+          )}
+          <SelectField
+            id="lead-campaign"
+            label="Campaign"
+            value={form.campaign}
+            onChange={(event) => setForm({ ...form, campaign: event.target.value })}
+            options={[{ value: "", label: "None" }, ...leadCampaignOptions]}
+          />
+          {form.campaign === OTHER_OPTION && (
+            <TextField
+              id="lead-campaign-other"
+              label="Please specify campaign"
+              value={form.campaign_other}
+              onChange={(event) => setForm({ ...form, campaign_other: event.target.value })}
               required
             />
           )}

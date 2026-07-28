@@ -52,6 +52,15 @@ export const leadSourceOptions: Option<string>[] = [
   "Cold call", "Newspaper / Print", "Hoarding", "Other"
 ].map((v) => ({ value: v, label: v }));
 
+// Controlled marketing-campaign list (attribution alongside source). Orgs can
+// extend this; "Other" reveals a free-text field. Keep values short + stable so
+// campaign filtering/reporting stays consistent.
+export const leadCampaignOptions: Option<string>[] = [
+  "Diwali Offer", "New Year Offer", "Summer Launch", "Property Expo",
+  "Site Visit Drive", "Referral Program", "Google Ads", "Meta Ads",
+  "Email Blast", "Newspaper Insert", "Other"
+].map((v) => ({ value: v, label: v }));
+
 // Real-estate "Property Interest" (unit configuration). "Other" → free text.
 export const propertyInterestOptions: Option<string>[] = [
   "1 BHK", "2 BHK", "3 BHK", "4 BHK", "5 BHK+", "Studio", "Penthouse",

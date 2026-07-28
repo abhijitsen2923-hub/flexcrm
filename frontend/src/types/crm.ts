@@ -286,6 +286,7 @@ export interface Lead {
   probability: number;
   expected_close_date: string | null;
   source: string | null;
+  campaign: string | null;
   interest: string | null;
   last_comment_preview: string | null;
   last_comment_at: string | null;

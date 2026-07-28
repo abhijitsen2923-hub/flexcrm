@@ -18,6 +18,7 @@ export interface LeadListQuery extends PaginationQuery, SearchSortQuery {
   industry?: LeadIndustry;
   stage_code?: string;
   source?: string;
+  campaign?: string;
   assigned_to_id?: string;
 }
 
@@ -39,6 +40,7 @@ export interface LeadCreatePayload {
   probability?: number;
   expected_close_date?: string | null;
   source?: string | null;
+  campaign?: string | null;
   interest?: string | null;
   assigned_to_id?: string | null;
   partner_id?: string | null;
@@ -62,6 +64,7 @@ export interface LeadUpdatePayload {
   probability?: number;
   expected_close_date?: string | null;
   source?: string | null;
+  campaign?: string | null;
   interest?: string | null;
   assigned_to_id?: string | null;
 }

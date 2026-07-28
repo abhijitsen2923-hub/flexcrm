@@ -41,6 +41,7 @@ class LeadCreate(ORMModel):
     probability: int = Field(default=0, ge=0, le=100)
     expected_close_date: date | None = None
     source: str | None = Field(default=None, max_length=120)
+    campaign: str | None = Field(default=None, max_length=120)
     interest: str | None = Field(default=None, max_length=255)
     assigned_to_id: UUID | None = None
     # Referring channel partner (broker), if this walk-in came via one.
@@ -73,6 +74,7 @@ class LeadUpdate(ORMModel):
     probability: int | None = Field(default=None, ge=0, le=100)
     expected_close_date: date | None = None
     source: str | None = Field(default=None, max_length=120)
+    campaign: str | None = Field(default=None, max_length=120)
     interest: str | None = Field(default=None, max_length=255)
     assigned_to_id: UUID | None = None
     partner_id: UUID | None = None
@@ -130,6 +132,7 @@ class LeadRead(ORMModel):
     probability: int
     expected_close_date: date | None = None
     source: str | None = None
+    campaign: str | None = None
     interest: str | None = None
     last_comment_preview: str | None = None
     last_comment_at: datetime | None = None
@@ -170,5 +173,6 @@ class LeadFilterParams(SearchSortParams):
     industry: LeadIndustry | None = None
     stage_code: str | None = None
     source: str | None = None
+    campaign: str | None = None
     assigned_to_id: UUID | None = None
     partner_id: UUID | None = None

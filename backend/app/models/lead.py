@@ -63,6 +63,9 @@ class Lead(TenantBase, UUIDPrimaryKeyMixin, TimestampMixin, TenantAuditMixin, Te
     probability: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     expected_close_date: Mapped[date | None] = mapped_column(nullable=True, index=True)
     source: Mapped[str | None] = mapped_column(String(120), nullable=True, index=True)
+    # Marketing campaign this lead is attributed to (free string, controlled list
+    # app-side) — a secondary attribution dimension alongside source.
+    campaign: Mapped[str | None] = mapped_column(String(120), nullable=True, index=True)
     interest: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     contact_name: Mapped[str] = mapped_column(String(255), nullable=False)
