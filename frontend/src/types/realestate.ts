@@ -17,7 +17,9 @@ export interface Unit {
   floor: number;
   unitNumber: string;
   unitType: UnitType;
-  area: number;
+  area: number;               // super built-up (saleable) — drives pricing/display
+  carpetArea: number | null;
+  builtUpArea: number | null;
   areaUnit: "sqft" | "sqmt";
   facing: UnitFacing | null;
   view: string | null;

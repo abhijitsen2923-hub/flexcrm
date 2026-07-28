@@ -95,7 +95,9 @@ interface TowerBuilder {
   addUnits: boolean;
   unit_type: UnitType;
   units_per_floor: string;
-  area: string;
+  area: string;            // super built-up (saleable)
+  carpet_area: string;
+  built_up_area: string;
   base_price: string;
   unit_prefix: string;
 }
@@ -107,6 +109,8 @@ const EMPTY_TOWER: TowerBuilder = {
   unit_type: "residential",
   units_per_floor: "4",
   area: "1000",
+  carpet_area: "",
+  built_up_area: "",
   base_price: "5000000",
   unit_prefix: "",
 };
@@ -350,6 +354,8 @@ export default function ProjectsPage() {
                     unit_type: t.unit_type,
                     floors: Array.from({ length: floors }, (_, i) => ({ floor: i + 1, count: perFloor })),
                     area: Number(t.area) || 1,
+                    carpet_area: t.carpet_area ? Number(t.carpet_area) : null,
+                    built_up_area: t.built_up_area ? Number(t.built_up_area) : null,
                     base_price: Number(t.base_price) || 0,
                     unit_prefix: t.unit_prefix.trim() || undefined,
                   }
@@ -621,7 +627,11 @@ export default function ProjectsPage() {
                           <TextField id={`tower-perfloor-${i}`} label="Units per floor" type="number" min={1} value={t.units_per_floor} onChange={(e) => setTower(i, { units_per_floor: e.target.value })} />
                         </div>
                         <div className="form-grid">
-                          <TextField id={`tower-area-${i}`} label="Area (sqft)" type="number" min={1} value={t.area} onChange={(e) => setTower(i, { area: e.target.value })} />
+                          <TextField id={`tower-carpet-${i}`} label="Carpet area (sqft)" type="number" min={0} value={t.carpet_area} onChange={(e) => setTower(i, { carpet_area: e.target.value })} placeholder="e.g. 800" />
+                          <TextField id={`tower-builtup-${i}`} label="Built-up area (sqft)" type="number" min={0} value={t.built_up_area} onChange={(e) => setTower(i, { built_up_area: e.target.value })} placeholder="e.g. 950" />
+                        </div>
+                        <div className="form-grid">
+                          <TextField id={`tower-area-${i}`} label="Super built-up area (sqft)" type="number" min={1} value={t.area} onChange={(e) => setTower(i, { area: e.target.value })} required hint="Saleable area — used for pricing" />
                           <TextField id={`tower-price-${i}`} label="Base price (₹)" type="number" min={0} value={t.base_price} onChange={(e) => setTower(i, { base_price: e.target.value })} />
                         </div>
                         <TextField
@@ -741,6 +751,8 @@ function TowerManager({ project, onChanged }: { project: Project; onChanged: () 
   const [perFloor, setPerFloor] = useState("4");
   const [customCounts, setCustomCounts] = useState<Record<number, string>>({});
   const [area, setArea] = useState("1000");
+  const [carpetArea, setCarpetArea] = useState("");
+  const [builtUpArea, setBuiltUpArea] = useState("");
   const [basePrice, setBasePrice] = useState("5000000");
   const [prefix, setPrefix] = useState("");
   const [savingUnits, setSavingUnits] = useState(false);
@@ -792,6 +804,8 @@ function TowerManager({ project, onChanged }: { project: Project; onChanged: () 
     setPerFloor("4");
     setCustomCounts({});
     setArea("1000");
+    setCarpetArea("");
+    setBuiltUpArea("");
     setBasePrice("5000000");
     setPrefix("");
   }
@@ -824,6 +838,8 @@ function TowerManager({ project, onChanged }: { project: Project; onChanged: () 
         unit_type: unitType,
         floors,
         area: Number(area),
+        carpet_area: carpetArea ? Number(carpetArea) : null,
+        built_up_area: builtUpArea ? Number(builtUpArea) : null,
         base_price: Number(basePrice) || 0,
         unit_prefix: prefix.trim() || null,
       });
@@ -1113,12 +1129,33 @@ function TowerManager({ project, onChanged }: { project: Project; onChanged: () 
 
               <div className="form-grid">
                 <TextField
+                  id={`carpet-${tower.id}`}
+                  label="Carpet area (sqft)"
+                  type="number"
+                  min={0}
+                  value={carpetArea}
+                  onChange={(e) => setCarpetArea(e.target.value)}
+                  placeholder="e.g. 800"
+                />
+                <TextField
+                  id={`builtup-${tower.id}`}
+                  label="Built-up area (sqft)"
+                  type="number"
+                  min={0}
+                  value={builtUpArea}
+                  onChange={(e) => setBuiltUpArea(e.target.value)}
+                  placeholder="e.g. 950"
+                />
+              </div>
+              <div className="form-grid">
+                <TextField
                   id={`area-${tower.id}`}
-                  label="Area (sqft)"
+                  label="Super built-up area (sqft)"
                   type="number"
                   min={1}
                   value={area}
                   onChange={(e) => setArea(e.target.value)}
+                  hint="Saleable area — used for pricing"
                 />
                 <TextField
                   id={`price-${tower.id}`}

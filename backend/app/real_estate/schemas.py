@@ -22,6 +22,8 @@ class UnitRead(ORMModel):
     unit_number: str
     unit_type: str = "residential"
     area: Decimal
+    carpet_area: Decimal | None = None
+    built_up_area: Decimal | None = None
     area_unit: str
     facing: str | None = None
     view: str | None = None
@@ -154,6 +156,8 @@ class UnitUpdate(ORMModel):
     unit_number: str | None = Field(default=None, min_length=1, max_length=20)
     unit_type: UnitType | None = None
     area: Decimal | None = Field(default=None, gt=0)
+    carpet_area: Decimal | None = Field(default=None, gt=0)
+    built_up_area: Decimal | None = Field(default=None, gt=0)
     area_unit: str | None = Field(default=None, max_length=20)
     facing: str | None = Field(default=None, max_length=50)
     view: str | None = Field(default=None, max_length=100)
@@ -171,7 +175,9 @@ class UnitBatchCreate(ORMModel):
     'same on every floor' choice into the explicit `floors` list."""
     unit_type: UnitType = UnitType.residential
     floors: list[FloorUnits] = Field(min_length=1)
-    area: Decimal = Field(gt=0)
+    area: Decimal = Field(gt=0)  # Super built-up (saleable) — required, drives pricing
+    carpet_area: Decimal | None = Field(default=None, gt=0)
+    built_up_area: Decimal | None = Field(default=None, gt=0)
     base_price: Decimal = Field(ge=0)
     area_unit: str = Field(default="sqft", max_length=20)
     facing: str | None = Field(default=None, max_length=50)
@@ -339,6 +345,8 @@ class BookingUnitInfo(ORMModel):
     floor: int
     unit_type: str = "residential"
     area: Decimal
+    carpet_area: Decimal | None = None
+    built_up_area: Decimal | None = None
     area_unit: str
     base_price: Decimal
     status: UnitStatus

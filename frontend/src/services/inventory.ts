@@ -21,6 +21,8 @@ interface ApiUnit {
   unit_number: string;
   unit_type: string;
   area: number | string;
+  carpet_area?: number | string | null;
+  built_up_area?: number | string | null;
   area_unit: string;
   facing: string | null;
   view: string | null;
@@ -110,6 +112,8 @@ function mapUnit(u: ApiUnit): Unit {
     unitNumber: u.unit_number,
     unitType: (u.unit_type as Unit["unitType"]) ?? "residential",
     area: Number(u.area),
+    carpetArea: numOrNull(u.carpet_area),
+    builtUpArea: numOrNull(u.built_up_area),
     areaUnit: u.area_unit as Unit["areaUnit"],
     facing: u.facing as Unit["facing"],
     view: u.view,
@@ -206,7 +210,9 @@ export interface TowerCreatePayload {
 export interface UnitBatchPayload {
   unit_type: UnitType;
   floors: { floor: number; count: number }[];
-  area: number;
+  area: number;                       // super built-up (saleable) — required
+  carpet_area?: number | null;
+  built_up_area?: number | null;
   base_price: number;
   area_unit?: string;
   facing?: string | null;
@@ -240,6 +246,8 @@ export interface UnitUpdatePayload {
   unit_number?: string;
   unit_type?: UnitType;
   area?: number;
+  carpet_area?: number | null;
+  built_up_area?: number | null;
   area_unit?: string;
   facing?: string | null;
   view?: string | null;

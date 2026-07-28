@@ -132,7 +132,11 @@ class Unit(TenantBase, UUIDPrimaryKeyMixin, TimestampMixin, TenantSoftDeleteMixi
     unit_number: Mapped[str] = mapped_column(String(20), nullable=False)
     # residential / parking / shop / godown — validated app-side via UnitType.
     unit_type: Mapped[str] = mapped_column(String(32), nullable=False, server_default="residential")
+    # `area` is the Super built-up (saleable) area — the one used for pricing/display.
+    # Carpet + Built-up are additional captured measures (optional).
     area: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False)
+    carpet_area: Mapped[Decimal | None] = mapped_column(Numeric(10, 2), nullable=True)
+    built_up_area: Mapped[Decimal | None] = mapped_column(Numeric(10, 2), nullable=True)
     area_unit: Mapped[str] = mapped_column(String(20), nullable=False, default="sqft")
     facing: Mapped[str | None] = mapped_column(String(50), nullable=True)
     view: Mapped[str | None] = mapped_column(String(100), nullable=True)

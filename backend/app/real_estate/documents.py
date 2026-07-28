@@ -139,7 +139,8 @@ def render_booking_document(
     unit_no = unit.unit_number if unit else "—"
     tower_name = tower.name if tower else "—"
     floor = unit.floor if unit else "—"
-    area = f"{unit.area} {unit.area_unit}" if unit else "—"
+    area = f"{unit.area} {unit.area_unit}" if unit else "—"  # super built-up (saleable)
+    carpet = f"{unit.carpet_area} {unit.area_unit}" if unit and unit.carpet_area is not None else None
     base_price = _inr(unit.base_price) if unit else "—"
 
     cust_name = customer.contact_name if customer else "—"
@@ -157,7 +158,8 @@ def render_booking_document(
         _row("Tower", tower_name),
         _row("Unit No.", unit_no),
         _row("Floor", floor),
-        _row("Carpet / Area", area),
+        _row("Super Built-up Area", area),
+        *([_row("Carpet Area", carpet)] if carpet else []),
         _row("Base Price", base_price),
     ]) + "</table>"
 

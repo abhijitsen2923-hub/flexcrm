@@ -112,9 +112,21 @@ export function UnitDetailPanel({ unit, onClose, onStatusChange, onStartBooking 
             <span>{UNIT_TYPE_LABEL[unit.unitType]}</span>
           </div>
           <div className="unit-panel__field">
-            <span className="unit-panel__label">Area</span>
+            <span className="unit-panel__label">Super built-up area</span>
             <span>{unit.area} {unit.areaUnit}</span>
           </div>
+          {unit.carpetArea != null && (
+            <div className="unit-panel__field">
+              <span className="unit-panel__label">Carpet area</span>
+              <span>{unit.carpetArea} {unit.areaUnit}</span>
+            </div>
+          )}
+          {unit.builtUpArea != null && (
+            <div className="unit-panel__field">
+              <span className="unit-panel__label">Built-up area</span>
+              <span>{unit.builtUpArea} {unit.areaUnit}</span>
+            </div>
+          )}
           <div className="unit-panel__field">
             <span className="unit-panel__label">Base Price</span>
             <span style={{ fontSize: "var(--text-display-lg)", fontWeight: 700 }}>{formatInr(unit.basePrice)}</span>
