@@ -117,13 +117,54 @@
   margin: 0;
 }
 
-.form-select {
+.form-select,
+.form-input {
   border: 1px solid var(--color-border-strong);
   border-radius: var(--radius-md);
   padding: var(--space-2) var(--space-3);
   font-size: 0.875rem;
   background: var(--color-surface);
   color: var(--color-text);
+}
+
+/* KYC document rows — stage several named files, all optional */
+.bw-kyc-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+.bw-kyc-row__name {
+  flex: 1 1 12rem;
+  min-width: 10rem;
+}
+.bw-kyc-row__file {
+  flex: 1 1 14rem;
+  min-width: 12rem;
+  font-size: 0.8rem;
+}
+.bw-kyc-row__done {
+  color: var(--color-success, #16a34a);
+  font-weight: 700;
+}
+.bw-kyc-row__remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: none;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  padding: 4px;
+  border-radius: var(--radius-md);
+}
+.bw-kyc-row__remove:hover {
+  color: var(--color-danger, #dc2626);
+  background: var(--color-surface-muted, rgba(0, 0, 0, 0.04));
+}
+.bw-kyc-row__remove:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 /* Document actions */

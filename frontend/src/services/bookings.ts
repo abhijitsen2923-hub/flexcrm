@@ -199,7 +199,7 @@ function mapBooking(b: ApiBooking): Booking {
       createdAt: r.created_at,
     })),
     kycDocuments: (b.kyc_documents ?? []).map((d) => ({
-      type: (d.type ?? d.doc_type ?? "other") as "aadhaar" | "pan" | "photo" | "other",
+      type: d.type ?? d.doc_type ?? "",
       fileName: d.file_path ?? "",
       uploadedAt: d.created_at ?? "",
     })),

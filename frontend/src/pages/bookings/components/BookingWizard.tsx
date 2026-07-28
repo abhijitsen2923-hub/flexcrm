@@ -1,4 +1,5 @@
 import { useRef, useState } from "react";
+import { Plus, Trash2 } from "lucide-react";
 import { Button, Modal, TextField, useToast } from "../../../components";
 import { bookingsService } from "../../../services/bookings";
 import { customersService } from "../../../services/customers";
@@ -10,6 +11,26 @@ import { extractErrorMessage } from "../../../utils/errors";
 import "./BookingWizard.css";
 
 const STEPS = ["Unit", "Customer & KYC", "Pricing", "Schedule & Documents"] as const;
+
+// Suggested KYC document names — a hint list for the free-text name field, NOT a
+// hard constraint. Users can type any name; it's stored verbatim as the doc's type.
+const KYC_DOC_SUGGESTIONS = [
+  "Aadhaar Card",
+  "PAN Card",
+  "Voter ID Card",
+  "Passport",
+  "Driving License",
+  "Passport Photo",
+];
+
+// One staged KYC upload: a manually-named file. `uploaded` flips true once its
+// POST succeeds so a retry after a mid-batch failure skips already-sent files.
+interface KycRow {
+  id: number;
+  name: string;
+  file: File | null;
+  uploaded: boolean;
+}
 
 interface Props {
   unit: Pick<Unit, "id" | "unitNumber" | "floor" | "area" | "basePrice"> & { towerName: string; projectName: string };
@@ -49,9 +70,22 @@ export function BookingWizard({ unit, onClose, onComplete, initialBooking = null
   const [customerQuery, setCustomerQuery] = useState("");
   const [customerResults, setCustomerResults] = useState<Customer[]>([]);
   const [searchingCust, setSearchingCust] = useState(false);
-  const [kycFile, setKycFile] = useState<File | null>(null);
-  const [kycDocType, setKycDocType] = useState<string>("aadhaar");
-  const fileRef = useRef<HTMLInputElement>(null);
+  // Stage any number of named KYC documents before continuing (all optional).
+  const rowSeq = useRef(0);
+  const [kycRows, setKycRows] = useState<KycRow[]>(() => [
+    { id: rowSeq.current++, name: "", file: null, uploaded: false },
+  ]);
+
+  function setRow(id: number, patch: Partial<KycRow>) {
+    setKycRows((prev) => prev.map((r) => (r.id === id ? { ...r, ...patch } : r)));
+  }
+  function addRow() {
+    setKycRows((prev) => [...prev, { id: rowSeq.current++, name: "", file: null, uploaded: false }]);
+  }
+  function removeRow(id: number) {
+    // Keep at least one row so there's always a slot to add a document.
+    setKycRows((prev) => (prev.length <= 1 ? prev : prev.filter((r) => r.id !== id)));
+  }
 
   async function searchCustomers(q: string) {
     setCustomerQuery(q);
@@ -101,11 +135,22 @@ export function BookingWizard({ unit, onClose, onComplete, initialBooking = null
   };
 
   const handleKycUpload = async () => {
-    if (!booking || !kycFile) return;
+    if (!booking) return;
+    // Upload every staged file (each is its own KYC doc). All optional — a row
+    // with no file is skipped, and continuing with zero documents is allowed.
+    const toUpload = kycRows.filter((r) => r.file && !r.uploaded);
+    if (toUpload.some((r) => !r.name.trim())) {
+      toast.error("Name each document you're uploading");
+      return;
+    }
     setSaving(true);
     try {
-      await bookingsService.uploadKyc(booking.id, kycFile, kycDocType);
-      // Always advance to step 2 (records the customer if one was picked) so the
+      for (const r of toUpload) {
+        await bookingsService.uploadKyc(booking.id, r.file as File, r.name.trim());
+        // Mark sent so a retry after a mid-batch failure doesn't re-upload it.
+        setRow(r.id, { uploaded: true });
+      }
+      // Advance to step 2 (records the customer if one was picked) so the
       // Registration Tracker reflects real progress. The /kyc endpoint returns
       // the doc — not the booking — so we advance separately.
       const updated = await bookingsService.advanceStep(booking.id, 2, {
@@ -114,7 +159,7 @@ export function BookingWizard({ unit, onClose, onComplete, initialBooking = null
       setBooking(updated);
       setStep(3);
     } catch {
-      toast.error("KYC upload failed");
+      toast.error("Upload failed — uploaded files were kept; retry the rest");
     } finally {
       setSaving(false);
     }
@@ -295,34 +340,55 @@ export function BookingWizard({ unit, onClose, onComplete, initialBooking = null
                 </div>
               )}
               <div className="bw-kyc">
-                <label className="bw-kyc__label">KYC Document</label>
-                <select
-                  className="form-select"
-                  value={kycDocType}
-                  onChange={(e) => setKycDocType(e.target.value)}
-                >
-                  <option value="aadhaar">Aadhaar Card</option>
-                  <option value="pan">PAN Card</option>
-                  <option value="photo">Passport Photo</option>
-                  <option value="other">Other</option>
-                </select>
-                <input
-                  type="file"
-                  ref={fileRef}
-                  accept="image/*,application/pdf"
-                  onChange={(e) => setKycFile(e.target.files?.[0] ?? null)}
-                  className="bw-kyc__input"
-                />
-                {kycFile && <p className="bw-kyc__filename">{kycFile.name}</p>}
+                <label className="bw-kyc__label">KYC Documents</label>
+                <p className="muted text-xs" style={{ margin: "0 0 0.5rem" }}>
+                  All optional — add each file and give it a name. You can add as many as you need.
+                </p>
+                <datalist id="kyc-doc-names">
+                  {KYC_DOC_SUGGESTIONS.map((name) => (
+                    <option key={name} value={name} />
+                  ))}
+                </datalist>
+                {kycRows.map((row) => (
+                  <div key={row.id} className="bw-kyc-row">
+                    <input
+                      type="text"
+                      list="kyc-doc-names"
+                      className="form-input bw-kyc-row__name"
+                      placeholder="Document name (e.g. Aadhaar Card)"
+                      maxLength={64}
+                      value={row.name}
+                      disabled={saving}
+                      onChange={(e) => setRow(row.id, { name: e.target.value })}
+                    />
+                    <input
+                      type="file"
+                      accept="image/*,application/pdf"
+                      className="bw-kyc-row__file"
+                      disabled={saving}
+                      onChange={(e) => setRow(row.id, { file: e.target.files?.[0] ?? null, uploaded: false })}
+                    />
+                    {row.uploaded && <span className="bw-kyc-row__done" title="Uploaded">✓</span>}
+                    {kycRows.length > 1 && (
+                      <button
+                        type="button"
+                        className="bw-kyc-row__remove"
+                        title="Remove this document"
+                        disabled={saving}
+                        onClick={() => removeRow(row.id)}
+                      >
+                        <Trash2 size={16} />
+                      </button>
+                    )}
+                  </div>
+                ))}
+                <Button variant="ghost" size="sm" disabled={saving} onClick={addRow} style={{ marginTop: "0.4rem" }}>
+                  <Plus size={14} style={{ marginRight: "0.3rem" }} /> Add document
+                </Button>
               </div>
               <div className="bw-footer">
                 <Button variant="secondary" onClick={() => setStep(1)}>← Back</Button>
-                <Button
-                  variant="primary"
-                  loading={saving}
-                  disabled={!kycFile}
-                  onClick={handleKycUpload}
-                >
+                <Button variant="primary" loading={saving} onClick={handleKycUpload}>
                   Upload & Continue →
                 </Button>
               </div>

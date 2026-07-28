@@ -157,7 +157,9 @@ export interface PricingSnapshot {
 }
 
 export interface KycDocument {
-  type: "aadhaar" | "pan" | "photo" | "other";
+  // Free-text document name typed at upload (e.g. "Aadhaar Card", "PAN Card").
+  // The backend stores it as a free-form doc_type, so this is an open string.
+  type: string;
   fileName: string;
   uploadedAt: string;
 }
