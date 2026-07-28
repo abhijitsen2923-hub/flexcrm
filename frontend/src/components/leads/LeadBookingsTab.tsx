@@ -59,6 +59,7 @@ export function LeadBookingsTab({ leadId, customerId, refreshKey }: Props) {
   const [pickerOpen, setPickerOpen] = useState(false);
   const [availUnits, setAvailUnits] = useState<WizardUnit[]>([]);
   const [pickerLoading, setPickerLoading] = useState(false);
+  const [unitQuery, setUnitQuery] = useState("");
   const [wizardUnit, setWizardUnit] = useState<WizardUnit | null>(null);
 
   // Registration.
@@ -99,6 +100,7 @@ export function LeadBookingsTab({ leadId, customerId, refreshKey }: Props) {
   }, [leadId, refreshKey]);
 
   async function openPicker() {
+    setUnitQuery("");
     setPickerLoading(true);
     try {
       const projects = await inventoryService.listProjects();
@@ -208,6 +210,13 @@ export function LeadBookingsTab({ leadId, customerId, refreshKey }: Props) {
   }
 
   if (loading) return <LoadingBlock label="Loading bookings…" />;
+
+  const unitSearch = unitQuery.trim().toLowerCase();
+  const filteredUnits = unitSearch
+    ? availUnits.filter((u) =>
+        `${u.unitNumber} ${u.projectName} ${u.towerName} floor ${u.floor}`.toLowerCase().includes(unitSearch)
+      )
+    : availUnits;
 
   return (
     <div className="stack" style={{ gap: "0.75rem" }}>
@@ -358,23 +367,38 @@ export function LeadBookingsTab({ leadId, customerId, refreshKey }: Props) {
           {availUnits.length === 0 ? (
             <EmptyState title="No available units" description="Add units in Projects, then start a booking." />
           ) : (
-            <ul style={{ listStyle: "none", margin: 0, padding: 0, maxHeight: 360, overflowY: "auto" }}>
-              {availUnits.map((u) => (
-                <li key={u.id}>
-                  <button
-                    type="button"
-                    onClick={() => { setWizardUnit(u); setPickerOpen(false); }}
-                    style={{ display: "flex", justifyContent: "space-between", gap: "0.75rem", width: "100%", padding: "0.6rem 0.75rem", border: "none", borderBottom: "1px solid var(--color-border)", background: "none", cursor: "pointer", textAlign: "left" }}
-                  >
-                    <span>
-                      <strong>{u.unitNumber}</strong>{" "}
-                      <span className="muted text-xs">· {u.projectName} · {u.towerName} · Floor {u.floor}</span>
-                    </span>
-                    <span className="muted text-sm">{formatInr(u.basePrice)}</span>
-                  </button>
-                </li>
-              ))}
-            </ul>
+            <div className="stack" style={{ gap: "0.6rem" }}>
+              <input
+                className="input"
+                type="search"
+                autoFocus
+                value={unitQuery}
+                onChange={(e) => setUnitQuery(e.target.value)}
+                placeholder="Search unit, project, tower, floor…"
+                aria-label="Search available units"
+              />
+              {filteredUnits.length === 0 ? (
+                <p className="muted text-sm" style={{ margin: "0.25rem 0" }}>No units match “{unitQuery}”.</p>
+              ) : (
+                <ul style={{ listStyle: "none", margin: 0, padding: 0, maxHeight: 360, overflowY: "auto" }}>
+                  {filteredUnits.map((u) => (
+                    <li key={u.id}>
+                      <button
+                        type="button"
+                        onClick={() => { setWizardUnit(u); setPickerOpen(false); }}
+                        style={{ display: "flex", justifyContent: "space-between", gap: "0.75rem", width: "100%", padding: "0.6rem 0.75rem", border: "none", borderBottom: "1px solid var(--color-border)", background: "none", cursor: "pointer", textAlign: "left" }}
+                      >
+                        <span>
+                          <strong>{u.unitNumber}</strong>{" "}
+                          <span className="muted text-xs">· {u.projectName} · {u.towerName} · Floor {u.floor}</span>
+                        </span>
+                        <span className="muted text-sm">{formatInr(u.basePrice)}</span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
           )}
         </Modal>
       )}

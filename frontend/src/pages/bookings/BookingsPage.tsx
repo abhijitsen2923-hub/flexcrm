@@ -45,6 +45,7 @@ export default function BookingsPage() {
   const [wizardUnit, setWizardUnit] = useState<WizardUnit | null>(null);
   const [wizardBooking, setWizardBooking] = useState<Booking | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [unitQuery, setUnitQuery] = useState("");
   // Staged unit-lifecycle action (Booked → Registered → Sold) from the list.
   const [markAction, setMarkAction] = useState<{ unitId: string; label: string; target: UnitStatus } | null>(null);
   const [marking, setMarking] = useState(false);
@@ -357,6 +358,13 @@ export default function BookingsPage() {
 
   if (loading) return <LoadingBlock label="Loading bookings…" />;
 
+  const unitSearch = unitQuery.trim().toLowerCase();
+  const filteredUnits = unitSearch
+    ? availableUnits.filter((u) =>
+        `${u.unitNumber} ${u.projectName} ${u.towerName} floor ${u.floor}`.toLowerCase().includes(unitSearch)
+      )
+    : availableUnits;
+
   return (
     <div className="bookings-page">
       <div className="page-header">
@@ -372,7 +380,7 @@ export default function BookingsPage() {
               Export CSV
             </Button>
           )}
-          <Button variant="primary" icon={<Plus size={16} />} onClick={() => setPickerOpen(true)}>
+          <Button variant="primary" icon={<Plus size={16} />} onClick={() => { setUnitQuery(""); setPickerOpen(true); }}>
             New Booking
           </Button>
         </div>
@@ -408,34 +416,49 @@ export default function BookingsPage() {
             description="Add units to a project (Projects → open a project → Add tower → Add units), then book an available one."
           />
         ) : (
-          <ul style={{ listStyle: "none", margin: 0, padding: 0, maxHeight: 360, overflowY: "auto" }}>
-            {availableUnits.map((u) => (
-              <li key={u.id}>
-                <button
-                  type="button"
-                  onClick={() => pickUnit(u)}
-                  style={{
-                    display: "flex",
-                    justifyContent: "space-between",
-                    gap: "0.75rem",
-                    width: "100%",
-                    padding: "0.6rem 0.75rem",
-                    border: "none",
-                    borderBottom: "1px solid var(--color-border)",
-                    background: "none",
-                    cursor: "pointer",
-                    textAlign: "left",
-                  }}
-                >
-                  <span>
-                    <strong>{u.unitNumber}</strong>{" "}
-                    <span className="muted text-xs">· {u.projectName} · {u.towerName} · Floor {u.floor}</span>
-                  </span>
-                  <span className="muted text-sm">{formatInr(u.basePrice)}</span>
-                </button>
-              </li>
-            ))}
-          </ul>
+          <div className="stack" style={{ gap: "0.6rem" }}>
+            <input
+              className="input"
+              type="search"
+              autoFocus
+              value={unitQuery}
+              onChange={(e) => setUnitQuery(e.target.value)}
+              placeholder="Search unit, project, tower, floor…"
+              aria-label="Search available units"
+            />
+            {filteredUnits.length === 0 ? (
+              <p className="muted text-sm" style={{ margin: "0.25rem 0" }}>No units match “{unitQuery}”.</p>
+            ) : (
+              <ul style={{ listStyle: "none", margin: 0, padding: 0, maxHeight: 360, overflowY: "auto" }}>
+                {filteredUnits.map((u) => (
+                  <li key={u.id}>
+                    <button
+                      type="button"
+                      onClick={() => pickUnit(u)}
+                      style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        gap: "0.75rem",
+                        width: "100%",
+                        padding: "0.6rem 0.75rem",
+                        border: "none",
+                        borderBottom: "1px solid var(--color-border)",
+                        background: "none",
+                        cursor: "pointer",
+                        textAlign: "left",
+                      }}
+                    >
+                      <span>
+                        <strong>{u.unitNumber}</strong>{" "}
+                        <span className="muted text-xs">· {u.projectName} · {u.towerName} · Floor {u.floor}</span>
+                      </span>
+                      <span className="muted text-sm">{formatInr(u.basePrice)}</span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
         )}
       </Modal>
 
