@@ -150,10 +150,13 @@ class StageTransitionService(ServiceBase):
             }
         )
 
-        # Update the lead's stage and the denormalized last-comment snapshot.
+        # Update the lead's stage and the denormalized snapshots. next_action_date
+        # mirrors the LATEST transition's value (may be None → clears a prior action),
+        # keeping the leads-list "due" filter in lock-step with the reminders job.
         lead.stage_code = target_stage.code
         lead.last_comment_preview = payload.comment.strip()[:255]
         lead.last_comment_at = datetime.now(UTC)
+        lead.next_action_date = payload.next_action_date
         lead.updated_by_id = actor_id
 
         # @mentions create in-app notifications. Spec §3.2 also calls out next-action

@@ -49,6 +49,7 @@ class BaseRepository(Generic[ModelType]):
         sort_by: str = "created_at",
         sort_order: str = "desc",
         options: Sequence[ORMOption] | None = None,
+        extra_filters: Sequence[Any] | None = None,
     ) -> tuple[list[ModelType], int]:
         query_filters = self._default_filters()
         if filters:
@@ -70,6 +71,12 @@ class BaseRepository(Generic[ModelType]):
                     search_clauses.append(cast(column, String).ilike(pattern))
             if search_clauses:
                 query_filters.append(or_(*search_clauses))
+
+        # Caller-supplied SQLAlchemy where-clauses (e.g. date ranges the generic
+        # equality/IN builder above can't express). Applied to both the row and
+        # count queries below, so pagination totals stay correct.
+        if extra_filters:
+            query_filters.extend(extra_filters)
 
         query = select(self.model).where(*query_filters)
         count_query = select(func.count()).select_from(self.model).where(*query_filters)

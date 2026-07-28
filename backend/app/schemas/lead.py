@@ -136,6 +136,7 @@ class LeadRead(ORMModel):
     interest: str | None = None
     last_comment_preview: str | None = None
     last_comment_at: datetime | None = None
+    next_action_date: datetime | None = None
     assigned_to_id: UUID | None = None
     partner_id: UUID | None = None
     property_type: str | None = None
@@ -171,8 +172,10 @@ class LeadDuplicate(ORMModel):
 class LeadFilterParams(SearchSortParams):
     customer_id: UUID | None = None
     industry: LeadIndustry | None = None
-    stage_code: str | None = None
+    stage_code: str | None = None  # single code, or comma-joined for multi-select → IN (...)
     source: str | None = None
     campaign: str | None = None
     assigned_to_id: UUID | None = None
     partner_id: UUID | None = None
+    # Filter to leads whose next action (call/follow-up) is due on this calendar day.
+    next_action_on: date | None = None

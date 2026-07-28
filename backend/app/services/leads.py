@@ -1,4 +1,5 @@
 import re
+from datetime import UTC, datetime, time, timedelta
 from uuid import UUID
 
 from fastapi import BackgroundTasks
@@ -36,6 +37,7 @@ class LeadService(ServiceBase):
         "expected_close_date",
         "lead_number",
         "last_comment_at",
+        "next_action_date",
     }
 
     def __init__(self, session):
@@ -99,17 +101,33 @@ class LeadService(ServiceBase):
 
     async def list_leads(self, pagination: PaginationParams, filters: LeadFilterParams):
         sort_by = validate_sort_field(filters.sort_by, self.allowed_sort_fields)
+        # Stage filter accepts a single code or a comma-joined list (multi-select) →
+        # a list value makes the repo emit `stage_code IN (...)`.
+        stage_codes = (
+            [c.strip() for c in filters.stage_code.split(",") if c.strip()]
+            if filters.stage_code
+            else None
+        )
+        # "Due on a day" filter — a range the generic equality/IN builder can't express.
+        extra_filters = []
+        if filters.next_action_on is not None:
+            day_start = datetime.combine(filters.next_action_on, time.min, tzinfo=UTC)
+            extra_filters = [
+                Lead.next_action_date >= day_start,
+                Lead.next_action_date < day_start + timedelta(days=1),
+            ]
         items, total = await self.repository.list(
             pagination=pagination,
             filters={
                 "customer_id": filters.customer_id,
                 "industry": filters.industry,
-                "stage_code": filters.stage_code,
+                "stage_code": stage_codes or None,
                 "source": filters.source,
                 "campaign": filters.campaign,
                 "assigned_to_id": filters.assigned_to_id,
                 "partner_id": filters.partner_id,
             },
+            extra_filters=extra_filters,
             search=filters.search,
             # Free-text search spans title + interest + the contact fields + lead
             # number (lead_number is Integer — the repo casts to String for ILIKE).

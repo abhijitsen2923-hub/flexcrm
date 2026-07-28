@@ -290,6 +290,7 @@ export interface Lead {
   interest: string | null;
   last_comment_preview: string | null;
   last_comment_at: string | null;
+  next_action_date?: string | null;
   assigned_to_id: string | null;
   // Channel partner (broker) who referred this lead, if any.
   partner_id: string | null;

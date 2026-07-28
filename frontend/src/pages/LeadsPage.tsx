@@ -145,7 +145,8 @@ export default function LeadsPage() {
   const [view, setView] = useState<ViewMode>("list");
   const [page, setPage] = useState(1);
   const [industryFilter, setIndustryFilter] = useState<LeadIndustry | "">(defaultIndustry);
-  const [stageFilter, setStageFilter] = useState<string>("");
+  const [stageFilter, setStageFilter] = useState<string[]>([]);   // multi-select stage codes
+  const [nextActionOn, setNextActionOn] = useState<string>("");   // YYYY-MM-DD "due on" filter
   const [ownerFilter, setOwnerFilter] = useState<string>("");
   const [sourceFilter, setSourceFilter] = useState<string>("");
   const [campaignFilter, setCampaignFilter] = useState<string>("");
@@ -199,14 +200,21 @@ export default function LeadsPage() {
       page,
       page_size: 20,
       industry: industryFilter || undefined,
-      stage_code: stageFilter || undefined,
+      // Comma-joined so the backend can `stage_code IN (...)` — a single stage still works.
+      stage_code: stageFilter.length ? stageFilter.join(",") : undefined,
+      next_action_on: nextActionOn || undefined,
       source: sourceFilter || undefined,
       campaign: campaignFilter || undefined,
       assigned_to_id: ownerFilter || undefined,
       search: search || undefined
     }),
-    [page, industryFilter, stageFilter, sourceFilter, campaignFilter, ownerFilter, search]
+    [page, industryFilter, stageFilter, nextActionOn, sourceFilter, campaignFilter, ownerFilter, search]
   );
+
+  function toggleStage(code: string) {
+    setStageFilter((prev) => (prev.includes(code) ? prev.filter((c) => c !== code) : [...prev, code]));
+    setPage(1);
+  }
 
   const { leads, pagination, loading, refresh, createLead, transitionLead } = useLeads(query);
   const { byIndustry, stages: allStages, getStage } = usePipelines();
@@ -787,7 +795,7 @@ export default function LeadsPage() {
               value={industryFilter}
               onChange={(event) => {
                 setIndustryFilter((event.target.value || "") as LeadIndustry | "");
-                setStageFilter("");
+                setStageFilter([]);
                 setPage(1);
               }}
               aria-label="Filter by industry"
@@ -800,23 +808,52 @@ export default function LeadsPage() {
               ))}
             </select>
           )}
-          <select
-            className="select"
-            value={stageFilter}
-            onChange={(event) => {
-              setStageFilter(event.target.value);
-              setPage(1);
-            }}
-            aria-label="Filter by stage"
-            style={{ minWidth: 220 }}
-          >
-            <option value="">All stages</option>
-            {stageOptionsForFilter.map((option) => (
-              <option key={`${option.value}-${option.label}`} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
+          <details className="stage-multiselect" style={{ position: "relative" }}>
+            <summary className="select" style={{ minWidth: 200, cursor: "pointer", userSelect: "none", listStyle: "none" }} aria-label="Filter by stage">
+              {stageFilter.length ? `Stages (${stageFilter.length})` : "All stages"}
+            </summary>
+            <div
+              style={{
+                position: "absolute", zIndex: 30, top: "calc(100% + 4px)", left: 0,
+                minWidth: 240, maxHeight: 300, overflowY: "auto",
+                background: "var(--color-surface)", border: "1px solid var(--color-border)",
+                borderRadius: "var(--radius-sm)", boxShadow: "0 6px 20px rgba(0,0,0,.14)", padding: "0.4rem"
+              }}
+            >
+              {stageFilter.length > 0 && (
+                <button
+                  type="button"
+                  className="link text-xs"
+                  onClick={() => { setStageFilter([]); setPage(1); }}
+                  style={{ background: "none", border: "none", cursor: "pointer", padding: "0.2rem 0.4rem", marginBottom: 2 }}
+                >
+                  Clear ({stageFilter.length})
+                </button>
+              )}
+              {stageOptionsForFilter.map((option) => (
+                <label
+                  key={`${option.value}-${option.label}`}
+                  style={{ display: "flex", alignItems: "center", gap: 8, padding: "0.35rem 0.4rem", cursor: "pointer" }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={stageFilter.includes(option.value)}
+                    onChange={() => toggleStage(option.value)}
+                  />
+                  <span className="text-sm">{option.label}</span>
+                </label>
+              ))}
+            </div>
+          </details>
+          <input
+            className="input"
+            type="date"
+            value={nextActionOn}
+            onChange={(event) => { setNextActionOn(event.target.value); setPage(1); }}
+            aria-label="Filter by next action due date"
+            title="Show leads whose next call/follow-up is due on this day"
+            style={{ minWidth: 150 }}
+          />
           <select
             className="select"
             value={sourceFilter}
@@ -869,6 +906,14 @@ export default function LeadsPage() {
                 </option>
               ))}
             </select>
+          )}
+          {nextActionOn && (
+            <span
+              style={{ display: "inline-flex", alignItems: "center", alignSelf: "center", whiteSpace: "nowrap" }}
+              title="Leads matching the current filters due on the selected day"
+            >
+              <Badge tone="warning">{pagination?.total ?? 0} due</Badge>
+            </span>
           )}
         </div>
 

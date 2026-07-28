@@ -78,6 +78,10 @@ class Lead(TenantBase, UUIDPrimaryKeyMixin, TimestampMixin, TenantAuditMixin, Te
 
     last_comment_preview: Mapped[str | None] = mapped_column(Text, nullable=True)
     last_comment_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Denormalized from the lead's LATEST stage transition (mirrors last_comment_*):
+    # the next scheduled call/follow-up, used by the leads "due on a day" filter and
+    # the follow-up reminders job. Nullable when no action is scheduled.
+    next_action_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
 
     assigned_to_id: Mapped[UUID | None] = mapped_column(
         Uuid,

@@ -16,10 +16,11 @@ import { apiClient } from "./http";
 export interface LeadListQuery extends PaginationQuery, SearchSortQuery {
   customer_id?: string;
   industry?: LeadIndustry;
-  stage_code?: string;
+  stage_code?: string;        // single code, or comma-joined for a multi-stage filter
   source?: string;
   campaign?: string;
   assigned_to_id?: string;
+  next_action_on?: string;    // YYYY-MM-DD — leads whose next action is due that day
 }
 
 export interface LeadCreatePayload {
