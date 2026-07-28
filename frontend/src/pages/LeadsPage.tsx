@@ -1317,6 +1317,7 @@ export default function LeadsPage() {
         lead={drawerLead}
         onClose={() => setDrawerLead(null)}
         onTransitionRequest={(lead, target) => openTransition(lead, target)}
+        onLogged={() => void refresh()}
         refreshKey={drawerKey}
       />
 

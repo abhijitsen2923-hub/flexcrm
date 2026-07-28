@@ -163,10 +163,16 @@ export const leadsService = {
     return data;
   },
 
-  async logCall(leadId: string, callType: "first_call" | "follow_up" | "dnp", notes?: string | null): Promise<LeadCallLog> {
+  async logCall(
+    leadId: string,
+    callType: "first_call" | "follow_up" | "dnp",
+    notes?: string | null,
+    nextActionDate?: string | null
+  ): Promise<LeadCallLog> {
     const { data } = await apiClient.post<LeadCallLog>(`/leads/${leadId}/calls`, {
       call_type: callType,
       notes: notes ?? null,
+      next_action_date: nextActionDate ?? null,
     });
     return data;
   },

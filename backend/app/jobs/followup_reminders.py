@@ -24,7 +24,6 @@ from app.database.enums import UserStatus
 from app.database.session import db_manager
 from app.models.lead import Lead
 from app.models.organization import Organization
-from app.models.stage_transition import StageTransition
 from app.models.user import User
 from app.services.email import EmailService
 from app.services.notifications import NotificationService
@@ -53,64 +52,46 @@ async def dispatch_followup_reminders(session) -> dict[str, int]:
         await set_tenant_schema(session, org.schema_name)
         counts["orgs"] += 1
         try:
-            # The current follow-up for a lead lives on its most recent
-            # transition. DISTINCT ON (lead_id) ORDER BY performed_at DESC, id DESC
-            # is tie-safe — exactly one (latest) row per lead, even if two share a
-            # performed_at (func.now() is constant within a transaction).
-            latest = (
-                select(
-                    StageTransition.lead_id.label("lead_id"),
-                    StageTransition.next_action_date.label("next_action_date"),
-                    StageTransition.comment.label("comment"),
-                )
-                .distinct(StageTransition.lead_id)
-                .order_by(
-                    StageTransition.lead_id,
-                    StageTransition.performed_at.desc(),
-                    StageTransition.id.desc(),
-                )
-                .subquery()
-            )
+            # A lead's current follow-up is its denormalized next_action_date —
+            # set by the latest stage transition OR a DNP scheduling a callback.
             rows = (
                 await session.execute(
-                    select(Lead, latest.c.next_action_date, latest.c.comment)
-                    .join(latest, latest.c.lead_id == Lead.id)
-                    .where(
+                    select(Lead).where(
                         Lead.is_deleted.is_(False),
                         Lead.assigned_to_id.is_not(None),
                         Lead.stage_code.notin_(CLOSED_STAGE_CODES),
-                        latest.c.next_action_date.is_not(None),
-                        latest.c.next_action_date < horizon,
+                        Lead.next_action_date.is_not(None),
+                        Lead.next_action_date < horizon,
                     )
                 )
-            ).all()
+            ).scalars().all()
 
             by_owner: dict = defaultdict(list)
-            for lead, nad, comment in rows:
-                by_owner[lead.assigned_to_id].append((lead, nad, comment))
+            for lead in rows:
+                by_owner[lead.assigned_to_id].append(lead)
 
             notif = NotificationService(session)
             emailer = EmailService()
-            for owner_id, items in by_owner.items():
+            for owner_id, leads in by_owner.items():
                 owner = await session.get(User, owner_id)
                 # Skip deactivated / soft-deleted owners.
                 if owner is None or owner.status != UserStatus.active or owner.is_deleted:
                     continue
-                counts["reminders"] += len(items)
+                counts["reminders"] += len(leads)
                 counts["recipients"] += 1
                 await notif.create_notification(
                     user_id=owner_id,
-                    message=f"You have {len(items)} follow-up(s) due. Log the call and set the next action.",
+                    message=f"You have {len(leads)} follow-up(s) due. Log the call and set the next action.",
                 )
                 if owner.email:
                     digest = [
                         {
                             "lead": lead.lead_number,
                             "name": lead.contact_name,
-                            "due": nad.strftime("%d %b %Y, %H:%M"),
-                            "note": (comment or "")[:120],
+                            "due": lead.next_action_date.strftime("%d %b %Y, %H:%M"),
+                            "note": (lead.last_comment_preview or "")[:120],
                         }
-                        for lead, nad, comment in items
+                        for lead in leads
                     ]
                     await emailer.send_followup_digest(
                         owner.email, rep_name=owner.first_name or "there", items=digest

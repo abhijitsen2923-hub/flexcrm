@@ -265,6 +265,7 @@ export interface LeadCallLog {
   user_id: string;
   call_type: "first_call" | "follow_up" | "dnp";
   notes: string | null;
+  next_action_date: string | null;
   created_at: string;
   user?: UserSummary | null;
 }

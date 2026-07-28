@@ -159,8 +159,12 @@ class LeadCallLog(TenantBase, UUIDPrimaryKeyMixin, TimestampMixin):
     user_id: Mapped[UUID] = mapped_column(
         Uuid, ForeignKey("public.users.id", ondelete="CASCADE"), nullable=False, index=True
     )
-    call_type: Mapped[str] = mapped_column(String(20), nullable=False)  # first_call | follow_up
+    call_type: Mapped[str] = mapped_column(String(20), nullable=False)  # first_call | follow_up | dnp
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Optional next-call date scheduled from this call (esp. a DNP → schedule a
+    # callback). Denormalized onto lead.next_action_date so it feeds the leads
+    # date-filter + follow-up reminders.
+    next_action_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     lead = relationship("Lead", back_populates="call_logs")
     # Read-only link to the caller (name on the timeline). Lambda + imported User

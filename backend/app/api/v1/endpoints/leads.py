@@ -178,7 +178,11 @@ async def log_lead_call(
     await get_lead_or_404(session, lead_id)
     await _enforce_lead_access(session, lead_id, current_user)
     return await LeadService(session).log_call(
-        lead_id, payload.call_type, actor_id=current_user.id, notes=payload.notes
+        lead_id,
+        payload.call_type,
+        actor_id=current_user.id,
+        notes=payload.notes,
+        next_action_date=payload.next_action_date,
     )
 
 

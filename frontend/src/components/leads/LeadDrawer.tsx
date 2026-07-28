@@ -13,6 +13,9 @@ import { canSetStage } from "../../utils/stageAccess";
 import { LeadBookingsTab } from "./LeadBookingsTab";
 
 
+// Mirror the stage-transition comment floor so a DNP is captured "like Call".
+const MIN_DNP_COMMENT = 10;
+
 type TabKey = "overview" | "bookings" | "history" | "activity";
 
 const TAB_LABELS: Record<TabKey, string> = {
@@ -28,11 +31,15 @@ interface LeadDrawerProps {
   lead: Lead | null;
   onClose: () => void;
   onTransitionRequest: (lead: Lead, target: PipelineStage) => void;
+  // Fired after an in-drawer action mutates the lead (e.g. a DNP schedules the
+  // next action) so the parent can refresh its list / "due" filter / badge —
+  // stage moves already refresh via onTransitionRequest → transition flow.
+  onLogged?: () => void;
   refreshKey?: number;
 }
 
 
-export function LeadDrawer({ open, lead, onClose, onTransitionRequest, refreshKey }: LeadDrawerProps) {
+export function LeadDrawer({ open, lead, onClose, onTransitionRequest, onLogged, refreshKey }: LeadDrawerProps) {
   const { byIndustry, getStage } = usePipelines();
   const { user } = useAuth();
   const [tab, setTab] = useState<TabKey>("overview");
@@ -40,7 +47,11 @@ export function LeadDrawer({ open, lead, onClose, onTransitionRequest, refreshKe
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyError, setHistoryError] = useState(false);
   const [calls, setCalls] = useState<LeadCallLog[]>([]);
-  const [callBusy, setCallBusy] = useState(false);
+  // "Did Not Pick" inline form — logs a DNP with a comment + a scheduled next call.
+  const [dnpOpen, setDnpOpen] = useState(false);
+  const [dnpComment, setDnpComment] = useState("");
+  const [dnpDate, setDnpDate] = useState("");
+  const [dnpBusy, setDnpBusy] = useState(false);
 
   // Escape key + lock body scroll while drawer is open.
   useEffect(() => {
@@ -90,16 +101,34 @@ export function LeadDrawer({ open, lead, onClose, onTransitionRequest, refreshKe
     return () => { cancelled = true; };
   }, [open, lead?.id, refreshKey]);
 
-  async function handleLogCall(callType: "first_call" | "follow_up" | "dnp") {
-    if (!lead) return;
-    setCallBusy(true);
+  // Reset the DNP form when switching leads.
+  useEffect(() => {
+    setDnpOpen(false);
+    setDnpComment("");
+    setDnpDate("");
+  }, [lead?.id]);
+
+  async function submitDnp() {
+    if (!lead || dnpComment.trim().length < MIN_DNP_COMMENT) return;
+    setDnpBusy(true);
     try {
-      await leadsService.logCall(lead.id, callType);
+      await leadsService.logCall(
+        lead.id,
+        "dnp",
+        dnpComment.trim(),
+        dnpDate ? new Date(dnpDate).toISOString() : null
+      );
       setCalls(await leadsService.calls(lead.id));
+      setDnpOpen(false);
+      setDnpComment("");
+      setDnpDate("");
+      // The DNP just moved the lead's next_action_date + last comment — let the
+      // parent list / date-filter / "due" badge reflect it without a manual refresh.
+      onLogged?.();
     } catch {
       /* non-critical */
     } finally {
-      setCallBusy(false);
+      setDnpBusy(false);
     }
   }
 
@@ -113,9 +142,6 @@ export function LeadDrawer({ open, lead, onClose, onTransitionRequest, refreshKe
     ? ["overview", "bookings", "history", "activity"]
     : ["overview", "history", "activity"];
   const activeTab: TabKey = tab === "bookings" && !isRealEstate ? "overview" : tab;
-  const myFirstCall = calls.find((c) => c.user_id === user?.id && c.call_type === "first_call");
-  const followUpCount = calls.filter((c) => c.call_type === "follow_up").length;
-  const dnpCount = calls.filter((c) => c.call_type === "dnp").length;
 
   return createPortal(
     // No backdrop-tap close: the drawer holds editable content (comments,
@@ -160,43 +186,6 @@ export function LeadDrawer({ open, lead, onClose, onTransitionRequest, refreshKe
           )}
           {activeTab === "overview" && (
             <div className="stack">
-              <div className="card" style={{ padding: "0.75rem 1rem" }}>
-                <div className="muted text-xs" style={{ textTransform: "uppercase", letterSpacing: ".04em", marginBottom: "0.5rem" }}>
-                  Call tracking
-                </div>
-                <div className="row" style={{ gap: "0.5rem", flexWrap: "wrap", alignItems: "center" }}>
-                  {myFirstCall ? (
-                    <Badge tone="success">First call done · {formatDateTime(myFirstCall.created_at)}</Badge>
-                  ) : (
-                    <Button size="sm" loading={callBusy} onClick={() => void handleLogCall("first_call")}>
-                      First Call Done
-                    </Button>
-                  )}
-                  <Button size="sm" variant="secondary" loading={callBusy} onClick={() => void handleLogCall("follow_up")}>
-                    Follow-up Call Done
-                  </Button>
-                  <Button size="sm" variant="ghost" loading={callBusy} onClick={() => void handleLogCall("dnp")}>
-                    Did Not Pick
-                  </Button>
-                  {followUpCount > 0 && (
-                    <span className="muted text-sm">{followUpCount} follow-up{followUpCount === 1 ? "" : "s"}</span>
-                  )}
-                  {dnpCount > 0 && (
-                    <span className="muted text-sm">· {dnpCount} DNP</span>
-                  )}
-                </div>
-                {calls.length > 0 && (
-                  <div className="stack" style={{ gap: "0.2rem", marginTop: "0.6rem" }}>
-                    {calls.slice().reverse().slice(0, 5).map((c) => (
-                      <div key={c.id} className="text-xs muted">
-                        {c.call_type === "first_call" ? "First call" : c.call_type === "dnp" ? "Did not pick" : "Follow-up"}
-                        {" · "}{c.user ? `${c.user.first_name} ${c.user.last_name}` : "—"}
-                        {" · "}{formatDateTime(c.created_at)}
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
               <DetailRow label="Contact" value={lead.contact_name || "—"} />
               <DetailRow label="Email" value={lead.contact_email ?? "—"} />
               <DetailRow label="Phone" value={lead.contact_phone ?? "—"} />
@@ -256,7 +245,56 @@ export function LeadDrawer({ open, lead, onClose, onTransitionRequest, refreshKe
                         </button>
                       );
                     })}
+                  <button
+                    type="button"
+                    className="btn btn--sm btn--ghost"
+                    onClick={() => setDnpOpen((v) => !v)}
+                    title="Log a Did-Not-Pick and schedule the next call"
+                  >
+                    Did Not Pick
+                  </button>
                 </div>
+
+                {dnpOpen && (
+                  <div className="stack" style={{ gap: "0.5rem", marginTop: "0.6rem", padding: "0.6rem 0.75rem", background: "var(--color-surface-muted)", borderRadius: "var(--radius-sm)" }}>
+                    <textarea
+                      className="input"
+                      rows={2}
+                      placeholder={`What happened? (min ${MIN_DNP_COMMENT} chars)`}
+                      value={dnpComment}
+                      onChange={(e) => setDnpComment(e.target.value)}
+                    />
+                    <label className="stack" style={{ gap: 2 }}>
+                      <span className="muted text-xs">Next call date &amp; time (optional)</span>
+                      <input className="input" type="datetime-local" value={dnpDate} onChange={(e) => setDnpDate(e.target.value)} />
+                    </label>
+                    <div className="row" style={{ justifyContent: "flex-end", gap: "0.4rem" }}>
+                      <Button size="sm" variant="secondary" onClick={() => setDnpOpen(false)} disabled={dnpBusy}>Cancel</Button>
+                      <Button size="sm" loading={dnpBusy} disabled={dnpComment.trim().length < MIN_DNP_COMMENT} onClick={() => void submitDnp()}>
+                        Log DNP
+                      </Button>
+                    </div>
+                  </div>
+                )}
+
+                {calls.length > 0 && (
+                  <div style={{ marginTop: "0.75rem" }}>
+                    <div className="muted text-xs" style={{ textTransform: "uppercase", letterSpacing: ".04em", marginBottom: "0.35rem" }}>
+                      Call log
+                    </div>
+                    <div className="stack" style={{ gap: "0.25rem" }}>
+                      {calls.slice().reverse().slice(0, 6).map((c) => (
+                        <div key={c.id} className="text-xs muted">
+                          {c.call_type === "first_call" ? "First call" : c.call_type === "dnp" ? "Did not pick" : "Follow-up"}
+                          {" · "}{c.user ? `${c.user.first_name} ${c.user.last_name}` : "—"}
+                          {" · "}{formatDateTime(c.created_at)}
+                          {c.next_action_date ? ` · next call ${formatDateTime(c.next_action_date)}` : ""}
+                          {c.notes ? ` — ${c.notes}` : ""}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           )}

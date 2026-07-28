@@ -95,6 +95,8 @@ class LeadCallLogCreate(ORMModel):
     # "dnp" (did-not-pick) stacks like follow_up — only first_call is idempotent.
     call_type: Literal["first_call", "follow_up", "dnp"]
     notes: str | None = Field(default=None, max_length=500)
+    # Optional next-call date scheduled from this call (denormalized onto the lead).
+    next_action_date: datetime | None = None
 
 
 class LeadCallLogRead(ORMModel):
@@ -103,6 +105,7 @@ class LeadCallLogRead(ORMModel):
     user_id: UUID
     call_type: str
     notes: str | None = None
+    next_action_date: datetime | None = None
     created_at: datetime
     user: UserSummary | None = None
 

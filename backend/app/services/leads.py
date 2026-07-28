@@ -1,4 +1,5 @@
 import re
+from datetime import UTC, datetime
 from uuid import UUID
 
 from fastapi import BackgroundTasks
@@ -70,10 +71,22 @@ class LeadService(ServiceBase):
         await self.commit()
         return count
 
-    async def log_call(self, lead_id: UUID, call_type: str, *, actor_id: UUID, notes: str | None = None) -> LeadCallLog:
+    async def log_call(
+        self,
+        lead_id: UUID,
+        call_type: str,
+        *,
+        actor_id: UUID,
+        notes: str | None = None,
+        next_action_date: datetime | None = None,
+    ) -> LeadCallLog:
         """Record a call by the current user. 'first_call' is idempotent per
         (lead, user) — clicking it again returns the existing log rather than
-        stacking duplicates."""
+        stacking duplicates. When `next_action_date` is given (e.g. a DNP →
+        schedule the next call), it's denormalized onto lead.next_action_date so
+        it feeds the leads date-filter + follow-up reminders. A `notes` reason is
+        denormalized onto last_comment_preview (mirroring a stage transition) so
+        it surfaces on the reminder digest + the lead's "last comment"."""
         if call_type == "first_call":
             existing = await self.session.scalar(
                 select(LeadCallLog).where(
@@ -84,8 +97,26 @@ class LeadService(ServiceBase):
             )
             if existing is not None:
                 return existing
-        log = LeadCallLog(lead_id=lead_id, user_id=actor_id, call_type=call_type, notes=notes)
+        log = LeadCallLog(
+            lead_id=lead_id, user_id=actor_id, call_type=call_type, notes=notes, next_action_date=next_action_date
+        )
         self.session.add(log)
+        # Denormalize onto the lead: the scheduled callback (next_action_date) and
+        # the reason (notes → last_comment_preview) so the leads date-filter,
+        # follow-up reminders, and the "last comment" snapshot reflect this call —
+        # the same way a stage transition denormalizes. A blank field leaves the
+        # prior value untouched (a note-less follow-up shouldn't wipe last_comment).
+        # Gate on the *stripped* note so a whitespace-only value (possible from a
+        # raw API caller — the schema has no min length) can't erase a real preview.
+        note = notes.strip() if notes else ""
+        if next_action_date is not None or note:
+            lead = await self.session.get(Lead, lead_id)
+            if lead is not None:
+                if next_action_date is not None:
+                    lead.next_action_date = next_action_date
+                if note:
+                    lead.last_comment_preview = note[:255]
+                    lead.last_comment_at = datetime.now(UTC)
         await self.commit()
         # Re-query so the `user` relationship (selectin) is loaded for the response
         # — accessing an unloaded relationship after commit would lazy-load in the
