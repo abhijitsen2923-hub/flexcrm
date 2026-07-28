@@ -165,6 +165,7 @@ export function InventoryBoard({ projects, onStatusChange, onRefresh, filterFloo
         <>
           <div className="drawer-backdrop" onClick={() => setSelectedUnit(null)} />
           <UnitDetailPanel
+            key={selectedUnit.id}
             unit={selectedUnit}
             onClose={() => setSelectedUnit(null)}
             onStatusChange={onStatusChange}
