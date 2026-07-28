@@ -195,21 +195,33 @@ export default function LeadsPage() {
     [org]
   );
 
-  const query = useMemo(
-    () => ({
+  const query = useMemo(() => {
+    // Turn the picked day into the user's LOCAL-day UTC boundaries so "due that day"
+    // respects the browser timezone (the app's users are IST). `YYYY-MM-DDT00:00:00`
+    // parses as local midnight; toISOString() gives the UTC instant.
+    let next_action_from: string | undefined;
+    let next_action_to: string | undefined;
+    if (nextActionOn) {
+      const start = new Date(`${nextActionOn}T00:00:00`);
+      const end = new Date(`${nextActionOn}T00:00:00`);
+      end.setDate(end.getDate() + 1);
+      next_action_from = start.toISOString();
+      next_action_to = end.toISOString();
+    }
+    return {
       page,
       page_size: 20,
       industry: industryFilter || undefined,
       // Comma-joined so the backend can `stage_code IN (...)` — a single stage still works.
       stage_code: stageFilter.length ? stageFilter.join(",") : undefined,
-      next_action_on: nextActionOn || undefined,
+      next_action_from,
+      next_action_to,
       source: sourceFilter || undefined,
       campaign: campaignFilter || undefined,
       assigned_to_id: ownerFilter || undefined,
       search: search || undefined
-    }),
-    [page, industryFilter, stageFilter, nextActionOn, sourceFilter, campaignFilter, ownerFilter, search]
-  );
+    };
+  }, [page, industryFilter, stageFilter, nextActionOn, sourceFilter, campaignFilter, ownerFilter, search]);
 
   function toggleStage(code: string) {
     setStageFilter((prev) => (prev.includes(code) ? prev.filter((c) => c !== code) : [...prev, code]));

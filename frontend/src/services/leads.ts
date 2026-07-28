@@ -20,7 +20,9 @@ export interface LeadListQuery extends PaginationQuery, SearchSortQuery {
   source?: string;
   campaign?: string;
   assigned_to_id?: string;
-  next_action_on?: string;    // YYYY-MM-DD — leads whose next action is due that day
+  // Selected local day's UTC boundaries — leads whose next action is due that day.
+  next_action_from?: string;
+  next_action_to?: string;
 }
 
 export interface LeadCreatePayload {

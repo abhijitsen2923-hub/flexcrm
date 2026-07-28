@@ -177,5 +177,8 @@ class LeadFilterParams(SearchSortParams):
     campaign: str | None = None
     assigned_to_id: UUID | None = None
     partner_id: UUID | None = None
-    # Filter to leads whose next action (call/follow-up) is due on this calendar day.
-    next_action_on: date | None = None
+    # Filter to leads whose next action (call/follow-up) is due within a datetime
+    # range. The client sends the selected LOCAL day's UTC boundaries (tz-correct),
+    # so `next_action_from <= next_action_date < next_action_to`.
+    next_action_from: datetime | None = None
+    next_action_to: datetime | None = None

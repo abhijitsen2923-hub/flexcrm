@@ -1,5 +1,4 @@
 import re
-from datetime import UTC, datetime, time, timedelta
 from uuid import UUID
 
 from fastapi import BackgroundTasks
@@ -108,14 +107,13 @@ class LeadService(ServiceBase):
             if filters.stage_code
             else None
         )
-        # "Due on a day" filter — a range the generic equality/IN builder can't express.
+        # "Due on a day" filter — a datetime range the generic equality/IN builder
+        # can't express. The client sends the selected local day's UTC boundaries.
         extra_filters = []
-        if filters.next_action_on is not None:
-            day_start = datetime.combine(filters.next_action_on, time.min, tzinfo=UTC)
-            extra_filters = [
-                Lead.next_action_date >= day_start,
-                Lead.next_action_date < day_start + timedelta(days=1),
-            ]
+        if filters.next_action_from is not None:
+            extra_filters.append(Lead.next_action_date >= filters.next_action_from)
+        if filters.next_action_to is not None:
+            extra_filters.append(Lead.next_action_date < filters.next_action_to)
         items, total = await self.repository.list(
             pagination=pagination,
             filters={
