@@ -143,6 +143,18 @@ export function LeadDrawer({ open, lead, onClose, onTransitionRequest, onLogged,
     : ["overview", "history", "activity"];
   const activeTab: TabKey = tab === "bookings" && !isRealEstate ? "overview" : tab;
 
+  // Real-estate leads carry a budget range (budget_min/max), not a single value —
+  // show the range instead of `value` (which defaults to 0 for RE). Mirrors the
+  // null-handling of the leads-list "Value / Budget" column.
+  const cur = lead.currency || "INR";
+  const budgetMin = lead.budget_min != null ? formatCurrency(lead.budget_min, cur) : null;
+  const budgetMax = lead.budget_max != null ? formatCurrency(lead.budget_max, cur) : null;
+  const budgetText =
+    budgetMin && budgetMax ? `${budgetMin} – ${budgetMax}`
+    : budgetMin ? `From ${budgetMin}`
+    : budgetMax ? `Up to ${budgetMax}`
+    : "—";
+
   return createPortal(
     // No backdrop-tap close: the drawer holds editable content (comments,
     // transitions) — close only via the ✕ button.
@@ -151,7 +163,10 @@ export function LeadDrawer({ open, lead, onClose, onTransitionRequest, onLogged,
         <header className="drawer__header">
           <div>
             <div className="muted text-xs">Lead #{lead.lead_number}</div>
-            <h2 style={{ marginTop: "0.25rem" }}>{lead.title}</h2>
+            <h2 style={{ marginTop: "0.25rem" }}>{lead.contact_name || lead.title}</h2>
+            {lead.contact_name && lead.title && (
+              <div className="muted text-sm">{lead.title}</div>
+            )}
             <div className="row" style={{ gap: "0.5rem", marginTop: "0.5rem", alignItems: "center" }}>
               <Badge tone="info">{titleCase(lead.industry)}</Badge>
               <Badge tone={currentStage ? pipelineCategoryTone(currentStage.category) : "neutral"}>
@@ -193,7 +208,11 @@ export function LeadDrawer({ open, lead, onClose, onTransitionRequest, onLogged,
               <DetailRow label="Industry" value={titleCase(lead.industry)} />
               <DetailRow label={interestLabel} value={lead.interest ?? "—"} />
               <DetailRow label="Source" value={lead.source ?? "—"} />
-              <DetailRow label="Value" value={formatCurrency(lead.value, lead.currency || "INR")} />
+              {isRealEstate ? (
+                <DetailRow label="Budget" value={budgetText} />
+              ) : (
+                <DetailRow label="Value" value={formatCurrency(lead.value, lead.currency || "INR")} />
+              )}
               <DetailRow label="Probability" value={`${lead.probability}%`} />
               <DetailRow label="Expected close" value={formatDate(lead.expected_close_date)} />
               <DetailRow
