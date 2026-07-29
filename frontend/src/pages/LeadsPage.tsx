@@ -38,9 +38,10 @@ type ViewMode = "list" | "kanban";
 
 // Stages whose move triggers heavy / needs-input side-effects keep the comment
 // modal: `sold` promotes a customer + accrues brokerage; `site_visit_confirmed`
-// books a visit on the calendar. Every other stage changes instantly from the
+// books a visit on the calendar; `booked` captures the property + token and
+// promotes the lead to a Customer. Every other stage changes instantly from the
 // dropdown (like the Owner column), recording an auto-comment.
-const QUICK_STAGE_MODAL_CODES = new Set<string>(["sold", "site_visit_confirmed"]);
+const QUICK_STAGE_MODAL_CODES = new Set<string>(["sold", "site_visit_confirmed", "booked"]);
 
 
 // Red "!" marker shown on any lead that shares an email or phone with another
@@ -1285,9 +1286,12 @@ export default function LeadsPage() {
         open={transitionOpen}
         lead={transitionLeadState}
         targetStage={transitionTarget}
+        assignableUsers={assignableUsers}
         onClose={() => setTransitionOpen(false)}
         onSubmit={async (payload) => {
           if (!transitionLeadState) return;
+          // `site_visit` is a separate calendar call; `booking`/`assigned_to_id`
+          // travel with the transition (the backend records the token + promotes).
           const { site_visit, ...transitionPayload } = payload;
           await transitionLead(transitionLeadState.id, transitionPayload);
           // When moving to the Site Visit stage, book the visit on the calendar.
@@ -1304,9 +1308,11 @@ export default function LeadsPage() {
           }
           toast.success(
             "Stage updated",
-            site_visit
-              ? "Moved · site visit booked on the calendar"
-              : `Moved to ${transitionTarget?.name ?? payload.to_stage_code}`
+            transitionPayload.booking
+              ? "Booked · token recorded, lead promoted to a customer"
+              : site_visit
+                ? "Moved · site visit booked on the calendar"
+                : `Moved to ${transitionTarget?.name ?? payload.to_stage_code}`
           );
           setDrawerKey((k) => k + 1);
         }}

@@ -3,7 +3,7 @@ from uuid import UUID
 
 from app.core.exceptions import AuthorizationError, NotFoundError, ValidationError
 from app.core.permissions import STAGE_MANAGER_ROLES, can_set_stage
-from app.database.enums import LeadIndustry, PipelineStageCategory, UserRole
+from app.database.enums import LeadIndustry, PipelineStageCategory, UnitStatus, UserRole
 from app.models.lead import Lead
 from app.models.pipeline_stage import PipelineStage  # noqa: F401  (kept for type hinting context)
 from app.models.stage_transition import StageTransition
@@ -25,6 +25,11 @@ from app.finance.services import SalesOrderService
 # The "Sold" stage shares the same `code` slug across both industries
 # (Education position 12 and Travel position 12). One constant covers both.
 SOLD_STAGE_CODE = "sold"
+
+# Real-estate "Booked / Token" (position 7) — the lead's first payment. Moving
+# here captures the property/token on a Booking and promotes the lead to a
+# Customer ("any payment ⇒ customer"), rather than waiting for Sold.
+BOOKED_STAGE_CODE = "booked"
 
 # Travel-only gate: cannot leave this stage until all required docs are uploaded.
 TRAVEL_DOCS_PENDING_STAGE = "visa_documentation_pending"
@@ -171,6 +176,29 @@ class StageTransitionService(ServiceBase):
                 ),
             )
 
+        # Real-estate "Booked / Token" (position 7): the lead's first payment.
+        # Only promote when a token/booking is actually recorded (the payment) —
+        # matching "any payment ⇒ customer"; a booking-less move to `booked` (e.g.
+        # a backward correction) must NOT create a customer or re-onboard one.
+        # Promotion is idempotent, so a later Sold transition still works.
+        held_unit_event: tuple[str, str] | None = None
+        if (
+            target_stage.code == BOOKED_STAGE_CODE
+            and lead.industry == LeadIndustry.real_estate
+            and payload.booking is not None
+        ):
+            # Salesperson: an explicit pick wins; else keep the lead's owner; else
+            # fall back to the user recording the booking — so the promoted
+            # customer always has an owner even for roles that can't pick a user.
+            if payload.assigned_to_id is not None:
+                lead.assigned_to_id = payload.assigned_to_id
+            elif lead.assigned_to_id is None:
+                lead.assigned_to_id = actor_id
+            booking, held_unit_event = await self._apply_booked_token(lead, payload.booking)
+            customer = await self.promotion_service.promote_from_lead(lead, actor_id=actor_id)
+            if booking.customer_id is None:
+                booking.customer_id = customer.id
+
         # Auto-promote on Sold (Education stage 12, Travel stage 12 — both
         # share code "sold"). Idempotent: a lead already linked to a Customer
         # just gets its status flipped to `active`.
@@ -225,7 +253,72 @@ class StageTransitionService(ServiceBase):
                 },
             }
         )
+        # A "Booked / Token" move that put a unit on hold → tell inventory views so
+        # the held unit leaves the available picker without a manual refresh.
+        if held_unit_event is not None:
+            await realtime_manager.broadcast(
+                {
+                    "event": "unit.status_changed",
+                    "unit_id": held_unit_event[0],
+                    "status": UnitStatus.hold.value,
+                    "project_id": held_unit_event[1],
+                }
+            )
         return transition
+
+    async def _apply_booked_token(self, lead: Lead, capture):
+        """Record the "Booked / Token" property + token on a Booking for the lead.
+
+        Reuses the lead's existing non-cancelled Booking if one exists (e.g. one
+        started in the Booking wizard) so we don't create a duplicate; otherwise
+        creates a fresh draft Booking for the picked unit. The token puts the unit
+        on HOLD (a reservation) — NOT `booked`: the booking stays a draft the user
+        completes in the wizard, and step-4 confirm is what flips a held unit to
+        `booked` + a confirmed booking. Holding keeps the unit out of the available
+        picker (no double-book) while preserving the confirm → register path.
+        Raises (rolling back the whole transition) if a new unit isn't available.
+        Returns the Booking. Local imports avoid a circular import at module load
+        (real_estate models register with the same metadata)."""
+        from sqlalchemy import select as _select
+
+        from app.database.enums import BookingStatus
+        from app.real_estate.models import Booking, Unit
+
+        existing = (
+            await self.session.execute(
+                _select(Booking)
+                .where(Booking.lead_id == lead.id, Booking.status != BookingStatus.cancelled)
+                .order_by(Booking.created_at.desc())
+            )
+        ).scalars().first()
+
+        held_unit: tuple[str, str] | None = None
+        if existing is not None:
+            booking = existing
+            # A wizard-started draft leaves its unit `available` until now — the
+            # token reserves it as a HOLD (only if still available, so we never
+            # clobber a booked/sold state) to prevent a double-booking.
+            reused_unit = await self.session.get(Unit, booking.unit_id)
+            if reused_unit is not None and reused_unit.status == UnitStatus.available:
+                reused_unit.status = UnitStatus.hold
+                held_unit = (str(reused_unit.id), str(reused_unit.project_id))
+        else:
+            unit = await self.session.get(Unit, capture.unit_id)
+            if unit is None:
+                raise ValidationError("The selected unit was not found.")
+            if unit.status != UnitStatus.available:
+                raise ValidationError("The selected unit is not available to book.")
+            booking = Booking(unit_id=unit.id, lead_id=lead.id, status=BookingStatus.draft)
+            self.session.add(booking)
+            unit.status = UnitStatus.hold
+            held_unit = (str(unit.id), str(unit.project_id))
+
+        booking.token_amount = capture.token_amount
+        booking.token_received_on = capture.token_received_on
+        booking.token_mode = capture.token_mode
+        # held_unit → the caller broadcasts unit.status_changed after commit so
+        # inventory boards / unit pickers drop the now-held unit without a refresh.
+        return booking, held_unit
 
     async def seed_initial_transition(
         self,

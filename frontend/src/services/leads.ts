@@ -78,6 +78,16 @@ export interface StageTransitionPayload {
   next_action_date?: string | null;
   attachment_path?: string | null;
   mentions?: string[];
+  // Salesperson (assigned owner) set during the move — used on "Booked / Token".
+  assigned_to_id?: string | null;
+  // "Booked / Token": the property unit + token; the backend creates/updates the
+  // lead's Booking with this and promotes the lead to a Customer.
+  booking?: {
+    unit_id: string;
+    token_amount: number;
+    token_mode: string;
+    token_received_on: string;
+  } | null;
 }
 
 export interface LeadImportDuplicate {
