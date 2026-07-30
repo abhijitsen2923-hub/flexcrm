@@ -148,6 +148,8 @@ export default function LeadsPage() {
   const [industryFilter, setIndustryFilter] = useState<LeadIndustry | "">(defaultIndustry);
   const [stageFilter, setStageFilter] = useState<string[]>([]);   // multi-select stage codes
   const [nextActionOn, setNextActionOn] = useState<string>("");   // YYYY-MM-DD "due on" filter
+  const [stageChangedFrom, setStageChangedFrom] = useState<string>(""); // YYYY-MM-DD range start
+  const [stageChangedTo, setStageChangedTo] = useState<string>("");     // YYYY-MM-DD range end
   const [ownerFilter, setOwnerFilter] = useState<string>("");
   const [sourceFilter, setSourceFilter] = useState<string>("");
   const [campaignFilter, setCampaignFilter] = useState<string>("");
@@ -209,6 +211,17 @@ export default function LeadsPage() {
       next_action_from = start.toISOString();
       next_action_to = end.toISOString();
     }
+    // Stage-changed From–To range → half-open local-day UTC boundaries. Each bound
+    // is independent, so a From-only or To-only range works as an open interval.
+    const stage_changed_from = stageChangedFrom
+      ? new Date(`${stageChangedFrom}T00:00:00`).toISOString()
+      : undefined;
+    let stage_changed_to: string | undefined;
+    if (stageChangedTo) {
+      const end = new Date(`${stageChangedTo}T00:00:00`);
+      end.setDate(end.getDate() + 1); // make the To day inclusive
+      stage_changed_to = end.toISOString();
+    }
     return {
       page,
       page_size: 20,
@@ -217,12 +230,14 @@ export default function LeadsPage() {
       stage_code: stageFilter.length ? stageFilter.join(",") : undefined,
       next_action_from,
       next_action_to,
+      stage_changed_from,
+      stage_changed_to,
       source: sourceFilter || undefined,
       campaign: campaignFilter || undefined,
       assigned_to_id: ownerFilter || undefined,
       search: search || undefined
     };
-  }, [page, industryFilter, stageFilter, nextActionOn, sourceFilter, campaignFilter, ownerFilter, search]);
+  }, [page, industryFilter, stageFilter, nextActionOn, stageChangedFrom, stageChangedTo, sourceFilter, campaignFilter, ownerFilter, search]);
 
   function toggleStage(code: string) {
     setStageFilter((prev) => (prev.includes(code) ? prev.filter((c) => c !== code) : [...prev, code]));
@@ -867,6 +882,32 @@ export default function LeadsPage() {
             title="Show leads whose next call/follow-up is due on this day"
             style={{ minWidth: 150 }}
           />
+          <span
+            className="row"
+            style={{ gap: "0.35rem", alignItems: "center", flexWrap: "nowrap" }}
+            title="Filter leads by when their stage last changed (From–To)"
+          >
+            <span className="muted text-xs" style={{ whiteSpace: "nowrap" }}>Stage changed</span>
+            <input
+              className="input"
+              type="date"
+              value={stageChangedFrom}
+              onChange={(event) => { setStageChangedFrom(event.target.value); setPage(1); }}
+              aria-label="Stage changed from date"
+              title="Stage last changed on/after this date"
+              style={{ minWidth: 140 }}
+            />
+            <span className="muted text-xs">to</span>
+            <input
+              className="input"
+              type="date"
+              value={stageChangedTo}
+              onChange={(event) => { setStageChangedTo(event.target.value); setPage(1); }}
+              aria-label="Stage changed to date"
+              title="Stage last changed on/before this date"
+              style={{ minWidth: 140 }}
+            />
+          </span>
           <select
             className="select"
             value={sourceFilter}

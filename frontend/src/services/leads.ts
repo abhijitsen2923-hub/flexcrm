@@ -23,6 +23,9 @@ export interface LeadListQuery extends PaginationQuery, SearchSortQuery {
   // Selected local day's UTC boundaries — leads whose next action is due that day.
   next_action_from?: string;
   next_action_to?: string;
+  // Local-day UTC boundaries for a From–To range on the lead's latest stage change.
+  stage_changed_from?: string;
+  stage_changed_to?: string;
 }
 
 export interface LeadCreatePayload {

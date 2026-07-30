@@ -140,6 +140,7 @@ class LeadRead(ORMModel):
     last_comment_preview: str | None = None
     last_comment_at: datetime | None = None
     next_action_date: datetime | None = None
+    stage_changed_at: datetime | None = None
     assigned_to_id: UUID | None = None
     partner_id: UUID | None = None
     property_type: str | None = None
@@ -185,3 +186,8 @@ class LeadFilterParams(SearchSortParams):
     # so `next_action_from <= next_action_date < next_action_to`.
     next_action_from: datetime | None = None
     next_action_to: datetime | None = None
+    # Filter to leads whose LATEST stage change falls within a datetime range
+    # (client sends local-day UTC boundaries, half-open like next_action_*):
+    # `stage_changed_from <= stage_changed_at < stage_changed_to`.
+    stage_changed_from: datetime | None = None
+    stage_changed_to: datetime | None = None

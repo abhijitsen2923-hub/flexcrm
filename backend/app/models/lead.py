@@ -1,4 +1,4 @@
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from uuid import UUID
 
 from sqlalchemy import (
@@ -82,6 +82,14 @@ class Lead(TenantBase, UUIDPrimaryKeyMixin, TimestampMixin, TenantAuditMixin, Te
     # the next scheduled call/follow-up, used by the leads "due on a day" filter and
     # the follow-up reminders job. Nullable when no action is scheduled.
     next_action_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    # Timestamp of the lead's LATEST stage change (set on every stage move + the
+    # initial seed). Unlike last_comment_at (bumped by DNP/call-logs), this is a
+    # pure stage-change stamp — drives the leads "stage changed between" range filter.
+    # The default stamps creation time for any lead built WITHOUT going through
+    # seed_initial_transition (e.g. customer-portal referrals), so it's never NULL.
+    stage_changed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True, default=lambda: datetime.now(UTC)
+    )
 
     assigned_to_id: Mapped[UUID | None] = mapped_column(
         Uuid,

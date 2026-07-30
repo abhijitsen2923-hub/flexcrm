@@ -162,6 +162,7 @@ class StageTransitionService(ServiceBase):
         lead.last_comment_preview = payload.comment.strip()[:255]
         lead.last_comment_at = datetime.now(UTC)
         lead.next_action_date = payload.next_action_date
+        lead.stage_changed_at = datetime.now(UTC)
         lead.updated_by_id = actor_id
 
         # @mentions create in-app notifications. Spec §3.2 also calls out next-action
@@ -341,4 +342,5 @@ class StageTransitionService(ServiceBase):
         )
         lead.last_comment_preview = comment[:255]
         lead.last_comment_at = datetime.now(UTC)
+        lead.stage_changed_at = datetime.now(UTC)
         return transition

@@ -145,6 +145,12 @@ class LeadService(ServiceBase):
             extra_filters.append(Lead.next_action_date >= filters.next_action_from)
         if filters.next_action_to is not None:
             extra_filters.append(Lead.next_action_date < filters.next_action_to)
+        # Latest-stage-change range (independent of next_action) — same half-open
+        # local-day boundaries from the client.
+        if filters.stage_changed_from is not None:
+            extra_filters.append(Lead.stage_changed_at >= filters.stage_changed_from)
+        if filters.stage_changed_to is not None:
+            extra_filters.append(Lead.stage_changed_at < filters.stage_changed_to)
         items, total = await self.repository.list(
             pagination=pagination,
             filters={
