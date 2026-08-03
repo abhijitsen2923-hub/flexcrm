@@ -36,13 +36,6 @@ import { canSetStage } from "../utils/stageAccess";
 
 type ViewMode = "list" | "kanban";
 
-// Stages whose move triggers heavy / needs-input side-effects keep the comment
-// modal: `sold` promotes a customer + accrues brokerage; `site_visit_confirmed`
-// books a visit on the calendar; `booked` captures the property + token and
-// promotes the lead to a Customer. Every other stage changes instantly from the
-// dropdown (like the Owner column), recording an auto-comment.
-const QUICK_STAGE_MODAL_CODES = new Set<string>(["sold", "site_visit_confirmed", "booked"]);
-
 
 // Red "!" marker shown on any lead that shares an email or phone with another
 // active lead (backend sets `is_duplicate` on the list response).
@@ -462,26 +455,6 @@ export default function LeadsPage() {
     setTransitionOpen(true);
   }
 
-  // Instant stage change from the list dropdown (like the Owner column), with an
-  // auto-comment so the backend's mandatory-comment rule, role gates, backward-move
-  // gate and side-effects all still apply. Consequential stages route to the modal
-  // instead (see QUICK_STAGE_MODAL_CODES).
-  async function handleQuickStage(lead: Lead, target: PipelineStage) {
-    try {
-      await transitionLead(lead.id, {
-        to_stage_code: target.code,
-        comment: `Moved to ${target.name} via quick change`,
-      });
-      toast.success("Stage updated", `Moved to ${target.name}`);
-      // transitionLead already refreshes on success.
-    } catch (err) {
-      toast.error("Stage change failed", extractErrorMessage(err));
-      // Re-sync the controlled <select> to the true stage after a rejected move
-      // (e.g. a non-manager backward move) so it snaps back.
-      await refresh();
-    }
-  }
-
   // --- CSV import -------------------------------------------------------
   const importInputRef = useRef<HTMLInputElement | null>(null);
   const [importing, setImporting] = useState(false);
@@ -613,15 +586,13 @@ export default function LeadsPage() {
             onChange={(event) => {
               const target = industryStages.find((s) => s.code === event.target.value);
               if (target && target.code !== lead.stage_code) {
-                if (QUICK_STAGE_MODAL_CODES.has(target.code)) {
-                  openTransition(lead, target);
-                } else {
-                  void handleQuickStage(lead, target);
-                }
+                // Every stage move opens the comment popup (mandatory comment on
+                // each move); the controlled <select> snaps back if it's cancelled.
+                openTransition(lead, target);
               }
             }}
             onClick={(event) => event.stopPropagation()}
-            title="Change stage — Sold / Site-visit ask for a comment; others change instantly"
+            title="Change stage — opens a comment box for the move"
             aria-label={`Stage for lead ${lead.lead_number}`}
           >
             {industryStages
