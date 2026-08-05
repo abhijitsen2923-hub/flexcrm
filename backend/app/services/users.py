@@ -1,3 +1,4 @@
+import secrets
 from uuid import UUID
 
 from sqlalchemy import select
@@ -6,9 +7,10 @@ from app.core.exceptions import ConflictError, NotFoundError, ValidationError
 from app.core.permissions import LEGACY_ROLES, role_is_valid_for_industry
 from app.core.security import hash_password
 from app.core.tenancy import current_org
-from app.database.enums import UserRole
+from app.database.enums import LeadIndustry, UserRole, UserStatus
 from app.models.custom_role import CustomRole, UserCustomRoleAssignment
 from app.models.organization import Organization
+from app.models.user import User
 from app.repositories.refresh_tokens import RefreshTokenRepository
 from app.repositories.users import UserRepository
 from app.schemas.common import PaginationParams
@@ -36,12 +38,45 @@ class UserService(ServiceBase):
                 "role": filters.role,
                 "status": filters.status,
                 "organization_id": current_org(self.session),
+                # Never surface non-human service accounts (e.g. the Meta-ingest
+                # integration user) in user listings or assignee pickers.
+                "is_system": False,
             },
             search=filters.search,
             search_fields=("first_name", "last_name", "email", "phone"),
             sort_by=sort_by,
             sort_order=filters.sort_order,
         )
+
+    async def get_or_create_integration_user(
+        self, *, organization_id: UUID, business_type: LeadIndustry | None = None
+    ) -> User:
+        """Return the per-org non-human 'integration' service account, creating it
+        on first use. It OWNS externally-ingested leads (Meta, etc.) so they have a
+        valid `created_by` without polluting a human's audit trail. `is_system=True`
+        keeps it out of user listings / assignee pickers; it can never log in
+        (unusable random password) and is not a sales role (the scorecard ignores
+        it). Intended to be called once at connection-setup (single request — no
+        concurrency); the connection then stores its id for the ingest to reuse."""
+        email = f"integration+{organization_id}@flexcrm.local"
+        existing = await self.repository.get_by_email(email)
+        if existing is not None:
+            return existing
+        user = await self.repository.create(
+            {
+                "first_name": "Integration",
+                "last_name": "(system)",
+                "email": email,
+                "password_hash": hash_password(secrets.token_urlsafe(32)),
+                "role": UserRole.support,
+                "status": UserStatus.active,
+                "is_system": True,
+                "organization_id": organization_id,
+                "business_type": business_type,
+            }
+        )
+        await self.session.flush()
+        return user
 
     async def get_user(self, user_id: UUID):
         user = await self.repository.get(user_id)

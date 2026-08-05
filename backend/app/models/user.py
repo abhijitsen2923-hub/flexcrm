@@ -35,6 +35,13 @@ class User(Base, UUIDPrimaryKeyMixin, TimestampMixin, AuditMixin, SoftDeleteMixi
     is_platform_admin: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default=text("false")
     )
+    # Non-human service account (e.g. the per-org integration user that OWNS
+    # externally-ingested leads — Meta, etc.). Never logs in (unusable password);
+    # excluded from user listings / assignee pickers. Its role is deliberately not
+    # a sales role, so the HR scorecard (counts sales/manager/admin) ignores it too.
+    is_system: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
 
     # DEPRECATED in Phase 7 — business_type now lives on the Organization.
     # Kept here for backward compat with existing rows; new code should read
