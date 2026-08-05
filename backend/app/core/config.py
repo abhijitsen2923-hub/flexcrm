@@ -92,6 +92,15 @@ class Settings(BaseSettings):
     # reject every call (403) — so they're inert until deliberately enabled.
     cron_secret: str | None = None
 
+    # Fernet keys (comma-separated urlsafe-base64) for encrypting per-tenant
+    # integration secrets at rest (Meta access tokens; later WhatsApp app secrets).
+    # The FIRST key encrypts; all are tried on decrypt (MultiFernet) so a key can be
+    # rotated by PREPENDING a new one. Unset => the integration vault is inert
+    # (encrypt/decrypt raise), so the feature is safe-by-default until enabled.
+    meta_enc_keys: str | None = None
+    # Pinned Meta Graph API version for all calls — bump deliberately + smoke-test.
+    meta_graph_version: str = "v21.0"
+
     websocket_ping_interval_seconds: int = 20
     websocket_event_buffer_size: int = 200
 

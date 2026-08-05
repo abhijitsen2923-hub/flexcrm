@@ -14,6 +14,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     Uuid,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -39,6 +40,16 @@ class Lead(TenantBase, UUIDPrimaryKeyMixin, TimestampMixin, TenantAuditMixin, Te
         UniqueConstraint("lead_number", name="uq_leads_lead_number"),
         Index("ix_leads_industry_stage_code", "industry", "stage_code"),
         Index("ix_leads_stage_assigned_to", "stage_code", "assigned_to_id"),
+        # Idempotency anchor for externally-ingested leads (e.g. Meta Lead Ads):
+        # the same (provider, external_id) can be ingested only once. Partial so it
+        # only applies to rows that actually carry an external id.
+        Index(
+            "uq_leads_provider_external_id",
+            "source_provider",
+            "external_id",
+            unique=True,
+            postgresql_where=text("external_id IS NOT NULL"),
+        ),
         {"schema": "tenant"},
     )
 
@@ -67,6 +78,12 @@ class Lead(TenantBase, UUIDPrimaryKeyMixin, TimestampMixin, TenantAuditMixin, Te
     # app-side) — a secondary attribution dimension alongside source.
     campaign: Mapped[str | None] = mapped_column(String(120), nullable=True, index=True)
     interest: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # External provenance for leads ingested from an outside source (e.g. Meta
+    # Lead Ads). `external_id` is the provider's own record id (the Meta
+    # leadgen_id); the partial-unique (source_provider, external_id) index above
+    # makes re-ingesting the same record a no-op. Null for manually-created leads.
+    source_provider: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    external_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
 
     contact_name: Mapped[str] = mapped_column(String(255), nullable=False)
     contact_email: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
