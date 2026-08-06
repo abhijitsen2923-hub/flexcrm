@@ -129,6 +129,12 @@ class LeadService(ServiceBase):
         )
         return list(result.scalars().all())
 
+    async def list_campaigns(self, owner_id=None) -> list[str]:
+        """Distinct campaign values in use — for the list's Campaign filter, so
+        custom/imported campaigns are selectable alongside the predefined ones.
+        `owner_id` scopes the result to a front-line rep's own leads (BR-2)."""
+        return await self.repository.distinct_campaigns(owner_id=owner_id)
+
     async def list_leads(self, pagination: PaginationParams, filters: LeadFilterParams):
         sort_by = validate_sort_field(filters.sort_by, self.allowed_sort_fields)
         # Stage filter accepts a single code or a comma-joined list (multi-select) →

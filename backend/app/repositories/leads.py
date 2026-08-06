@@ -79,6 +79,28 @@ class LeadRepository(BaseRepository[Lead]):
             {r for (r,) in phone_rows if r},
         )
 
+    async def distinct_campaigns(self, owner_id=None) -> list[str]:
+        """Distinct non-empty campaign values across the tenant's active leads.
+
+        Powers the list's Campaign filter dropdown so imported/custom campaigns —
+        not just the app's predefined labels — are selectable. Tenant-scoped by
+        the session's schema routing. When `owner_id` is set (front-line reps),
+        restrict to that owner's leads — the same anti-poaching scope the list
+        and duplicate-check paths enforce, so a rep can't discover campaign names
+        used only on other reps' leads.
+        """
+        where = [
+            Lead.is_deleted.is_(False),
+            Lead.campaign.is_not(None),
+            Lead.campaign != "",
+        ]
+        if owner_id is not None:
+            where.append(Lead.assigned_to_id == owner_id)
+        rows = await self.session.execute(
+            select(Lead.campaign).where(*where).distinct().order_by(Lead.campaign)
+        )
+        return [c for (c,) in rows if c]
+
     async def next_lead_number(self) -> int:
         # The DB has a unique constraint on lead_number; this MAX+1 lookup is
         # safe for a single-writer dev/demo workload. Replace with a Postgres

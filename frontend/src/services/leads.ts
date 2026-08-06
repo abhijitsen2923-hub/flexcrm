@@ -126,6 +126,14 @@ export const leadsService = {
     return data;
   },
 
+  // Distinct campaign values actually present on the tenant's leads — used to
+  // populate the Campaign filter so custom/imported campaigns (not just the
+  // predefined ones) are selectable.
+  async campaigns(): Promise<string[]> {
+    const { data } = await apiClient.get<string[]>("/leads/campaigns");
+    return data;
+  },
+
   async create(payload: LeadCreatePayload): Promise<Lead> {
     const { data } = await apiClient.post<Lead>("/leads", payload);
     return data;

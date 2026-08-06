@@ -1,5 +1,5 @@
 import { Download, LayoutGrid, List as ListIcon, Plus, RefreshCw, Upload } from "lucide-react";
-import { useEffect, useMemo, useRef, useState, type ChangeEvent, type DragEvent, type FormEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type DragEvent, type FormEvent } from "react";
 
 import {
   Badge,
@@ -146,6 +146,9 @@ export default function LeadsPage() {
   const [ownerFilter, setOwnerFilter] = useState<string>("");
   const [sourceFilter, setSourceFilter] = useState<string>("");
   const [campaignFilter, setCampaignFilter] = useState<string>("");
+  // Distinct campaign values actually present on the tenant's leads, so the
+  // Campaign filter can offer custom/imported campaigns — not just predefined.
+  const [campaignChoices, setCampaignChoices] = useState<string[]>([]);
   // Raw search box value + its debounced counterpart (the latter drives the query
   // so typing doesn't fire a request per keystroke).
   const [searchInput, setSearchInput] = useState("");
@@ -248,14 +251,56 @@ export default function LeadsPage() {
   const canAssign = hasPerm("USER_VIEW");
   const toast = useToast();
 
+  // Load the distinct campaigns in use for the filter dropdown. Refreshed on
+  // mount, on any lead.* realtime event, and after a CSV import so a newly
+  // imported campaign becomes selectable right away.
+  const loadCampaigns = useCallback(async () => {
+    try {
+      setCampaignChoices(await leadsService.campaigns());
+    } catch {
+      /* non-fatal: the filter still shows the predefined options */
+    }
+  }, []);
+  useEffect(() => {
+    void loadCampaigns();
+  }, [loadCampaigns]);
+
   // Auto-refresh when any lead.* envelope arrives — covers create, update,
   // stage_changed, deleted. The dependency array is empty in useRealtimeEvent
   // (it subscribes once), but it always has the latest `refresh` via a ref.
   useRealtimeEvent((event) => {
     if (event.event.startsWith("lead.")) {
       void refresh();
+      void loadCampaigns();
     }
   });
+
+  // Filter options = predefined campaigns + any custom ones actually on leads
+  // (deduped, predefined first). This is what makes imported campaigns filterable.
+  const campaignFilterOptions = useMemo(() => {
+    const seen = new Set<string>();
+    const opts: { value: string; label: string }[] = [];
+    for (const o of leadCampaignOptions) {
+      if (!seen.has(o.value)) {
+        seen.add(o.value);
+        opts.push(o);
+      }
+    }
+    for (const c of campaignChoices) {
+      if (c && !seen.has(c)) {
+        seen.add(c);
+        opts.push({ value: c, label: c });
+      }
+    }
+    // Always keep the currently-selected campaign present, even if it just
+    // dropped out of the distinct set (its last lead was deleted/reassigned), so
+    // the controlled <select> can't desync — showing "All campaigns" while the
+    // filter is still applied.
+    if (campaignFilter && !seen.has(campaignFilter)) {
+      opts.push({ value: campaignFilter, label: campaignFilter });
+    }
+    return opts;
+  }, [campaignChoices, campaignFilter]);
 
   const stageOptionsForFilter = useMemo(() => {
     const source = industryFilter ? byIndustry[industryFilter] : allStages;
@@ -489,6 +534,8 @@ export default function LeadsPage() {
           (result.errors.length > 0 ? `, ${result.errors.length} row error${result.errors.length === 1 ? "" : "s"}` : "")
       );
       await refresh();
+      // Surface any newly imported campaign in the filter dropdown immediately.
+      void loadCampaigns();
     } catch (err) {
       toast.error("Import failed", extractErrorMessage(err));
     } finally {
@@ -907,7 +954,7 @@ export default function LeadsPage() {
             style={{ minWidth: 180 }}
           >
             <option value="">All campaigns</option>
-            {leadCampaignOptions.map((option) => (
+            {campaignFilterOptions.map((option) => (
               <option key={option.value} value={option.value}>
                 {option.label}
               </option>

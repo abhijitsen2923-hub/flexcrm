@@ -87,6 +87,20 @@ async def check_duplicate_leads(
     return await LeadService(session).find_duplicate_leads(email, phone, owner_id=owner_id)
 
 
+@router.get("/campaigns", response_model=list[str])
+async def list_lead_campaigns(
+    current_user=Depends(require_permissions(PermissionCode.LEAD_VIEW)),
+    session: AsyncSession = Depends(get_db_session),
+):
+    """Distinct campaign values in use across the tenant's leads — populates the
+    list's Campaign filter so custom/imported campaigns (not just the predefined
+    ones) are selectable. Declared before any `/{lead_id}` route so the literal
+    path wins; tenant-scoped by the session's schema routing. Front-line reps are
+    scoped to their own leads (same anti-poaching rule as the list/duplicates)."""
+    owner_id = current_user.id if current_user.role in ASSIGNED_ONLY_LEAD_ROLES else None
+    return await LeadService(session).list_campaigns(owner_id=owner_id)
+
+
 @router.post("", response_model=LeadRead, status_code=status.HTTP_201_CREATED)
 async def create_lead(
     payload: LeadCreate,
