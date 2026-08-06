@@ -13,6 +13,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, status
 from app.core.config import get_settings
 from app.database.session import db_manager
 from app.jobs.followup_reminders import dispatch_followup_reminders
+from app.jobs.meta_lead_sync import dispatch_meta_lead_sync
 from app.jobs.registration_reminders import dispatch_registration_reminders
 
 router = APIRouter()
@@ -41,4 +42,14 @@ async def trigger_followup_reminders(_: None = Depends(require_cron_secret)):
     switches org scope itself and commits per org."""
     async with db_manager.session_factory() as session:
         counts = await dispatch_followup_reminders(session)
+    return counts
+
+
+@router.post("/meta-lead-sync")
+async def trigger_meta_lead_sync(_: None = Depends(require_cron_secret)):
+    """Cross-org: poll every connected org's Meta (Facebook/Instagram) Lead Ads and
+    ingest new leads. Fresh session — dispatch switches org scope itself and commits
+    per org. Meant to run every 5-15 min."""
+    async with db_manager.session_factory() as session:
+        counts = await dispatch_meta_lead_sync(session)
     return counts
