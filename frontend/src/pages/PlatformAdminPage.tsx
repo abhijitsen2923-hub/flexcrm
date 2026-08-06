@@ -41,7 +41,10 @@ const MODULE_LABELS: Record<ModuleKey, string> = {
 
 const CORE_MODULES: ModuleKey[] = ["deals", "tasks", "activities"];
 const OPS_MODULES: ModuleKey[] = ["finance", "hr"];
-const RE_MODULES: ModuleKey[] = ["inventory", "bookings", "site_visits", "projects", "meta_leads"];
+const RE_MODULES: ModuleKey[] = ["inventory", "bookings", "site_visits", "projects"];
+// Lead-source / messaging integrations. RE-only today (Meta Lead Ads); drop the
+// RE gate on the group when a vertical-agnostic integration is added.
+const INTEGRATIONS_MODULES: ModuleKey[] = ["meta_leads"];
 
 const INDUSTRY_LABEL: Record<Industry, string> = {
   education: "Education",
@@ -440,6 +443,15 @@ export function PlatformAdminPage() {
                   <ModuleGroup
                     title="Real Estate"
                     keys={RE_MODULES}
+                    org={org}
+                    disabled={busy || locked}
+                    onToggle={(key, val) => void handleToggle(org, key, val)}
+                  />
+                )}
+                {org.business_type === "real_estate" && (
+                  <ModuleGroup
+                    title="Integrations"
+                    keys={INTEGRATIONS_MODULES}
                     org={org}
                     disabled={busy || locked}
                     onToggle={(key, val) => void handleToggle(org, key, val)}
