@@ -40,6 +40,7 @@ const InventoryPage = lazy(() => import("./pages/inventory/InventoryPage"));
 const ProjectsPage = lazy(() => import("./pages/inventory/ProjectsPage"));
 const SiteVisitsPage = lazy(() => import("./pages/site-visits/SiteVisitsPage"));
 const BookingsPage = lazy(() => import("./pages/bookings/BookingsPage"));
+const IntegrationsPage = lazy(() => import("./pages/integrations/IntegrationsPage"));
 // Registration & possession trackers
 const RegistrationTrackerPage = lazy(() => import("./pages/trackers/RegistrationTrackerPage"));
 const PossessionTrackerPage = lazy(() => import("./pages/trackers/PossessionTrackerPage"));
@@ -123,6 +124,7 @@ export function App() {
                         {FEATURES.bookings && <Route path="trackers/registration" element={<RegistrationTrackerPage />} />}
                         {FEATURES.bookings && <Route path="trackers/possession" element={<PossessionTrackerPage />} />}
                         {FEATURES.bookings && <Route path="channel-partners" element={<ChannelPartnersPage />} />}
+                        {FEATURES.meta_leads && <Route path="integrations" element={<IntegrationsPage />} />}
                         <Route path="users" element={<UsersPage />} />
                         <Route path="admin" element={<PlatformAdminPage />} />
                         <Route path="*" element={<NotFoundPage />} />
