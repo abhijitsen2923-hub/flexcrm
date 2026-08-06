@@ -31,6 +31,7 @@ from app.core.exceptions import AppException, ValidationError
 from app.core.lead_csv import CsvColumn, import_columns_for
 from app.core.tenancy import current_org
 from app.core.lead_normalize import (
+    normalize_campaign,
     normalize_property_interest,
     normalize_property_type,
     normalize_source,
@@ -247,20 +248,22 @@ class LeadImportService(ServiceBase):
         # selects. Unrecognised values pass through as free text (never rejected).
         if "source" in payload_kwargs:
             payload_kwargs["source"] = normalize_source(payload_kwargs["source"])
+        if "campaign" in payload_kwargs:
+            payload_kwargs["campaign"] = normalize_campaign(payload_kwargs["campaign"])
         if industry == LeadIndustry.real_estate:
             if "interest" in payload_kwargs:
                 payload_kwargs["interest"] = normalize_property_interest(payload_kwargs["interest"])
             if "property_type" in payload_kwargs:
                 payload_kwargs["property_type"] = normalize_property_type(payload_kwargs["property_type"])
 
-        # Resolve an optional lead owner by email → a user in this workspace.
+        # Resolve the optional assignee by email → a user in this workspace.
         owner_email = (row.get("owner_email") or "").strip().lower()
         if owner_email:
             owner = await self.user_repository.get_by_email(owner_email)
             org_id = current_org(self.session)
             if owner is None or (org_id is not None and owner.organization_id != org_id):
                 raise ValidationError(
-                    f"Owner email '{owner_email}' does not match a user in your workspace."
+                    f"Assignee email '{owner_email}' does not match a user in your workspace."
                 )
             payload_kwargs["assigned_to_id"] = owner.id
 

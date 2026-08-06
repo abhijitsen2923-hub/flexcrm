@@ -29,6 +29,13 @@ PROPERTY_INTEREST_LABELS: tuple[str, ...] = (
 )
 # Property type is *value*-keyed in the UI (value != label); imports store the value.
 PROPERTY_TYPE_VALUES: tuple[str, ...] = ("apartment", "villa", "plot", "commercial")
+# Marketing campaigns (leadCampaignOptions). Orgs can extend these, so unrecognised
+# values pass through as free text — only the canonical ones snap for filter parity.
+CAMPAIGN_LABELS: tuple[str, ...] = (
+    "Diwali Offer", "New Year Offer", "Summer Launch", "Property Expo",
+    "Site Visit Drive", "Referral Program", "Google Ads", "Meta Ads",
+    "Email Blast", "Newspaper Insert", "Other",
+)
 
 
 def _norm_key(value: str) -> str:
@@ -111,6 +118,30 @@ _PROPERTY_TYPE_MAP = _build_map(
 )
 
 
+_CAMPAIGN_MAP = _build_map(
+    CAMPAIGN_LABELS,
+    {
+        "diwali": "Diwali Offer", "diwali sale": "Diwali Offer", "diwali offer": "Diwali Offer",
+        "new year": "New Year Offer", "newyear": "New Year Offer", "ny offer": "New Year Offer",
+        "summer": "Summer Launch", "summer offer": "Summer Launch", "summer sale": "Summer Launch",
+        "expo": "Property Expo", "property fair": "Property Expo", "propexpo": "Property Expo",
+        "real estate expo": "Property Expo",
+        "site visit": "Site Visit Drive", "sitevisit": "Site Visit Drive", "svd": "Site Visit Drive",
+        "referral": "Referral Program", "refer": "Referral Program", "refer a friend": "Referral Program",
+        "referral program": "Referral Program",
+        "google": "Google Ads", "google ad": "Google Ads", "adwords": "Google Ads",
+        "google adwords": "Google Ads", "gads": "Google Ads", "ppc": "Google Ads",
+        "meta": "Meta Ads", "meta ad": "Meta Ads", "facebook ads": "Meta Ads", "fb ads": "Meta Ads",
+        "instagram ads": "Meta Ads", "insta ads": "Meta Ads", "fb": "Meta Ads",
+        "email": "Email Blast", "email campaign": "Email Blast", "mailer": "Email Blast",
+        "emailer": "Email Blast", "edm": "Email Blast",
+        "newspaper": "Newspaper Insert", "paper insert": "Newspaper Insert",
+        "print insert": "Newspaper Insert", "news paper": "Newspaper Insert",
+        "others": "Other", "na": "Other",
+    },
+)
+
+
 def _normalize(value: str | None, lookup: dict[str, str]) -> str | None:
     """Snap `value` to a canonical label/value when recognised; otherwise return
     the original trimmed text (unknown → kept as free text). Empty → None."""
@@ -132,3 +163,7 @@ def normalize_property_interest(value: str | None) -> str | None:
 
 def normalize_property_type(value: str | None) -> str | None:
     return _normalize(value, _PROPERTY_TYPE_MAP)
+
+
+def normalize_campaign(value: str | None) -> str | None:
+    return _normalize(value, _CAMPAIGN_MAP)
