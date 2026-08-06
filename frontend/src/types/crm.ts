@@ -76,11 +76,11 @@ export type ActivityType = "note" | "call" | "email" | "meeting" | "task" | "sta
 export type ModuleKey =
   | "deals" | "tasks" | "activities" | "finance" | "hr"
   | "inventory" | "bookings" | "site_visits" | "projects"
-  | "meta_leads";
+  | "meta_facebook" | "meta_instagram";
 export const MODULE_KEYS: ModuleKey[] = [
   "deals", "tasks", "activities", "finance", "hr",
   "inventory", "bookings", "site_visits", "projects",
-  "meta_leads",
+  "meta_facebook", "meta_instagram",
 ];
 
 export interface UserSummary {

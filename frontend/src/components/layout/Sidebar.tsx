@@ -36,6 +36,9 @@ interface NavItem {
   icon: LucideIcon;
   requires: PermissionCode[];
   moduleKey?: keyof ReturnType<typeof mergeModules>;
+  // Any-of: item is shown when at least one of these modules is enabled.
+  // Use instead of `moduleKey` for a nav that fronts several modules.
+  moduleKeys?: Array<keyof ReturnType<typeof mergeModules>>;
 }
 
 
@@ -56,7 +59,7 @@ const NAV: ReadonlyArray<NavItem> = [
   { to: "/trackers/registration", label: "Registration", icon: FileCheck2, requires: ["LEAD_MANAGE"], moduleKey: "bookings" },
   { to: "/trackers/possession", label: "Possession", icon: KeyRound, requires: ["LEAD_MANAGE"], moduleKey: "bookings" },
   { to: "/channel-partners", label: "Channel Partners", icon: Handshake, requires: ["USER_VIEW"], moduleKey: "bookings" },
-  { to: "/integrations", label: "Integrations", icon: Plug, requires: ["ORG_MANAGE"], moduleKey: "meta_leads" },
+  { to: "/integrations", label: "Integrations", icon: Plug, requires: ["ORG_MANAGE"], moduleKeys: ["meta_facebook", "meta_instagram"] },
   // Always-visible
   { to: "/analytics", label: "Analytics", icon: BarChart3, requires: ["ANALYTICS_VIEW"] },
   { to: "/users", label: "Users", icon: Users, requires: ["USER_VIEW"] }
@@ -77,6 +80,7 @@ export function Sidebar({ open, onClose }: SidebarProps) {
 
   const visible = NAV.filter((item) => {
     if (user?.is_platform_admin) return false;
+    if (item.moduleKeys && !item.moduleKeys.some((k) => modules[k])) return false;
     if (item.moduleKey && !modules[item.moduleKey]) return false;
     return any(item.requires);
   });

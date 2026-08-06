@@ -39,7 +39,7 @@ _MANAGER_ROLES = (UserRole.sales_manager, UserRole.owner)
 async def dispatch_meta_lead_sync(session) -> dict[str, int]:
     """Poll + ingest across every org with an active connection. Shared by the CLI
     and the HTTP cron; does NOT own the engine lifecycle."""
-    counts = {"orgs": 0, "connections": 0, "created": 0, "skipped": 0}
+    counts = {"orgs": 0, "connections": 0, "created": 0, "skipped": 0, "filtered": 0}
 
     with bypass(session):
         orgs = (
@@ -51,6 +51,12 @@ async def dispatch_meta_lead_sync(session) -> dict[str, int]:
         ).scalars().all()
 
     for org in orgs:
+        # Which platforms this org is granted (per-tenant admin toggles). FB and IG
+        # share one connection, so the poll filters ingestion by platform.
+        features = org.features or {}
+        allowed = {p for p in ("facebook", "instagram") if features.get(f"module.meta_{p}")}
+        if not allowed:
+            continue  # neither Facebook nor Instagram granted for this org
         set_scope(session, org.id)
         await set_tenant_schema(session, org.schema_name)
         try:
@@ -69,9 +75,12 @@ async def dispatch_meta_lead_sync(session) -> dict[str, int]:
             org_created = 0
             for conn in connections:
                 counts["connections"] += 1
-                stats = await MetaSyncService(session).sync_connection(conn, organization_id=org.id)
+                stats = await MetaSyncService(session).sync_connection(
+                    conn, organization_id=org.id, allowed_platforms=allowed
+                )
                 counts["created"] += stats["created"]
                 counts["skipped"] += stats["skipped"]
+                counts["filtered"] += stats["filtered"]
                 org_created += stats["created"]
             if org_created:
                 await _notify_managers(session, org.id, org_created)
@@ -119,7 +128,7 @@ def main() -> None:
     counts = asyncio.run(run())
     print(
         f"meta_lead_sync: orgs={counts['orgs']} connections={counts['connections']} "
-        f"created={counts['created']} skipped={counts['skipped']}"
+        f"created={counts['created']} skipped={counts['skipped']} filtered={counts['filtered']}"
     )
 
 

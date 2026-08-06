@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 
 import { Badge, Button, LoadingBlock, TextField, useToast } from "../../components";
+import { useOrgModules } from "../../context/OrgContext";
 import { integrationsService, type MetaConnection, type MetaValidateResult } from "../../services/integrations";
 import { extractErrorMessage } from "../../utils/errors";
 import { formatDateTime } from "../../utils/format";
@@ -35,6 +36,13 @@ const SETUP_STEPS = [
 
 export default function IntegrationsPage() {
   const toast = useToast();
+  const orgModules = useOrgModules();
+  // FB & IG share one connection; the poll ingests only platforms enabled for
+  // this workspace (per-tenant admin toggles). Show which are active.
+  const activePlatforms = [
+    orgModules.meta_facebook ? "Facebook" : null,
+    orgModules.meta_instagram ? "Instagram" : null,
+  ].filter(Boolean) as string[];
   const [connections, setConnections] = useState<MetaConnection[]>([]);
   const [loading, setLoading] = useState(true);
   const [pageId, setPageId] = useState("");
@@ -104,6 +112,12 @@ export default function IntegrationsPage() {
           Connect <strong>Facebook &amp; Instagram Lead Ads</strong> — new lead-form submissions flow
           into your pipeline as fresh enquiries, tagged by source.
         </p>
+        {activePlatforms.length > 0 ? (
+          <p className="text-xs muted" style={{ marginTop: "0.35rem" }}>
+            Enabled for your workspace: <strong>{activePlatforms.join(" & ")}</strong>. One connection
+            below covers both platforms; leads from a platform that isn&apos;t enabled are skipped.
+          </p>
+        ) : null}
       </div>
 
       {/* Existing connections */}

@@ -21,7 +21,8 @@ const ALL_OFF: Record<ModuleKey, boolean> = {
   bookings: false,
   site_visits: false,
   projects: false,
-  meta_leads: false,
+  meta_facebook: false,
+  meta_instagram: false,
 };
 
 interface OrgContextValue {

@@ -36,15 +36,18 @@ const MODULE_LABELS: Record<ModuleKey, string> = {
   bookings: "Bookings",
   site_visits: "Site Visits",
   projects: "Projects",
-  meta_leads: "Meta Lead Ads",
+  meta_facebook: "Facebook Lead Ads",
+  meta_instagram: "Instagram Lead Ads",
 };
 
 const CORE_MODULES: ModuleKey[] = ["deals", "tasks", "activities"];
 const OPS_MODULES: ModuleKey[] = ["finance", "hr"];
 const RE_MODULES: ModuleKey[] = ["inventory", "bookings", "site_visits", "projects"];
-// Lead-source / messaging integrations. RE-only today (Meta Lead Ads); drop the
-// RE gate on the group when a vertical-agnostic integration is added.
-const INTEGRATIONS_MODULES: ModuleKey[] = ["meta_leads"];
+// Lead-source / messaging integrations. Facebook & Instagram Lead Ads are
+// independent per-tenant toggles (both share one Meta connection, gated by
+// platform). RE-only today; drop the RE gate when a vertical-agnostic
+// integration is added.
+const INTEGRATIONS_MODULES: ModuleKey[] = ["meta_facebook", "meta_instagram"];
 
 const INDUSTRY_LABEL: Record<Industry, string> = {
   education: "Education",
@@ -64,7 +67,8 @@ function defaultsForIndustry(industry: Industry): Record<ModuleKey, boolean> {
     bookings: isRE,
     site_visits: isRE,
     projects: isRE,
-    meta_leads: false,
+    meta_facebook: false,
+    meta_instagram: false,
   };
 }
 

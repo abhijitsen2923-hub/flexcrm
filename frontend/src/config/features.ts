@@ -27,8 +27,10 @@ export const FEATURES: Record<ModuleKey, boolean> = {
   bookings: flag(import.meta.env.VITE_FEATURE_BOOKINGS_ENABLED),
   site_visits: flag(import.meta.env.VITE_FEATURE_SITE_VISITS_ENABLED),
   projects: flag(import.meta.env.VITE_FEATURE_PROJECTS_ENABLED),
-  // Integrations
-  meta_leads: flag(import.meta.env.VITE_FEATURE_META_LEADS_ENABLED),
+  // Integrations — Meta Lead Ads. Both platforms share one build flag; the
+  // per-tenant + per-platform choice is the admin toggle, not the build flag.
+  meta_facebook: flag(import.meta.env.VITE_FEATURE_META_LEADS_ENABLED),
+  meta_instagram: flag(import.meta.env.VITE_FEATURE_META_LEADS_ENABLED),
 };
 
 export type FeatureKey = ModuleKey;
@@ -41,6 +43,7 @@ export function mergeModules(orgModules: Record<ModuleKey, boolean>): Record<Mod
   const keys: ModuleKey[] = [
     "deals", "tasks", "activities", "finance", "hr",
     "inventory", "bookings", "site_visits", "projects",
+    "meta_facebook", "meta_instagram",
   ];
   return Object.fromEntries(
     keys.map((k) => [k, FEATURES[k] && (orgModules[k] ?? false)])
