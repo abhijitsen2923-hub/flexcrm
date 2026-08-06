@@ -1112,11 +1112,10 @@ export default function LeadsPage() {
           <div className="form-grid">
             <TextField
               id="lead-contact-email"
-              label="Email"
+              label="Email (optional)"
               type="email"
               value={form.contact_email}
               onChange={(event) => { setForm({ ...form, contact_email: event.target.value }); resetDupCheck(); }}
-              required
               placeholder="name@example.com"
             />
             <TextField
@@ -1409,7 +1408,7 @@ export default function LeadsPage() {
         <div className="stack">
           <p className="muted text-sm">
             Upload a CSV matching your business type — use the <strong>Template</strong> button for the
-            correct columns. Email and phone are required; rows missing them are reported as errors.
+            correct columns. Phone is required; rows missing it are reported as errors.
           </p>
           <label style={{ display: "flex", gap: 8, alignItems: "flex-start", cursor: "pointer" }}>
             <input

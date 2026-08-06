@@ -206,10 +206,8 @@ class LeadImportService(ServiceBase):
         contact_name = (row.get("contact_name") or "").strip()
         if not contact_name:
             raise ValidationError("contact_name is required.")
-        # Email + primary phone are mandatory (all verticals). Check here for
-        # clear per-row messages instead of a raw pydantic error.
-        if not (row.get("contact_email") or "").strip():
-            raise ValidationError("Email is required.")
+        # Primary phone is mandatory (all verticals); email is optional. Check
+        # here for a clear per-row message instead of a raw pydantic error.
         if not (row.get("contact_phone") or "").strip():
             raise ValidationError("Phone is required.")
 

@@ -23,10 +23,11 @@ class LeadCreate(ORMModel):
     # field; the others are optional and populate the auto-created Customer
     # on Sold.
     contact_name: str = Field(min_length=1, max_length=255)
-    # Email + primary phone are mandatory on capture (all verticals); a second
+    # Primary phone is mandatory on capture (all verticals); email is optional
+    # (many walk-in / call / WhatsApp leads have a phone but no email); a second
     # phone is optional. Enforced here so both the New Lead form and the CSV
-    # importer reject rows missing them.
-    contact_email: EmailStr
+    # importer apply the same rules.
+    contact_email: EmailStr | None = None
     contact_phone: str = Field(min_length=1, max_length=32)
     contact_phone_alt: str | None = Field(default=None, max_length=32)
     company_name: str | None = Field(default=None, max_length=255)
