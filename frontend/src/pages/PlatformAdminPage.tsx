@@ -36,11 +36,12 @@ const MODULE_LABELS: Record<ModuleKey, string> = {
   bookings: "Bookings",
   site_visits: "Site Visits",
   projects: "Projects",
+  meta_leads: "Meta Lead Ads",
 };
 
 const CORE_MODULES: ModuleKey[] = ["deals", "tasks", "activities"];
 const OPS_MODULES: ModuleKey[] = ["finance", "hr"];
-const RE_MODULES: ModuleKey[] = ["inventory", "bookings", "site_visits", "projects"];
+const RE_MODULES: ModuleKey[] = ["inventory", "bookings", "site_visits", "projects", "meta_leads"];
 
 const INDUSTRY_LABEL: Record<Industry, string> = {
   education: "Education",
@@ -60,6 +61,7 @@ function defaultsForIndustry(industry: Industry): Record<ModuleKey, boolean> {
     bookings: isRE,
     site_visits: isRE,
     projects: isRE,
+    meta_leads: false,
   };
 }
 

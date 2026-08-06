@@ -27,6 +27,8 @@ export const FEATURES: Record<ModuleKey, boolean> = {
   bookings: flag(import.meta.env.VITE_FEATURE_BOOKINGS_ENABLED),
   site_visits: flag(import.meta.env.VITE_FEATURE_SITE_VISITS_ENABLED),
   projects: flag(import.meta.env.VITE_FEATURE_PROJECTS_ENABLED),
+  // Integrations
+  meta_leads: flag(import.meta.env.VITE_FEATURE_META_LEADS_ENABLED),
 };
 
 export type FeatureKey = ModuleKey;

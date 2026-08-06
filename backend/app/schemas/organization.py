@@ -13,6 +13,7 @@ MODULE_KEYS = (
     "deals", "tasks", "activities",               # Core CRM — any industry
     "finance", "hr",                              # Business operations — any industry
     "inventory", "bookings", "site_visits", "projects",  # Real Estate vertical
+    "meta_leads",                                 # Integrations — Meta Lead Ads ingestion
 )
 
 
