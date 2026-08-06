@@ -12,6 +12,7 @@ from app.api.v1.endpoints import (
     dashboard,
     deals,
     exports,
+    integrations,
     leads,
     organizations,
     partner_portal,
@@ -33,6 +34,7 @@ api_router.include_router(auth.router, prefix="/auth", tags=["Authentication"])
 api_router.include_router(admin.router, prefix="/admin", tags=["Platform Admin"])
 api_router.include_router(cron.router, prefix="/cron", tags=["Cron"])
 api_router.include_router(organizations.router, prefix="/organizations", tags=["Organizations"])
+api_router.include_router(integrations.router, prefix="/integrations", tags=["Integrations"])
 api_router.include_router(users.router, prefix="/users", tags=["Users"])
 api_router.include_router(customers.router, prefix="/customers", tags=["Customers"])
 # Customer lifecycle sub-routes (delivery / renewals / referrals) also live
