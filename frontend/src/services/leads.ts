@@ -110,6 +110,12 @@ export interface LeadImportResult {
   duplicates: LeadImportDuplicate[];
 }
 
+export interface LeadBulkActionResult {
+  updated: number;
+  failed: number;
+  errors: string[];
+}
+
 export interface LeadDuplicate {
   id: string;
   lead_number: number;
@@ -167,6 +173,24 @@ export const leadsService = {
     const { data } = await apiClient.post<ApiMessageResponse>("/leads/bulk-reassign", {
       lead_ids: leadIds,
       assigned_to_id: assignedToId,
+    });
+    return data;
+  },
+
+  // Manager bulk stage change — move many leads to one stage. Each lead still
+  // goes through a full transition (mandatory comment); some may be rejected
+  // (e.g. a backward move) and are reported in `failed`/`errors`.
+  async bulkTransition(
+    leadIds: string[],
+    toStageCode: string,
+    comment: string,
+    nextActionDate?: string | null
+  ): Promise<LeadBulkActionResult> {
+    const { data } = await apiClient.post<LeadBulkActionResult>("/leads/bulk-transition", {
+      lead_ids: leadIds,
+      to_stage_code: toStageCode,
+      comment,
+      next_action_date: nextActionDate ?? null,
     });
     return data;
   },

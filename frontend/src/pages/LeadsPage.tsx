@@ -14,6 +14,7 @@ import {
   useToast,
   type DataTableColumn
 } from "../components";
+import { BulkStageModal } from "../components/leads/BulkStageModal";
 import { LeadDrawer } from "../components/leads/LeadDrawer";
 import { StageTransitionModal } from "../components/leads/StageTransitionModal";
 import { usePipelines } from "../context/PipelineContext";
@@ -395,6 +396,64 @@ export default function LeadsPage() {
     }
   }
 
+  // --- Bulk stage change (Manager) ---------------------------------------
+  // Excluded from bulk: capture stages that need per-lead detail (a unit/token on
+  // "booked", a site-visit slot on "site_visit_confirmed") and "sold", whose heavy,
+  // near-irreversible side effects (Customer + SalesOrder + Invoice + commission)
+  // must be applied one lead at a time. The backend blocks these too.
+  const BULK_EXCLUDED_STAGES = useMemo(() => new Set(["sold", "booked", "site_visit_confirmed"]), []);
+  const [bulkStageCode, setBulkStageCode] = useState("");
+  const [bulkStageOpen, setBulkStageOpen] = useState(false);
+  const [bulkTransitioning, setBulkTransitioning] = useState(false);
+
+  // Bulk stage options are scoped to ONE concrete industry — a single stage code
+  // isn't meaningful across industries. For a normal single-vertical org that's the
+  // org's industry; on a legacy "All industries" view the picker is empty (pick an
+  // industry first). Also drops the capture/terminal stages and any the role can't set.
+  const bulkStageOptions = useMemo(() => {
+    const ind = industryFilter || user?.business_type;
+    if (!ind) return [];
+    return (byIndustry[ind] ?? [])
+      .filter((s) => !BULK_EXCLUDED_STAGES.has(s.code))
+      .filter((s) => canSetStage(user?.role, s.code))
+      .map((s) => ({ value: s.code, label: s.name }));
+  }, [industryFilter, user?.business_type, user?.role, byIndustry, BULK_EXCLUDED_STAGES]);
+
+  const bulkStageName = useMemo(
+    () => bulkStageOptions.find((o) => o.value === bulkStageCode)?.label ?? bulkStageCode,
+    [bulkStageOptions, bulkStageCode]
+  );
+
+  async function handleBulkStage(comment: string, nextActionDate: string | null) {
+    if (!bulkStageCode || selectedIds.size === 0) return;
+    setBulkTransitioning(true);
+    try {
+      const result = await leadsService.bulkTransition(
+        Array.from(selectedIds),
+        bulkStageCode,
+        comment,
+        nextActionDate
+      );
+      if (result.updated === 0) {
+        // Nothing moved (e.g. every pick was a backward move the role can't make).
+        // Throw so the modal shows the reason and stays open with the selection intact.
+        throw new Error(result.errors[0] || "No leads could be moved to this stage.");
+      }
+      toast.success(
+        "Stage updated",
+        result.failed > 0
+          ? `${result.updated} moved, ${result.failed} skipped${result.errors.length ? ` — ${result.errors[0]}` : ""}`
+          : `Moved ${result.updated} lead${result.updated === 1 ? "" : "s"}.`
+      );
+      setSelectedIds(new Set());
+      setBulkStageCode("");
+      setBulkStageOpen(false);
+      await refresh();
+    } finally {
+      setBulkTransitioning(false);
+    }
+  }
+
   function openCreate() {
     setForm(makeEmptyForm(user?.business_type ?? "education", allowedCurrencies[0] ?? "INR"));
     setFormError(null);
@@ -557,7 +616,9 @@ export default function LeadsPage() {
 
   // --- List columns (spec §3.1) ------------------------------------------
   const columns: DataTableColumn<Lead>[] = [
-    ...(canAssign
+    // Selection is available to anyone who can bulk-act: reassign owners (USER_VIEW)
+    // OR bulk-change stage (LEAD_MANAGE). Reps see only their own leads (list-scoped).
+    ...((canAssign || canManage)
       ? [{
           key: "select",
           width: "36px",
@@ -842,6 +903,10 @@ export default function LeadsPage() {
               onChange={(event) => {
                 setIndustryFilter((event.target.value || "") as LeadIndustry | "");
                 setStageFilter([]);
+                // Drop any selection — it may span the industry we're leaving, and the
+                // bulk stage picker is industry-scoped.
+                setSelectedIds(new Set());
+                setBulkStageCode("");
                 setPage(1);
               }}
               aria-label="Filter by industry"
@@ -991,7 +1056,7 @@ export default function LeadsPage() {
 
         {view === "list" ? (
           <>
-            {canAssign && selectedIds.size > 0 && (
+            {(canAssign || canManage) && selectedIds.size > 0 && (
               <div
                 className="row"
                 style={{
@@ -1005,21 +1070,44 @@ export default function LeadsPage() {
                 }}
               >
                 <strong>{selectedIds.size} selected</strong>
-                <select
-                  className="select"
-                  value={bulkOwner}
-                  onChange={(e) => setBulkOwner(e.target.value)}
-                  style={{ maxWidth: 240 }}
-                  aria-label="Change owner to"
-                >
-                  <option value="">Change owner to…</option>
-                  {assignableUsers.map((u) => (
-                    <option key={u.id} value={u.id}>{u.first_name} {u.last_name}</option>
-                  ))}
-                </select>
-                <Button size="sm" loading={bulkReassigning} disabled={!bulkOwner} onClick={() => void handleBulkReassign()}>
-                  Change Owner
-                </Button>
+                {canAssign && (
+                  <>
+                    <select
+                      className="select"
+                      value={bulkOwner}
+                      onChange={(e) => setBulkOwner(e.target.value)}
+                      style={{ maxWidth: 240 }}
+                      aria-label="Change owner to"
+                    >
+                      <option value="">Change owner to…</option>
+                      {assignableUsers.map((u) => (
+                        <option key={u.id} value={u.id}>{u.first_name} {u.last_name}</option>
+                      ))}
+                    </select>
+                    <Button size="sm" loading={bulkReassigning} disabled={!bulkOwner} onClick={() => void handleBulkReassign()}>
+                      Change Owner
+                    </Button>
+                  </>
+                )}
+                {canManage && (
+                  <>
+                    <select
+                      className="select"
+                      value={bulkStageCode}
+                      onChange={(e) => setBulkStageCode(e.target.value)}
+                      style={{ maxWidth: 240 }}
+                      aria-label="Move to stage"
+                    >
+                      <option value="">Move to stage…</option>
+                      {bulkStageOptions.map((o) => (
+                        <option key={o.value} value={o.value}>{o.label}</option>
+                      ))}
+                    </select>
+                    <Button size="sm" disabled={!bulkStageCode} onClick={() => setBulkStageOpen(true)}>
+                      Change Stage
+                    </Button>
+                  </>
+                )}
                 <Button size="sm" variant="ghost" onClick={() => setSelectedIds(new Set())}>Clear</Button>
               </div>
             )}
@@ -1374,6 +1462,14 @@ export default function LeadsPage() {
           );
           setDrawerKey((k) => k + 1);
         }}
+      />
+
+      <BulkStageModal
+        open={bulkStageOpen}
+        count={selectedIds.size}
+        stageName={bulkStageName}
+        onClose={() => { if (!bulkTransitioning) setBulkStageOpen(false); }}
+        onSubmit={handleBulkStage}
       />
 
       <LeadDrawer

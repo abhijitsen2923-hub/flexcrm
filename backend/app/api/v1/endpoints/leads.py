@@ -11,7 +11,9 @@ from app.core.permissions import ASSIGNED_ONLY_LEAD_ROLES, PermissionCode
 from app.database.session import get_db_session
 from app.schemas.common import MessageResponse, PaginatedResponse, PaginationParams, build_page_meta
 from app.schemas.lead import (
+    LeadBulkActionResult,
     LeadBulkReassign,
+    LeadBulkTransition,
     LeadCallLogCreate,
     LeadCallLogRead,
     LeadCreate,
@@ -133,6 +135,29 @@ async def bulk_reassign_leads(
         payload.lead_ids, payload.assigned_to_id, actor_id=current_user.id
     )
     return MessageResponse(message=f"Reassigned {count} lead(s).")
+
+
+@router.post("/bulk-transition", response_model=LeadBulkActionResult)
+async def bulk_transition_leads(
+    payload: LeadBulkTransition,
+    current_user=Depends(require_permissions(PermissionCode.LEAD_MANAGE)),
+    session: AsyncSession = Depends(get_db_session),
+):
+    """Move many selected leads to one stage in a single action. Each lead goes
+    through the normal transition (mandatory comment, role/backward gates, side
+    effects); rejected leads are reported, not fatal. Front-line reps are scoped
+    to their own leads, same as the single-transition endpoint."""
+    enforce = current_user.id if current_user.role in ASSIGNED_ONLY_LEAD_ROLES else None
+    result = await StageTransitionService(session).bulk_transition(
+        payload.lead_ids,
+        payload.to_stage_code,
+        payload.comment,
+        actor_id=current_user.id,
+        actor_role=current_user.role,
+        next_action_date=payload.next_action_date,
+        enforce_owner_id=enforce,
+    )
+    return LeadBulkActionResult(**result)
 
 
 @router.put("/{lead_id}", response_model=LeadRead)

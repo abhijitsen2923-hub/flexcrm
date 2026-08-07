@@ -2,6 +2,7 @@ from datetime import UTC, datetime
 from uuid import UUID
 
 from app.core.exceptions import AuthorizationError, NotFoundError, ValidationError
+from app.core.logging import get_logger
 from app.core.permissions import STAGE_MANAGER_ROLES, can_set_stage
 from app.database.enums import LeadIndustry, PipelineStageCategory, UnitStatus, UserRole
 from app.models.lead import Lead
@@ -21,6 +22,8 @@ from app.services.realtime import realtime_manager
 # would otherwise happen when `app.finance.models` registers with metadata.
 from app.finance.services import SalesOrderService
 
+logger = get_logger(__name__)
+
 
 # The "Sold" stage shares the same `code` slug across both industries
 # (Education position 12 and Travel position 12). One constant covers both.
@@ -37,6 +40,12 @@ TRAVEL_DOCS_PENDING_STAGE = "visa_documentation_pending"
 # Closed-lost stages — any move out of these is a "reopen" and skips the
 # normal backward-only-by-manager rule.
 CLOSED_LOST_STAGE_CODES = {"did_not_pick", "not_interested", "disqualified"}
+
+# Stages a BULK move must NOT target: each needs per-lead capture (a booking/token
+# on "booked", a site-visit slot on "site_visit_confirmed") or fires heavy, near-
+# irreversible side effects ("sold" → Customer + SalesOrder + Invoice + commission +
+# brokerage). Those must be moved one lead at a time.
+BULK_BLOCKED_STAGE_CODES = {SOLD_STAGE_CODE, BOOKED_STAGE_CODE, "site_visit_confirmed"}
 
 
 class StageTransitionService(ServiceBase):
@@ -266,6 +275,69 @@ class StageTransitionService(ServiceBase):
                 }
             )
         return transition
+
+    async def bulk_transition(
+        self,
+        lead_ids: list[UUID],
+        to_stage_code: str,
+        comment: str,
+        *,
+        actor_id: UUID,
+        actor_role: UserRole,
+        next_action_date: datetime | None = None,
+        enforce_owner_id: UUID | None = None,
+    ) -> dict:
+        """Move each lead to `to_stage_code` via the normal single-lead path, so
+        every rule and side effect (comment, role/backward gates, Sold/Booked
+        promotions, realtime, history) applies identically. Per-lead failures are
+        collected — one rejected lead (e.g. a backward move a rep can't make, or a
+        stage that doesn't exist for that lead's industry) never aborts the rest.
+        `enforce_owner_id`, when set (front-line reps), restricts moves to the
+        caller's own leads — the same anti-poaching scope as the single endpoint.
+        Returns {updated, failed, errors}."""
+        # Capture/terminal stages are not bulk-movable — they need per-lead detail or
+        # fire heavy side effects. Reject the whole request (the UI hides them too).
+        if to_stage_code in BULK_BLOCKED_STAGE_CODES:
+            raise ValidationError(
+                "That stage can't be set in bulk — move those leads one at a time so "
+                "each lead's booking, sale, or visit details are captured."
+            )
+        updated = 0
+        errors: list[str] = []
+        for lead_id in lead_ids:
+            try:
+                if enforce_owner_id is not None:
+                    owned = await self.lead_repository.get(lead_id)
+                    if owned is None or owned.assigned_to_id != enforce_owner_id:
+                        errors.append("Some leads are not assigned to you and were skipped.")
+                        continue
+                await self.create_transition(
+                    lead_id,
+                    StageTransitionCreate(
+                        to_stage_code=to_stage_code,
+                        comment=comment,
+                        next_action_date=next_action_date,
+                    ),
+                    actor_id=actor_id,
+                    actor_role=actor_role,
+                )
+                updated += 1
+            except (ValidationError, AuthorizationError, NotFoundError) as exc:
+                # create_transition may have added rows before raising — clear them
+                # so the session is clean for the next lead. Already-committed leads
+                # (per-lead commit) are unaffected.
+                await self.session.rollback()
+                errors.append(exc.detail)
+            except Exception:  # noqa: BLE001 — one bad lead must not abort the whole batch
+                await self.session.rollback()
+                logger.warning("bulk_transition: unexpected error on lead %s", lead_id, exc_info=True)
+                errors.append("An unexpected error prevented moving some leads.")
+        # Dedupe + cap the reasons for a compact toast; `failed` keeps the true count.
+        seen: list[str] = []
+        for e in errors:
+            if e not in seen:
+                seen.append(e)
+        return {"updated": updated, "failed": len(errors), "errors": seen[:5]}
 
     async def _apply_booked_token(self, lead: Lead, capture):
         """Record the "Booked / Token" property + token on a Booking for the lead.

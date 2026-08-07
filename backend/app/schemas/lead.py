@@ -8,6 +8,7 @@ from pydantic import EmailStr, Field
 from app.database.enums import LeadIndustry
 from app.schemas.common import ORMModel, SearchSortParams
 from app.schemas.customer import CustomerCompact
+from app.schemas.stage_transition import MIN_COMMENT_LENGTH
 from app.schemas.user import UserSummary
 
 
@@ -90,6 +91,25 @@ class LeadUpdate(ORMModel):
 class LeadBulkReassign(ORMModel):
     lead_ids: list[UUID] = Field(min_length=1)
     assigned_to_id: UUID
+
+
+class LeadBulkTransition(ORMModel):
+    """Move many leads to the same stage in one action. Each lead still goes
+    through the full single-lead transition (mandatory comment, role/backward
+    gates, side effects), so the shared comment must clear the ≥10-char floor."""
+    lead_ids: list[UUID] = Field(min_length=1, max_length=200)
+    to_stage_code: str = Field(min_length=1, max_length=64)
+    comment: str = Field(min_length=MIN_COMMENT_LENGTH, max_length=4000)
+    next_action_date: datetime | None = None
+
+
+class LeadBulkActionResult(ORMModel):
+    """Per-lead outcome summary for a bulk action — some leads may be rejected
+    (e.g. a backward move a rep can't make) while the rest succeed."""
+    updated: int
+    failed: int
+    # A few human-readable failure reasons (deduped, capped) for a toast.
+    errors: list[str] = []
 
 
 class LeadCallLogCreate(ORMModel):
