@@ -23,6 +23,7 @@ const FEEDBACK_LABELS: Record<SiteVisitFeedback, string> = {
   cold: "Cold ❄️",
 };
 
+// Monday-based week start (matches the Mon–Sun column order).
 function startOfWeek(d: Date): Date {
   const day = d.getDay();
   const diff = d.getDate() - day + (day === 0 ? -6 : 1);
@@ -31,6 +32,10 @@ function startOfWeek(d: Date): Date {
 
 function addDays(d: Date, n: number): Date {
   return new Date(d.getFullYear(), d.getMonth(), d.getDate() + n);
+}
+
+function addMonths(d: Date, n: number): Date {
+  return new Date(d.getFullYear(), d.getMonth() + n, 1);
 }
 
 function sameDay(a: Date, b: Date): boolean {
@@ -45,6 +50,10 @@ function toLocalInput(iso: string): string {
 }
 
 const DAY_LABELS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+// How many events a month cell shows before collapsing into "+N more".
+const MONTH_CELL_EVENT_CAP = 3;
+
+type ViewMode = "week" | "month";
 
 interface Props {
   visits: SiteVisit[];
@@ -54,20 +63,24 @@ interface Props {
 
 interface ScheduleForm {
   leadId: string;
-  projectId: string;
+  // A single visit can cover MULTIPLE projects on one day — one SiteVisit is
+  // created per selected project so each has its own attendance/feedback.
+  projectIds: string[];
   assignedToId: string;
   scheduledAt: string;
   notes: string;
 }
 
-const BLANK: ScheduleForm = { leadId: "", projectId: "", assignedToId: "", scheduledAt: "", notes: "" };
+const BLANK: ScheduleForm = { leadId: "", projectIds: [], assignedToId: "", scheduledAt: "", notes: "" };
 
 export function SiteVisitCalendar({ visits, onSchedule, onUpdateFeedback }: Props) {
   const toast = useToast();
   const { projects } = useInventory();
   const [users, setUsers] = useState<User[]>([]);
   const [leads, setLeads] = useState<Lead[]>([]);
-  const [weekStart, setWeekStart] = useState(() => startOfWeek(new Date()));
+  const [viewMode, setViewMode] = useState<ViewMode>("month");
+  // Any day inside the currently-viewed week/month; navigation moves it.
+  const [cursor, setCursor] = useState(() => new Date());
   const [scheduleOpen, setScheduleOpen] = useState(false);
   const [form, setForm] = useState<ScheduleForm>(BLANK);
   const [saving, setSaving] = useState(false);
@@ -79,7 +92,16 @@ export function SiteVisitCalendar({ visits, onSchedule, onUpdateFeedback }: Prop
     void leadsService.list({ page_size: 100 }).then((r) => setLeads(r.items)).catch(() => {});
   }, []);
 
-  const days = useMemo(() => Array.from({ length: 7 }, (_, i) => addDays(weekStart, i)), [weekStart]);
+  // Week = 7 days from Monday; month = a full 6-week grid so every month lays out
+  // consistently (leading/trailing days spill from the adjacent months).
+  const days = useMemo(() => {
+    if (viewMode === "week") {
+      const ws = startOfWeek(cursor);
+      return Array.from({ length: 7 }, (_, i) => addDays(ws, i));
+    }
+    const gridStart = startOfWeek(new Date(cursor.getFullYear(), cursor.getMonth(), 1));
+    return Array.from({ length: 42 }, (_, i) => addDays(gridStart, i));
+  }, [viewMode, cursor]);
 
   const visitsByDay = useMemo(() => {
     const map = new Map<string, SiteVisit[]>();
@@ -89,30 +111,61 @@ export function SiteVisitCalendar({ visits, onSchedule, onUpdateFeedback }: Prop
       existing.push(v);
       map.set(key, existing);
     }
+    // Keep each day's visits in chronological order.
+    for (const list of map.values()) {
+      list.sort((a, b) => new Date(a.scheduledAt).getTime() - new Date(b.scheduledAt).getTime());
+    }
     return map;
   }, [visits]);
 
-  const prevWeek = () => setWeekStart((w) => addDays(w, -7));
-  const nextWeek = () => setWeekStart((w) => addDays(w, 7));
+  const goPrev = () => setCursor((c) => (viewMode === "week" ? addDays(c, -7) : addMonths(c, -1)));
+  const goNext = () => setCursor((c) => (viewMode === "week" ? addDays(c, 7) : addMonths(c, 1)));
+
+  const rangeLabel = useMemo(() => {
+    if (viewMode === "week") {
+      const ws = startOfWeek(cursor);
+      return `${ws.toLocaleDateString(undefined, { month: "short", day: "numeric" })} – ${addDays(ws, 6).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}`;
+    }
+    return cursor.toLocaleDateString(undefined, { month: "long", year: "numeric" });
+  }, [viewMode, cursor]);
+
+  const toggleProject = (id: string) =>
+    setForm((f) => ({
+      ...f,
+      projectIds: f.projectIds.includes(id)
+        ? f.projectIds.filter((p) => p !== id)
+        : [...f.projectIds, id],
+    }));
 
   const handleSchedule = async () => {
+    if (form.projectIds.length === 0 || !form.scheduledAt) return;
     setSaving(true);
-    try {
-      await onSchedule({
-        leadId: form.leadId || null,
-        projectId: form.projectId,
-        scheduledAt: form.scheduledAt,
-        assignedToId: form.assignedToId || null,
-        notes: form.notes || null,
-      });
-      toast.success("Site visit scheduled");
+    let ok = 0;
+    const errors: string[] = [];
+    // One SiteVisit per selected project (same lead/time/assignee/notes).
+    for (const projectId of form.projectIds) {
+      try {
+        await onSchedule({
+          leadId: form.leadId || null,
+          projectId,
+          scheduledAt: form.scheduledAt,
+          assignedToId: form.assignedToId || null,
+          notes: form.notes || null,
+        });
+        ok += 1;
+      } catch (e) {
+        errors.push(extractErrorMessage(e));
+      }
+    }
+    if (ok > 0) {
+      toast.success(`Scheduled ${ok} site visit${ok === 1 ? "" : "s"}`);
       setScheduleOpen(false);
       setForm(BLANK);
-    } catch (e) {
-      toast.error("Failed to schedule site visit", extractErrorMessage(e));
-    } finally {
-      setSaving(false);
     }
+    if (errors.length > 0) {
+      toast.error(`${errors.length} visit${errors.length === 1 ? "" : "s"} couldn't be scheduled`, errors[0]);
+    }
+    setSaving(false);
   };
 
   const patchVisit = async (patch: UpdateSiteVisitPayload, successMsg: string) => {
@@ -131,10 +184,6 @@ export function SiteVisitCalendar({ visits, onSchedule, onUpdateFeedback }: Prop
 
   const today = new Date();
 
-  const projectOptions = [
-    { value: "", label: "— Select site —" },
-    ...projects.map((p) => ({ value: p.id, label: p.name })),
-  ];
   const leadOptions = [
     { value: "", label: "— No lead —" },
     ...leads.map((l) => ({ value: l.id, label: `${l.contact_name} (#${l.lead_number})` })),
@@ -144,69 +193,98 @@ export function SiteVisitCalendar({ visits, onSchedule, onUpdateFeedback }: Prop
     ...users.map((u) => ({ value: u.id, label: `${u.first_name} ${u.last_name}` })),
   ];
 
+  const renderEvent = (v: SiteVisit) => (
+    <button
+      key={v.id}
+      className={[
+        "sv-event",
+        v.feedback ? `sv-event--${v.feedback}` : "",
+        v.attended === false ? "sv-event--absent" : "",
+        v.status === "cancelled" ? "sv-event--absent" : "",
+      ].filter(Boolean).join(" ")}
+      style={v.status === "cancelled" ? { opacity: 0.55, textDecoration: "line-through" } : undefined}
+      onClick={() => { setSelectedVisit(v); setRescheduleAt(toLocalInput(v.scheduledAt)); }}
+      title={`${formatDateTime(v.scheduledAt)}${v.project ? ` · ${v.project.name}` : ""}`}
+    >
+      <span className="sv-event__time">
+        {new Date(v.scheduledAt).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}
+      </span>
+      <span className="sv-event__lead">{v.lead?.contactName ?? "Site visit"}</span>
+      {v.project && <span className="sv-event__project muted text-xs">{v.project.name}</span>}
+      {v.status === "cancelled" ? (
+        <Badge tone="neutral">Cancelled</Badge>
+      ) : (
+        v.feedback && <Badge tone={FEEDBACK_TONE[v.feedback]}>{FEEDBACK_LABELS[v.feedback]}</Badge>
+      )}
+    </button>
+  );
+
   return (
     <div className="sv-calendar">
       {/* Toolbar */}
       <div className="sv-calendar__toolbar">
         <div className="sv-calendar__nav">
-          <button className="sv-nav-btn" onClick={prevWeek} aria-label="Previous week"><ChevronLeft size={16} /></button>
-          <span className="sv-calendar__range">
-            {weekStart.toLocaleDateString(undefined, { month: "short", day: "numeric" })} –{" "}
-            {addDays(weekStart, 6).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}
-          </span>
-          <button className="sv-nav-btn" onClick={nextWeek} aria-label="Next week"><ChevronRight size={16} /></button>
+          <button className="sv-nav-btn" onClick={goPrev} aria-label={viewMode === "week" ? "Previous week" : "Previous month"}><ChevronLeft size={16} /></button>
+          <span className="sv-calendar__range">{rangeLabel}</span>
+          <button className="sv-nav-btn" onClick={goNext} aria-label={viewMode === "week" ? "Next week" : "Next month"}><ChevronRight size={16} /></button>
+          <button className="sv-nav-btn sv-nav-btn--today" onClick={() => setCursor(new Date())}>Today</button>
         </div>
-        <Button variant="primary" size="sm" onClick={() => { setForm(BLANK); setScheduleOpen(true); }}>
-          + Schedule Visit
-        </Button>
+        <div className="sv-calendar__right">
+          <div className="sv-viewtoggle" role="group" aria-label="Calendar view">
+            <button
+              className={["sv-viewtoggle__btn", viewMode === "week" ? "is-active" : ""].filter(Boolean).join(" ")}
+              onClick={() => setViewMode("week")}
+            >
+              Week
+            </button>
+            <button
+              className={["sv-viewtoggle__btn", viewMode === "month" ? "is-active" : ""].filter(Boolean).join(" ")}
+              onClick={() => setViewMode("month")}
+            >
+              Month
+            </button>
+          </div>
+          <Button variant="primary" size="sm" onClick={() => { setForm(BLANK); setScheduleOpen(true); }}>
+            + Schedule Visit
+          </Button>
+        </div>
       </div>
 
-      {/* Grid */}
-      <div className="sv-grid" role="grid">
-        {days.map((day, i) => (
-          <div
-            key={i}
-            className={["sv-grid__header", sameDay(day, today) ? "sv-grid__header--today" : ""].filter(Boolean).join(" ")}
-            role="columnheader"
-          >
-            <span className="sv-grid__dayname">{DAY_LABELS[i]}</span>
-            <span className="sv-grid__daynum">{day.getDate()}</span>
-          </div>
+      {/* Grid — a 7-column day-name header, then week (7) or month (42) cells. */}
+      <div className={`sv-grid sv-grid--${viewMode}`} role="grid">
+        {DAY_LABELS.map((label) => (
+          <div key={label} className="sv-grid__dowhead" role="columnheader">{label}</div>
         ))}
 
         {days.map((day, i) => {
           const dayVisits = visitsByDay.get(day.toDateString()) ?? [];
+          const isToday = sameDay(day, today);
+          const inMonth = viewMode === "week" || day.getMonth() === cursor.getMonth();
+          const shown = viewMode === "month" ? dayVisits.slice(0, MONTH_CELL_EVENT_CAP) : dayVisits;
+          const extra = dayVisits.length - shown.length;
           return (
             <div
               key={i}
-              className={["sv-grid__cell", sameDay(day, today) ? "sv-grid__cell--today" : ""].filter(Boolean).join(" ")}
+              className={[
+                "sv-grid__cell",
+                isToday ? "sv-grid__cell--today" : "",
+                !inMonth ? "sv-grid__cell--muted" : "",
+              ].filter(Boolean).join(" ")}
               role="gridcell"
             >
-              {dayVisits.map((v) => (
+              <div className="sv-grid__cellhead">
+                <span className="sv-grid__daynum">{day.getDate()}</span>
+              </div>
+              {shown.map(renderEvent)}
+              {extra > 0 && (
                 <button
-                  key={v.id}
-                  className={[
-                    "sv-event",
-                    v.feedback ? `sv-event--${v.feedback}` : "",
-                    v.attended === false ? "sv-event--absent" : "",
-                    v.status === "cancelled" ? "sv-event--absent" : "",
-                  ].filter(Boolean).join(" ")}
-                  style={v.status === "cancelled" ? { opacity: 0.55, textDecoration: "line-through" } : undefined}
-                  onClick={() => { setSelectedVisit(v); setRescheduleAt(toLocalInput(v.scheduledAt)); }}
-                  title={formatDateTime(v.scheduledAt)}
+                  className="sv-more"
+                  onClick={() => { setCursor(day); setViewMode("week"); }}
+                  title="Show this week"
                 >
-                  <span className="sv-event__time">
-                    {new Date(v.scheduledAt).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}
-                  </span>
-                  <span className="sv-event__lead">{v.lead?.contactName ?? "Site visit"}</span>
-                  {v.project && <span className="sv-event__project muted text-xs">{v.project.name}</span>}
-                  {v.status === "cancelled" ? (
-                    <Badge tone="neutral">Cancelled</Badge>
-                  ) : (
-                    v.feedback && <Badge tone={FEEDBACK_TONE[v.feedback]}>{FEEDBACK_LABELS[v.feedback]}</Badge>
-                  )}
+                  +{extra} more
                 </button>
-              ))}
+              )}
             </div>
           );
         })}
@@ -215,13 +293,30 @@ export function SiteVisitCalendar({ visits, onSchedule, onUpdateFeedback }: Prop
       {/* Schedule modal */}
       <Modal open={scheduleOpen} title="Schedule Site Visit" onClose={() => setScheduleOpen(false)}>
         <div className="sv-form">
-          <SelectField
-            id="sv-project"
-            label="Site (project)"
-            value={form.projectId}
-            onChange={(e) => setForm({ ...form, projectId: e.target.value })}
-            options={projectOptions}
-          />
+          <div className="sv-field">
+            <span className="sv-field__label">Sites (projects) — select one or more</span>
+            {projects.length === 0 ? (
+              <p className="muted text-sm">No projects yet — add one in Inventory first.</p>
+            ) : (
+              <div className="sv-checklist">
+                {projects.map((p) => (
+                  <label key={p.id} className="sv-check">
+                    <input
+                      type="checkbox"
+                      checked={form.projectIds.includes(p.id)}
+                      onChange={() => toggleProject(p.id)}
+                    />
+                    <span>{p.name}</span>
+                  </label>
+                ))}
+              </div>
+            )}
+            {form.projectIds.length > 1 && (
+              <span className="muted text-xs">
+                {form.projectIds.length} site visits will be created for this day (one per project).
+              </span>
+            )}
+          </div>
           <SelectField
             id="sv-lead"
             label="Lead (optional)"
@@ -240,7 +335,7 @@ export function SiteVisitCalendar({ visits, onSchedule, onUpdateFeedback }: Prop
           <TextField label="Notes" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} />
           <div className="sv-form__footer">
             <Button variant="secondary" onClick={() => setScheduleOpen(false)}>Cancel</Button>
-            <Button variant="primary" loading={saving} disabled={!form.projectId || !form.scheduledAt} onClick={handleSchedule}>
+            <Button variant="primary" loading={saving} disabled={form.projectIds.length === 0 || !form.scheduledAt} onClick={handleSchedule}>
               Schedule
             </Button>
           </div>

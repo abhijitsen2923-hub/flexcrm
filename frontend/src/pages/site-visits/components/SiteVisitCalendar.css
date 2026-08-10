@@ -36,6 +36,33 @@
   color: var(--color-text);
 }
 .sv-nav-btn:hover { background: var(--color-surface-muted); }
+.sv-nav-btn--today { font-size: 0.8rem; padding: var(--space-1) var(--space-3); }
+
+.sv-calendar__right {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+
+/* Week / Month toggle */
+.sv-viewtoggle {
+  display: inline-flex;
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+.sv-viewtoggle__btn {
+  background: var(--color-surface);
+  border: none;
+  padding: var(--space-1) var(--space-3);
+  font-size: 0.8rem;
+  cursor: pointer;
+  color: var(--color-text);
+}
+.sv-viewtoggle__btn + .sv-viewtoggle__btn { border-left: 1px solid var(--color-border); }
+.sv-viewtoggle__btn:hover { background: var(--color-surface-muted); }
+.sv-viewtoggle__btn.is-active { background: var(--color-primary-soft); color: var(--color-primary); font-weight: 600; }
 
 /* 7-column grid */
 .sv-grid {
@@ -46,18 +73,44 @@
   overflow: hidden;
 }
 
-.sv-grid__header {
+/* Day-name header row (Mon–Sun), shared by both views */
+.sv-grid__dowhead {
   background: var(--color-surface-muted);
   border-bottom: 1px solid var(--color-border);
   border-right: 1px solid var(--color-border);
   padding: var(--space-2) var(--space-3);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
+  text-align: center;
+  font-size: 0.7rem;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  font-weight: 600;
 }
-.sv-grid__header:last-child { border-right: none; }
-.sv-grid__header--today { background: var(--color-primary-soft); }
-.sv-grid__dayname { font-size: 0.7rem; color: var(--color-text-muted); text-transform: uppercase; }
+.sv-grid__dowhead:nth-child(7) { border-right: none; }
+
+/* Day number inside each cell */
+.sv-grid__cellhead {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 2px;
+}
+
+/* Month view: shorter cells, dim the spill-over days, collapse overflow */
+.sv-grid--month .sv-grid__cell { min-height: 96px; }
+.sv-grid__cell--muted { background: var(--color-surface-muted); }
+.sv-grid__cell--muted .sv-grid__daynum { color: var(--color-text-muted); font-weight: 500; }
+.sv-grid--month .sv-event { padding: 2px var(--space-1); }
+.sv-grid--month .sv-event .badge { display: none; }
+.sv-more {
+  background: none;
+  border: none;
+  color: var(--color-text-muted);
+  font-size: 0.7rem;
+  text-align: left;
+  padding: 2px;
+  cursor: pointer;
+}
+.sv-more:hover { color: var(--color-primary); text-decoration: underline; }
+
 .sv-grid__daynum { font-size: 1rem; font-weight: 700; }
 
 .sv-grid__cell {
@@ -103,6 +156,36 @@
   flex-direction: column;
   gap: var(--space-3);
 }
+.sv-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+.sv-field__label {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--color-text-muted);
+}
+/* Multi-select project list */
+.sv-checklist {
+  max-height: 168px;
+  overflow-y: auto;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: var(--space-2);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.sv-check {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: 0.875rem;
+  cursor: pointer;
+  padding: 2px;
+}
+.sv-check input { cursor: pointer; }
 .sv-form__footer {
   display: flex;
   justify-content: flex-end;
