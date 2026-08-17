@@ -46,8 +46,9 @@ class MetaGraphError(RuntimeError):
 
 
 class MetaGraphClient:
-    def __init__(self, access_token: str, *, version: str | None = None) -> None:
-        self._token = access_token
+    def __init__(self, access_token: str | None = None, *, version: str | None = None) -> None:
+        # Optional so app-level OAuth calls (code exchange) can use a token-less client.
+        self._token = access_token or ""
         self._version = version or get_settings().meta_graph_version
 
     async def _request(self, url: str, params: dict | None) -> dict:
@@ -114,3 +115,55 @@ class MetaGraphClient:
             )
         async for lead in self._paginate(f"{form_id}/leads", params):
             yield lead
+
+    # --- OAuth "Connect Facebook" (Phase 1) --------------------------------
+    # Meta's OAuth token endpoints are GET, so they reuse _request. These take the
+    # app credentials per-call (no token on the client yet for the code exchange).
+
+    async def exchange_code(self, code: str, *, app_id: str, app_secret: str, redirect_uri: str) -> dict:
+        """Exchange an OAuth authorization code for a (short-lived) user access token.
+        Returns Meta's {access_token, token_type, expires_in?}."""
+        return await self._request(
+            f"{_GRAPH_BASE}/{self._version}/oauth/access_token",
+            {
+                "client_id": app_id,
+                "client_secret": app_secret,
+                "redirect_uri": redirect_uri,
+                "code": code,
+            },
+        )
+
+    async def long_lived_user_token(self, short_token: str, *, app_id: str, app_secret: str) -> dict:
+        """Exchange a short-lived user token for a long-lived (~60-day) one.
+        Returns {access_token, token_type, expires_in}."""
+        return await self._request(
+            f"{_GRAPH_BASE}/{self._version}/oauth/access_token",
+            {
+                "grant_type": "fb_exchange_token",
+                "client_id": app_id,
+                "client_secret": app_secret,
+                "fb_exchange_token": short_token,
+            },
+        )
+
+    async def list_pages(self) -> list[dict]:
+        """Pages the current USER manages (uses this client's user token). Each item
+        carries the Page's OWN access_token + linked Instagram business account."""
+        return [
+            page
+            async for page in self._paginate(
+                "me/accounts",
+                {"fields": "id,name,access_token,instagram_business_account,tasks", "limit": 100},
+            )
+        ]
+
+    async def get_lead(self, leadgen_id: str) -> dict:
+        """Fetch a single leadgen lead by id — the webhook ingest path (Phase 2)."""
+        return await self._request(
+            f"{_GRAPH_BASE}/{self._version}/{leadgen_id}",
+            {
+                "fields": "id,created_time,field_data,ad_id,ad_name,adset_name,"
+                "campaign_id,campaign_name,form_id,form_name,platform,is_organic",
+                "access_token": self._token,
+            },
+        )

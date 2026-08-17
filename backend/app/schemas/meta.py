@@ -42,6 +42,9 @@ class MetaConnectionRead(ORMModel):
     provider: str
     page_id: str
     page_name: str | None = None
+    # "byo" (pasted token) | "oauth" ("Connect Facebook"). Lets the UI badge how it
+    # was connected; the token is never returned regardless.
+    auth_type: str = "byo"
     default_industry: str
     field_map: dict | None = None
     status: str
@@ -49,3 +52,24 @@ class MetaConnectionRead(ORMModel):
     last_synced_at: datetime | None = None
     is_active: bool
     created_at: datetime
+
+
+# --- OAuth "Connect Facebook" flow ---------------------------------------
+
+
+class MetaOAuthStartResponse(ORMModel):
+    """The Facebook OAuth dialog URL the frontend redirects the browser to."""
+    authorize_url: str
+
+
+class MetaOAuthPage(ORMModel):
+    """A Page the user manages, offered for selection after OAuth. No token exposed."""
+    id: str
+    name: str | None = None
+    has_instagram: bool = False
+
+
+class MetaOAuthConnectRequest(ORMModel):
+    """Finalize: connect the chosen Page(s) from a completed OAuth round-trip."""
+    handle: str = Field(min_length=1)
+    page_ids: list[str] = Field(min_length=1)

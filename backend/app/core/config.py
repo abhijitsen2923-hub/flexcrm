@@ -100,6 +100,13 @@ class Settings(BaseSettings):
     meta_enc_keys: str | None = None
     # Pinned Meta Graph API version for all calls — bump deliberately + smoke-test.
     meta_graph_version: str = "v21.0"
+    # Meta OAuth "Connect Facebook" (one-click SaaS onboarding) — FlexCRM's OWN app.
+    # Inert until set: the bring-your-own-token connect keeps working without these.
+    # The app secret also verifies the leadgen webhook signature (Phase 2).
+    meta_app_id: str | None = None
+    meta_app_secret: str | None = None
+    meta_oauth_redirect_uri: str | None = None
+    meta_webhook_verify_token: str | None = None
 
     websocket_ping_interval_seconds: int = 20
     websocket_event_buffer_size: int = 200

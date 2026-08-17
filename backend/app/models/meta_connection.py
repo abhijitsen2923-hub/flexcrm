@@ -45,8 +45,26 @@ class MetaConnection(
     provider: Mapped[str] = mapped_column(String(20), nullable=False, default="facebook")
     page_id: Mapped[str] = mapped_column(String(64), nullable=False)
     page_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    # Fernet ciphertext of the business's System-User access token — NEVER plaintext.
+    # How the token was obtained. "byo" = the admin pasted their own never-expiring
+    # System-User token (poll-only). "oauth" = connected via FlexCRM's app
+    # ("Connect Facebook") — the token can expire and webhooks apply. The downstream
+    # ingest is identical either way; this just drives refresh + webhook behaviour.
+    auth_type: Mapped[str] = mapped_column(
+        String(10), nullable=False, default="byo", server_default=text("'byo'")
+    )
+    # Fernet ciphertext of the PAGE access token used to read leads — NEVER plaintext.
+    # (BYO: the System-User token. OAuth: the Page token derived from the user token.)
     token_encrypted: Mapped[str] = mapped_column(Text, nullable=False)
+    # OAuth only: Fernet ciphertext of the long-lived USER token (to refresh/re-derive
+    # the page token) and when it expires. Null for BYO (never expires).
+    user_token_encrypted: Mapped[str | None] = mapped_column(Text, nullable=True)
+    token_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # The scopes the user actually granted (they can decline some on Meta's screen).
+    granted_scopes: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    # Webhook subscription state (Phase 2): pending | subscribed | error.
+    subscription_status: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="pending", server_default=text("'pending'")
+    )
     # The org's industry VALUE (e.g. "real_estate"), captured so the ingest sets
     # Lead.industry explicitly (the poll job has no logged-in user to fall back on).
     # Stored as a plain string to avoid binding the cross-schema enum type here.

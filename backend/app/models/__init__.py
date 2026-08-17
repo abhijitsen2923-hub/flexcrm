@@ -6,6 +6,7 @@ from app.models.delivery_log import DeliveryLog
 from app.models.lead import Lead
 from app.models.lead_document import LeadDocument
 from app.models.meta_connection import MetaConnection
+from app.models.meta_page_route import MetaPageRoute
 from app.models.notification import Notification
 from app.models.organization import Organization
 from app.models.pipeline_stage import PipelineStage
@@ -28,6 +29,7 @@ __all__ = [
     "Lead",
     "LeadDocument",
     "MetaConnection",
+    "MetaPageRoute",
     "Notification",
     "Organization",
     "PipelineStage",
