@@ -22,18 +22,13 @@ from sqlalchemy import select
 
 from app.core.logging import get_logger
 from app.core.tenancy import bypass, set_scope, set_tenant_schema
-from app.database.enums import UserRole, UserStatus
 from app.database.session import db_manager
 from app.models.meta_connection import MetaConnection
 from app.models.organization import Organization
-from app.models.user import User
 from app.services.meta_sync import MetaSyncService
-from app.services.notifications import NotificationService
+from app.services.meta_webhook import notify_new_meta_leads
 
 logger = get_logger(__name__)
-
-# Managers who get the "new leads arrived, assign them" nudge (RE + cross-vertical owner).
-_MANAGER_ROLES = (UserRole.sales_manager, UserRole.owner)
 
 
 async def dispatch_meta_lead_sync(session) -> dict[str, int]:
@@ -83,7 +78,7 @@ async def dispatch_meta_lead_sync(session) -> dict[str, int]:
                 counts["filtered"] += stats["filtered"]
                 org_created += stats["created"]
             if org_created:
-                await _notify_managers(session, org.id, org_created)
+                await notify_new_meta_leads(session, org.id, org_created)
                 await session.commit()
         except Exception:
             await session.rollback()
@@ -91,28 +86,6 @@ async def dispatch_meta_lead_sync(session) -> dict[str, int]:
 
     set_scope(session, None)
     return counts
-
-
-async def _notify_managers(session, org_id, created: int) -> None:
-    manager_ids = (
-        await session.execute(
-            select(User.id).where(
-                User.organization_id == org_id,
-                User.role.in_(_MANAGER_ROLES),
-                User.status == UserStatus.active,
-                User.is_deleted.is_(False),
-            )
-        )
-    ).scalars().all()
-    if not manager_ids:
-        return
-    notif = NotificationService(session)
-    plural = "s" if created != 1 else ""
-    for manager_id in manager_ids:
-        await notif.create_notification(
-            user_id=manager_id,
-            message=f"{created} new Meta lead{plural} arrived and need assigning.",
-        )
 
 
 async def run() -> dict[str, int]:

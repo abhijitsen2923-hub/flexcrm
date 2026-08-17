@@ -51,12 +51,8 @@ class MetaGraphClient:
         self._token = access_token or ""
         self._version = version or get_settings().meta_graph_version
 
-    async def _request(self, url: str, params: dict | None) -> dict:
-        try:
-            async with httpx.AsyncClient(timeout=20.0) as client:
-                resp = await client.get(url, params=params or {})
-        except httpx.HTTPError as exc:  # network/timeout — transient
-            raise MetaGraphError(f"Graph request failed: {exc}") from exc
+    @staticmethod
+    def _parse(resp: httpx.Response) -> dict:
         try:
             data = resp.json()
         except ValueError:
@@ -73,6 +69,24 @@ class MetaGraphClient:
                 error_type=err.get("type"),
             )
         return data
+
+    async def _request(self, url: str, params: dict | None) -> dict:
+        try:
+            async with httpx.AsyncClient(timeout=20.0) as client:
+                resp = await client.get(url, params=params or {})
+        except httpx.HTTPError as exc:  # network/timeout — transient
+            raise MetaGraphError(f"Graph request failed: {exc}") from exc
+        return self._parse(resp)
+
+    async def _post(self, url: str, params: dict | None) -> dict:
+        """POST with params in the query string (Meta's write endpoints, e.g. app
+        subscription). Same error surfacing as _request."""
+        try:
+            async with httpx.AsyncClient(timeout=20.0) as client:
+                resp = await client.post(url, params=params or {})
+        except httpx.HTTPError as exc:  # network/timeout — transient
+            raise MetaGraphError(f"Graph request failed: {exc}") from exc
+        return self._parse(resp)
 
     async def _paginate(self, path: str, params: dict) -> AsyncIterator[dict]:
         """Yield every item across pages. `paging.next` is a full URL with the token
@@ -166,4 +180,13 @@ class MetaGraphClient:
                 "campaign_id,campaign_name,form_id,form_name,platform,is_organic",
                 "access_token": self._token,
             },
+        )
+
+    async def subscribe_leadgen(self, page_id: str) -> dict:
+        """Subscribe THIS app to the Page's `leadgen` webhooks (uses this client's PAGE
+        token, which must carry pages_manage_metadata). After this, Meta pushes each new
+        lead to the app's configured callback URL. Returns Meta's {"success": true}."""
+        return await self._post(
+            f"{_GRAPH_BASE}/{self._version}/{page_id}/subscribed_apps",
+            {"subscribed_fields": "leadgen", "access_token": self._token},
         )

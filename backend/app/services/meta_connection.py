@@ -136,6 +136,16 @@ class MetaConnectionService(ServiceBase):
         conn.deleted_at = None
         conn.is_active = True
 
+    async def _subscribe_page(self, page_id: str, page_token: str) -> str:
+        """Best-effort: subscribe FlexCRM's app to this Page's leadgen webhooks so leads
+        arrive in real time (Phase 2). NEVER raises — the poll is the fallback — so a
+        subscribe failure can't break the connect. Returns the subscription_status to store."""
+        try:
+            await MetaGraphClient(page_token).subscribe_leadgen(page_id)
+            return "subscribed"
+        except MetaGraphError:
+            return "failed"
+
     async def connect(self, req: MetaConnectRequest, *, actor_id: UUID) -> MetaConnection:
         """Validate + store a bring-your-own-token connection. Rejects if the token can't
         retrieve leads (so only working connections are saved). Re-connecting the same
@@ -244,6 +254,9 @@ class MetaConnectionService(ServiceBase):
             conn.updated_by_id = actor_id
         conn.status = "ok"
         conn.status_detail = None
+        # Subscribe our app to this Page's leadgen webhooks (real-time delivery). The page
+        # token from OAuth carries pages_manage_metadata; best-effort — poll is the fallback.
+        conn.subscription_status = await self._subscribe_page(page_id, page_token)
         # Register the public route LAST (see connect()) so a cross-org race becomes a
         # clean 409 at commit rather than a raw IntegrityError at an earlier flush.
         await self._register_page_route(page_id, org)

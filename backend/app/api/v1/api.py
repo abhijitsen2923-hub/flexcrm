@@ -20,6 +20,7 @@ from app.api.v1.endpoints import (
     pipeline_stages,
     tasks,
     users,
+    webhooks,
     websocket,
 )
 from app.finance.router import router as finance_router
@@ -33,6 +34,7 @@ api_router = APIRouter()
 api_router.include_router(auth.router, prefix="/auth", tags=["Authentication"])
 api_router.include_router(admin.router, prefix="/admin", tags=["Platform Admin"])
 api_router.include_router(cron.router, prefix="/cron", tags=["Cron"])
+api_router.include_router(webhooks.router, prefix="/webhooks", tags=["Webhooks"])
 api_router.include_router(organizations.router, prefix="/organizations", tags=["Organizations"])
 api_router.include_router(integrations.router, prefix="/integrations", tags=["Integrations"])
 api_router.include_router(users.router, prefix="/users", tags=["Users"])
