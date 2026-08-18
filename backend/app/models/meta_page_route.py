@@ -28,6 +28,11 @@ class MetaPageRoute(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     organization_id: Mapped[UUID] = mapped_column(
         Uuid, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True
     )
+    # The Facebook USER who authorized this Page (OAuth only; NULL for bring-your-own-token).
+    # The deauthorize + data-deletion callbacks arrive with only a user_id, so this public,
+    # cross-tenant column is how we find every Page that user connected without scanning
+    # tenants. Indexed, non-unique (one user may connect several Pages across workspaces).
+    provider_user_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     # Denormalised so the webhook can set_tenant_schema without a second lookup.
     schema_name: Mapped[str] = mapped_column(Text, nullable=False)
     is_active: Mapped[bool] = mapped_column(

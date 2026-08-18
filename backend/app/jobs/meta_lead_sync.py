@@ -44,16 +44,20 @@ async def dispatch_meta_lead_sync(session) -> dict[str, int]:
                 )
             )
         ).scalars().all()
+        # Snapshot the scalars WHILE the ORM rows are fresh: an org-level rollback() below
+        # EXPIRES every persistent object, so touching org.features/id/schema_name on a later
+        # iteration would trigger an async lazy-load in sync context (MissingGreenlet) and
+        # abort the whole run — breaking the "one bad org can't break the rest" guarantee.
+        org_scopes = [(o.id, o.schema_name, o.features or {}) for o in orgs]
 
-    for org in orgs:
+    for org_id, schema_name, features in org_scopes:
         # Which platforms this org is granted (per-tenant admin toggles). FB and IG
         # share one connection, so the poll filters ingestion by platform.
-        features = org.features or {}
         allowed = {p for p in ("facebook", "instagram") if features.get(f"module.meta_{p}")}
         if not allowed:
             continue  # neither Facebook nor Instagram granted for this org
-        set_scope(session, org.id)
-        await set_tenant_schema(session, org.schema_name)
+        set_scope(session, org_id)
+        await set_tenant_schema(session, schema_name)
         try:
             connections = (
                 await session.execute(
@@ -71,18 +75,18 @@ async def dispatch_meta_lead_sync(session) -> dict[str, int]:
             for conn in connections:
                 counts["connections"] += 1
                 stats = await MetaSyncService(session).sync_connection(
-                    conn, organization_id=org.id, allowed_platforms=allowed
+                    conn, organization_id=org_id, allowed_platforms=allowed
                 )
                 counts["created"] += stats["created"]
                 counts["skipped"] += stats["skipped"]
                 counts["filtered"] += stats["filtered"]
                 org_created += stats["created"]
             if org_created:
-                await notify_new_meta_leads(session, org.id, org_created)
+                await notify_new_meta_leads(session, org_id, org_created)
                 await session.commit()
         except Exception:
             await session.rollback()
-            logger.warning("meta_lead_sync failed for org %s", org.id, exc_info=True)
+            logger.warning("meta_lead_sync failed for org %s", org_id, exc_info=True)
 
     set_scope(session, None)
     return counts

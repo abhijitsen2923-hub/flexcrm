@@ -151,10 +151,14 @@ async def meta_oauth_callback(
         org_id = svc.verify_state(state)
         user_token, expires_in = await svc.exchange_code_for_user_token(code)
         pages = await svc.list_pages(user_token)
+        # Attribute the connection to the granting FB user so the deauthorize + data-deletion
+        # callbacks (which arrive with only a user_id) can find it. Best-effort → may be None.
+        fb_user_id = await svc.get_user_id(user_token)
         handle = secrets.token_urlsafe(24)
         stash = {
             "org_id": str(org_id),
             "user_token": crypto.encrypt_secret(user_token),
+            "fb_user_id": fb_user_id,
             "expires_in": expires_in,
             "pages": [
                 {
@@ -231,6 +235,7 @@ async def meta_oauth_connect(
                     granted_scopes=None,
                     user_token_expires_in=stash.get("expires_in"),
                     actor_id=current_user.id,
+                    provider_user_id=stash.get("fb_user_id"),
                 )
                 # Materialize NOW, while the just-committed ORM object is still loaded — a
                 # LATER page's rollback() would EXPIRE it, and serializing an expired

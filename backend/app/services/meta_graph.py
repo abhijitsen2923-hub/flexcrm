@@ -160,6 +160,15 @@ class MetaGraphClient:
             },
         )
 
+    async def get_me(self) -> dict:
+        """The authenticated user's id/name (uses this client's USER token). Used to
+        attribute a connection to the granting Facebook user for the deauthorize +
+        data-deletion callbacks."""
+        return await self._request(
+            f"{_GRAPH_BASE}/{self._version}/me",
+            {"fields": "id,name", "access_token": self._token},
+        )
+
     async def list_pages(self) -> list[dict]:
         """Pages the current USER manages (uses this client's user token). Each item
         carries the Page's OWN access_token + linked Instagram business account."""

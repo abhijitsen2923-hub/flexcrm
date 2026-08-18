@@ -26,7 +26,7 @@ from uuid import UUID
 
 from app.core.config import get_settings
 from app.core.exceptions import ValidationError
-from app.services.meta_graph import MetaGraphClient
+from app.services.meta_graph import MetaGraphClient, MetaGraphError
 
 # Scopes FlexCRM requests to read a Page's lead-gen leads (+ subscribe its webhook).
 _OAUTH_SCOPES = (
@@ -124,3 +124,47 @@ class MetaOAuthService:
     async def list_pages(self, user_token: str) -> list[dict]:
         """The Pages this user manages, each with its own access_token + IG link."""
         return await MetaGraphClient(user_token).list_pages()
+
+    async def refresh_user_token(self, current_long_token: str) -> tuple[str, int | None]:
+        """Re-extend a long-lived user token before it expires. fb_exchange_token accepts a
+        long-lived token and returns a fresh ~60-day one. Returns (token, expires_in|None).
+        Raises MetaGraphError (auth) if the user revoked access — the caller flips to reauth."""
+        data = await MetaGraphClient().long_lived_user_token(
+            current_long_token, app_id=self._s.meta_app_id, app_secret=self._s.meta_app_secret
+        )
+        token = data.get("access_token")
+        if not token:
+            raise ValidationError("Meta did not return a refreshed token.")
+        return token, data.get("expires_in")
+
+    async def get_user_id(self, user_token: str) -> str | None:
+        """The Facebook user id behind a user token (for deauth/data-deletion routing).
+        Best-effort — returns None on any Graph failure rather than blocking the connect."""
+        try:
+            me = await MetaGraphClient(user_token).get_me()
+        except MetaGraphError:
+            return None
+        uid = me.get("id")
+        return str(uid) if uid else None
+
+
+def parse_signed_request(signed_request: str) -> dict | None:
+    """Verify + decode a Meta `signed_request` (the deauthorize + data-deletion callbacks).
+
+    Format: `<base64url signature>.<base64url json payload>`, where the signature is
+    HMAC-SHA256(app_secret, <payload base64url string>). Returns the payload dict ONLY on a
+    valid signature; returns None (never raises) on a missing secret, malformed input, or a
+    signature mismatch — so a forged callback is silently ignored, not acted on."""
+    secret = get_settings().meta_app_secret
+    if not secret or not signed_request or "." not in signed_request:
+        return None
+    try:
+        sig_b64, payload_b64 = signed_request.split(".", 1)
+        expected = hmac.new(secret.encode(), payload_b64.encode(), hashlib.sha256).digest()
+        got = base64.urlsafe_b64decode(sig_b64 + "=" * (-len(sig_b64) % 4))
+        if not hmac.compare_digest(got, expected):
+            return None
+        payload = json.loads(base64.urlsafe_b64decode(payload_b64 + "=" * (-len(payload_b64) % 4)))
+    except Exception:  # noqa: BLE001 — any decode/parse failure → treat as unverified
+        return None
+    return payload if isinstance(payload, dict) else None

@@ -12,13 +12,14 @@ from uuid import UUID
 
 from sqlalchemy import select
 
-from app.core.crypto import encrypt_secret
+from app.core.crypto import decrypt_secret, encrypt_secret
 from app.core.exceptions import NotFoundError, ValidationError
-from app.core.tenancy import current_org
+from app.core.tenancy import bypass, current_org, set_scope, set_tenant_schema
 from app.models.meta_connection import MetaConnection
 from app.models.meta_page_route import MetaPageRoute
 from app.models.organization import Organization
 from app.schemas.meta import MetaConnectionUpdate, MetaConnectRequest, MetaValidateResult
+from app.services import meta_oauth
 from app.services.base import ServiceBase
 from app.services.meta_graph import MetaGraphClient, MetaGraphError
 from app.services.users import UserService
@@ -92,10 +93,14 @@ class MetaConnectionService(ServiceBase):
             )
         ).scalar_one_or_none()
 
-    async def _register_page_route(self, page_id: str, org: Organization) -> None:
+    async def _register_page_route(
+        self, page_id: str, org: Organization, provider_user_id: str | None = None
+    ) -> None:
         """Enforce "one Page ↔ one tenant" PLATFORM-WIDE and (re)register the public
         page→tenant router. Called by BOTH connect paths (BYO + OAuth) so the invariant
-        holds regardless of method. Raises if the Page is already owned by another org."""
+        holds regardless of method. `provider_user_id` (OAuth only) records the granting
+        Facebook user so the deauth/data-deletion callbacks can route by user. Raises if
+        the Page is already owned by another org."""
         route = (
             await self.session.execute(
                 select(MetaPageRoute).where(MetaPageRoute.page_id == page_id)
@@ -112,11 +117,16 @@ class MetaConnectionService(ServiceBase):
                     organization_id=org.id,
                     schema_name=org.schema_name,
                     is_active=True,
+                    provider_user_id=provider_user_id,
                 )
             )
         else:
             route.is_active = True
             route.schema_name = org.schema_name
+            # Only overwrite the owner when we actually know it (a BYO reconnect passes
+            # None and must not wipe an OAuth-established attribution).
+            if provider_user_id is not None:
+                route.provider_user_id = provider_user_id
 
     async def _release_page_route(self, page_id: str, org_id: UUID | None) -> None:
         """Free the public router on disconnect so the Page can be reconnected — by this
@@ -208,6 +218,7 @@ class MetaConnectionService(ServiceBase):
         granted_scopes: list[str] | None,
         user_token_expires_in: int | None,
         actor_id: UUID,
+        provider_user_id: str | None = None,
     ) -> MetaConnection:
         """Store a connection obtained via the "Connect Facebook" OAuth flow. Runs in
         the caller's (authenticated) tenant schema. Encrypts both the Page token (used
@@ -258,8 +269,9 @@ class MetaConnectionService(ServiceBase):
         # token from OAuth carries pages_manage_metadata; best-effort — poll is the fallback.
         conn.subscription_status = await self._subscribe_page(page_id, page_token)
         # Register the public route LAST (see connect()) so a cross-org race becomes a
-        # clean 409 at commit rather than a raw IntegrityError at an earlier flush.
-        await self._register_page_route(page_id, org)
+        # clean 409 at commit rather than a raw IntegrityError at an earlier flush. Records
+        # the granting FB user so deauth/data-deletion callbacks can route by user.
+        await self._register_page_route(page_id, org, provider_user_id)
         await self.commit()
         return conn
 
@@ -295,6 +307,65 @@ class MetaConnectionService(ServiceBase):
         await self._release_page_route(conn.page_id, current_org(self.session))
         await self.commit()
 
+    async def refresh_oauth_connection(self, conn: MetaConnection) -> str:
+        """Refresh ONE OAuth connection's tokens (runs under the connection's tenant scope,
+        which the cron loop sets). Re-extends the long-lived user token, re-derives the Page
+        token, and updates the expiry. Flips to `needs_reauth` on any auth failure (user
+        revoked / token dead / Page no longer accessible) so the UI + poll prompt a
+        re-connect. Never raises; returns a short status word for the cron's counters.
+        BYO connections are skipped (their tokens aren't ours to refresh)."""
+        if conn.auth_type != "oauth" or not conn.user_token_encrypted:
+            return "skipped"
+        try:
+            user_token = decrypt_secret(conn.user_token_encrypted)
+        except Exception:  # noqa: BLE001 — key rotated / corrupt cipher
+            conn.status = "needs_reauth"
+            conn.status_detail = "Stored user token could not be decrypted."
+            await self.commit()
+            return "decrypt_failed"
+
+        oauth = meta_oauth.MetaOAuthService()
+        try:
+            new_user_token, expires_in = await oauth.refresh_user_token(user_token)
+            pages = await oauth.list_pages(new_user_token)
+        except MetaGraphError as exc:
+            if not exc.is_auth_error:
+                # Transient (network/timeout/429/5xx) — do NOT kill a valid connection.
+                # Leave it completely untouched (status, tokens, expiry) so it stays in the
+                # selection window and the NEXT refresh run retries; the poll/webhook keep
+                # working in the meantime. Mirrors meta_sync's is_auth_error gate.
+                return "transient_error"
+            conn.status = "needs_reauth"
+            conn.status_detail = f"Token refresh failed: {exc}"[:500]
+            await self.commit()
+            return "needs_reauth"
+        except ValidationError as exc:
+            # Meta accepted the call but returned no token — the grant is effectively dead.
+            conn.status = "needs_reauth"
+            conn.status_detail = f"Token refresh failed: {exc}"[:500]
+            await self.commit()
+            return "needs_reauth"
+
+        page = next((p for p in pages if str(p.get("id")) == conn.page_id), None)
+        if page is None or not page.get("access_token"):
+            # The user no longer administers this Page (or lost the leads grant) — a fresh
+            # user token can't produce this Page's token, so a re-connect is required.
+            conn.status = "needs_reauth"
+            conn.status_detail = "The connected Page is no longer accessible with this login."
+            await self.commit()
+            return "page_lost"
+
+        conn.user_token_encrypted = encrypt_secret(new_user_token)
+        conn.token_encrypted = encrypt_secret(page["access_token"])
+        conn.token_expires_at = (
+            datetime.now(UTC) + timedelta(seconds=int(expires_in)) if expires_in else None
+        )
+        if conn.status == "needs_reauth":
+            conn.status = "ok"
+            conn.status_detail = None
+        await self.commit()
+        return "refreshed"
+
     async def _org(self) -> Organization:
         org_id = current_org(self.session)
         org = (
@@ -303,3 +374,46 @@ class MetaConnectionService(ServiceBase):
         if org is None:
             raise NotFoundError("Organization not found.")
         return org
+
+
+async def purge_connections_for_user(session, provider_user_id: str) -> int:
+    """Disconnect EVERY Meta connection a given Facebook user authorized, across ALL tenants
+    — the deauthorize + data-deletion callbacks. Public routes carry the provider_user_id, so
+    we find the affected Pages without scanning tenants, then per Page switch into its tenant,
+    soft-delete the connection, WIPE its stored tokens (the user's data), and drop the public
+    route (freeing the Page to be reconnected). Ingested leads are the business's own records,
+    not the FB user's personal data, so they are deliberately NOT deleted. Idempotent; returns
+    the number of connections purged. Commits per Page and resets scope at the end."""
+    with bypass(session):
+        routes = (
+            await session.execute(
+                select(MetaPageRoute).where(MetaPageRoute.provider_user_id == provider_user_id)
+            )
+        ).scalars().all()
+    purged = 0
+    for route in routes:
+        set_scope(session, route.organization_id)
+        await set_tenant_schema(session, route.schema_name)
+        conn = (
+            await session.execute(
+                select(MetaConnection).where(
+                    MetaConnection.provider == _PROVIDER,
+                    MetaConnection.page_id == route.page_id,
+                )
+            )
+        ).scalar_one_or_none()
+        if conn is not None:
+            conn.is_deleted = True
+            conn.is_active = False
+            conn.subscription_status = "revoked"
+            conn.status = "revoked"
+            conn.status_detail = "Access removed by the Facebook user."
+            conn.token_encrypted = ""       # wipe the Page token
+            conn.user_token_encrypted = None  # wipe the user token
+            purged += 1
+        # The route is PUBLIC — delete it outside any tenant-schema translation.
+        with bypass(session):
+            await session.delete(route)
+        await session.commit()
+    set_scope(session, None)
+    return purged

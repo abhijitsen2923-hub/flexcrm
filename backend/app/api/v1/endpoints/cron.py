@@ -14,6 +14,7 @@ from app.core.config import get_settings
 from app.database.session import db_manager
 from app.jobs.followup_reminders import dispatch_followup_reminders
 from app.jobs.meta_lead_sync import dispatch_meta_lead_sync
+from app.jobs.meta_token_refresh import dispatch_meta_token_refresh
 from app.jobs.registration_reminders import dispatch_registration_reminders
 
 router = APIRouter()
@@ -52,4 +53,14 @@ async def trigger_meta_lead_sync(_: None = Depends(require_cron_secret)):
     per org. Meant to run every 5-15 min."""
     async with db_manager.session_factory() as session:
         counts = await dispatch_meta_lead_sync(session)
+    return counts
+
+
+@router.post("/meta-token-refresh")
+async def trigger_meta_token_refresh(_: None = Depends(require_cron_secret)):
+    """Cross-org: re-extend OAuth Meta tokens nearing expiry and flip revoked connections
+    to needs_reauth. Fresh session — dispatch switches org scope itself and commits per
+    connection. Meant to run daily."""
+    async with db_manager.session_factory() as session:
+        counts = await dispatch_meta_token_refresh(session)
     return counts
