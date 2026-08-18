@@ -15,19 +15,26 @@
     "binding": "ASSETS"
   },
   // Crons (UTC):
-  //  - 30 3 * * *   : daily 03:30 UTC (~09:00 IST) — reminder dispatch.
+  //  - 30 3 * * *   : daily 03:30 UTC (~09:00 IST) — reminders + follow-ups +
+  //                   Meta token refresh + a Meta lead-sync poll.
+  //  - 30 15 * * *  : daily 15:30 UTC (~21:00 IST) — a second Meta lead-sync poll.
+  // => Meta lead-sync runs TWICE daily (backstop; OAuth pages also get real-time
+  //    webhooks), token refresh + reminders run ONCE daily. The scheduled() handler
+  //    branches on event.cron (worker/index.js).
   // NOTE: the old */4 keep-alive ping was REMOVED — on Neon's free tier it kept
   // the compute awake 24/7 and burned the monthly compute allowance, which
   // hard-suspends the DB for the rest of the cycle (total outage). We now let
   // Neon auto-suspend when idle; the first request after idle wakes it (~2-5s,
-  // covered by the client's retry). Re-add a keep-alive only on a paid Neon plan.
-  // The scheduled() handler branches on event.cron (worker/index.js).
+  // covered by the client's retry). The twice-daily Meta poll wakes Neon only
+  // twice a day, so it's free-tier-safe. Re-add a keep-alive only on a paid plan.
   "triggers": {
-    "crons": ["30 3 * * *"]
+    "crons": ["30 3 * * *", "30 15 * * *"]
   },
   "vars": {
     "REMINDERS_URL": "https://flexcrm-backend-539170436218.asia-south1.run.app/api/v1/cron/registration-reminders",
-    "FOLLOWUP_URL": "https://flexcrm-backend-539170436218.asia-south1.run.app/api/v1/cron/followup-reminders"
+    "FOLLOWUP_URL": "https://flexcrm-backend-539170436218.asia-south1.run.app/api/v1/cron/followup-reminders",
+    "META_SYNC_URL": "https://flexcrm-backend-539170436218.asia-south1.run.app/api/v1/cron/meta-lead-sync",
+    "META_TOKEN_REFRESH_URL": "https://flexcrm-backend-539170436218.asia-south1.run.app/api/v1/cron/meta-token-refresh"
   }
   // NOTE: CRON_SECRET is a Worker *secret*, not a var — set it with
   // `npx wrangler secret put CRON_SECRET` (must match the backend CRON_SECRET).
