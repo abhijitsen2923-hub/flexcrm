@@ -14,6 +14,7 @@ export interface MetaConnection {
   provider: string;
   page_id: string;
   page_name: string | null;
+  auth_type: string; // "oauth" (Connect Facebook) | "byo" (System-User token)
   default_industry: string;
   field_map: Record<string, string> | null;
   status: string; // ok | needs_reauth | error
@@ -27,6 +28,13 @@ export interface MetaConnectPayload {
   page_id: string;
   token: string;
   field_map?: Record<string, string> | null;
+}
+
+// A Page surfaced by the OAuth round-trip for the admin to pick from.
+export interface MetaOAuthPage {
+  id: string;
+  name: string | null;
+  has_instagram: boolean;
 }
 
 // Tenant Meta (Facebook/Instagram) Lead Ads connection management. The access
@@ -56,5 +64,27 @@ export const integrationsService = {
   },
   async disconnectMeta(id: string): Promise<void> {
     await apiClient.delete(`/integrations/meta/${id}`);
+  },
+
+  // --- OAuth "Connect Facebook" (one-click) ---
+  // start → returns the Facebook consent URL to redirect the browser to. Meta then
+  // bounces back to /integrations?meta_oauth=<handle>, which the page exchanges for the
+  // user's Pages (getMetaOAuthSession) before connecting the chosen ones (connectMetaOAuth).
+  async startMetaOAuth(): Promise<{ authorize_url: string }> {
+    const { data } = await apiClient.get<{ authorize_url: string }>("/integrations/meta/oauth/start");
+    return data;
+  },
+  async getMetaOAuthSession(handle: string): Promise<MetaOAuthPage[]> {
+    const { data } = await apiClient.get<MetaOAuthPage[]>(
+      `/integrations/meta/oauth/session/${encodeURIComponent(handle)}`
+    );
+    return data;
+  },
+  async connectMetaOAuth(handle: string, pageIds: string[]): Promise<MetaConnection[]> {
+    const { data } = await apiClient.post<MetaConnection[]>("/integrations/meta/oauth/connect", {
+      handle,
+      page_ids: pageIds,
+    });
+    return data;
   },
 };

@@ -1,8 +1,14 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 
-import { Badge, Button, LoadingBlock, TextField, useToast } from "../../components";
+import { Badge, Button, LoadingBlock, Modal, TextField, useToast } from "../../components";
 import { useOrgModules } from "../../context/OrgContext";
-import { integrationsService, type MetaConnection, type MetaValidateResult } from "../../services/integrations";
+import {
+  integrationsService,
+  type MetaConnection,
+  type MetaOAuthPage,
+  type MetaValidateResult,
+} from "../../services/integrations";
 import { extractErrorMessage } from "../../utils/errors";
 import { formatDateTime } from "../../utils/format";
 
@@ -50,6 +56,17 @@ export default function IntegrationsPage() {
   const [probe, setProbe] = useState<MetaValidateResult | null>(null);
   const [busy, setBusy] = useState<"test" | "connect" | null>(null);
 
+  // OAuth "Connect Facebook" flow.
+  const [oauthBusy, setOauthBusy] = useState(false);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [pickerHandle, setPickerHandle] = useState<string | null>(null);
+  const [pickerPages, setPickerPages] = useState<MetaOAuthPage[]>([]);
+  const [pickerLoading, setPickerLoading] = useState(false);
+  const [pickerBusy, setPickerBusy] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const oauthHandledRef = useRef(false);
+
   async function refresh() {
     setLoading(true);
     try {
@@ -63,6 +80,89 @@ export default function IntegrationsPage() {
   useEffect(() => {
     void refresh();
   }, []);
+
+  // Handle the return leg of the OAuth round-trip: Meta's callback redirects the browser to
+  // /integrations?meta_oauth=<handle> (or ?meta_oauth_error=...). Consume it exactly once,
+  // strip the params (so a refresh/back can't replay a spent handle), then open the picker.
+  async function openPicker(handle: string) {
+    setPickerHandle(handle);
+    setPickerOpen(true);
+    setPickerLoading(true);
+    setPickerPages([]);
+    setSelectedIds([]);
+    try {
+      const pages = await integrationsService.getMetaOAuthSession(handle);
+      setPickerPages(pages);
+      // Pre-select when there's a single obvious choice; otherwise let the admin pick.
+      setSelectedIds(pages.length === 1 ? pages.map((p) => p.id) : []);
+    } catch (err) {
+      setPickerOpen(false);
+      setPickerHandle(null);
+      toast.error("Connect session expired", extractErrorMessage(err));
+    } finally {
+      setPickerLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    if (oauthHandledRef.current) return;
+    const handle = searchParams.get("meta_oauth");
+    const oauthError = searchParams.get("meta_oauth_error");
+    if (!handle && !oauthError) return;
+    oauthHandledRef.current = true;
+    const next = new URLSearchParams(searchParams);
+    next.delete("meta_oauth");
+    next.delete("meta_oauth_error");
+    setSearchParams(next, { replace: true });
+    if (oauthError) {
+      toast.error("Facebook connect not completed", "The connection was cancelled or failed — you can try again.");
+      return;
+    }
+    if (handle) void openPicker(handle);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
+
+  async function startOAuth() {
+    setOauthBusy(true);
+    try {
+      const { authorize_url } = await integrationsService.startMetaOAuth();
+      // Leave the SPA for Facebook's consent screen; Meta returns to /integrations after.
+      window.location.href = authorize_url;
+    } catch (err) {
+      toast.error("Couldn't start Facebook connect", extractErrorMessage(err));
+      setOauthBusy(false); // on success we're navigating away, so only reset on failure
+    }
+  }
+
+  function togglePage(id: string) {
+    setSelectedIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+  }
+
+  function closePicker() {
+    if (pickerBusy) return;
+    setPickerOpen(false);
+    setPickerHandle(null);
+  }
+
+  async function connectSelected() {
+    if (!pickerHandle || selectedIds.length === 0) return;
+    setPickerBusy(true);
+    try {
+      const created = await integrationsService.connectMetaOAuth(pickerHandle, selectedIds);
+      toast.success(
+        "Connected",
+        `${created.length} page${created.length === 1 ? "" : "s"} connected — leads will start syncing shortly.`
+      );
+      await refresh();
+    } catch (err) {
+      toast.error("Could not connect", extractErrorMessage(err));
+    } finally {
+      // The handle is one-time (consumed server-side on the first attempt), so always close.
+      setPickerBusy(false);
+      setPickerOpen(false);
+      setPickerHandle(null);
+    }
+  }
 
   async function testConnection() {
     if (!pageId.trim() || !token.trim()) return;
@@ -115,7 +215,7 @@ export default function IntegrationsPage() {
         {activePlatforms.length > 0 ? (
           <p className="text-xs muted" style={{ marginTop: "0.35rem" }}>
             Enabled for your workspace: <strong>{activePlatforms.join(" & ")}</strong>. One connection
-            below covers both platforms; leads from a platform that isn&apos;t enabled are skipped.
+            covers both platforms; leads from a platform that isn&apos;t enabled are skipped.
           </p>
         ) : null}
       </div>
@@ -140,6 +240,8 @@ export default function IntegrationsPage() {
                     <span className="muted text-xs">· Page {conn.page_id}</span>
                   </span>
                   <span className="text-xs muted">
+                    {conn.auth_type === "oauth" ? "via Facebook login" : "via token"}
+                    {" · "}
                     {conn.last_synced_at ? `Last synced ${formatDateTime(conn.last_synced_at)}` : "Not synced yet"}
                     {conn.status_detail ? ` · ${conn.status_detail}` : ""}
                   </span>
@@ -156,20 +258,41 @@ export default function IntegrationsPage() {
         )}
       </div>
 
-      {/* Setup checklist */}
+      {/* Primary: one-click Connect Facebook */}
+      <div className="card" style={{ padding: "1rem 1.25rem" }}>
+        <strong>Add a connection</strong>
+        <p className="muted text-sm" style={{ marginTop: "0.35rem" }}>
+          Sign in with Facebook and choose which Page(s) to sync — the simplest way to connect.
+          Leads then arrive in real time, and we keep the connection refreshed for you.
+        </p>
+        <div className="row" style={{ marginTop: "0.75rem" }}>
+          <Button
+            loading={oauthBusy}
+            disabled={oauthBusy}
+            onClick={() => void startOAuth()}
+          >
+            Connect Facebook
+          </Button>
+        </div>
+      </div>
+
+      {/* Advanced: bring-your-own System-User token (the original method) */}
       <details className="card" style={{ padding: "0.75rem 1.25rem" }}>
-        <summary style={{ cursor: "pointer", fontWeight: 600 }}>How to get your token (one-time setup)</summary>
-        <ol className="stack" style={{ gap: "0.35rem", margin: "0.75rem 0 0", paddingLeft: "1.1rem" }}>
+        <summary style={{ cursor: "pointer", fontWeight: 600 }}>
+          Advanced: connect with a System-User token
+        </summary>
+        <p className="muted text-xs" style={{ margin: "0.6rem 0 0.25rem" }}>
+          Prefer to bring your own never-expiring token (no Facebook login redirect)? Follow these
+          one-time steps, paste your token, and connect. Note: real-time webhooks aren&apos;t available
+          on this method — leads are polled every few minutes.
+        </p>
+        <ol className="stack" style={{ gap: "0.35rem", margin: "0.5rem 0 0.75rem", paddingLeft: "1.1rem" }}>
           {SETUP_STEPS.map((s, i) => (
             <li key={i} className="text-sm">{s}</li>
           ))}
         </ol>
-      </details>
 
-      {/* Connect form */}
-      <div className="card" style={{ padding: "1rem 1.25rem" }}>
-        <strong>Add a connection</strong>
-        <div className="form-grid" style={{ marginTop: "0.75rem" }}>
+        <div className="form-grid" style={{ marginTop: "0.5rem" }}>
           <TextField
             id="meta-page-id"
             label="Facebook Page ID"
@@ -219,7 +342,57 @@ export default function IntegrationsPage() {
             Connect
           </Button>
         </div>
-      </div>
+      </details>
+
+      {/* OAuth Page picker */}
+      <Modal
+        open={pickerOpen}
+        title="Choose which Page(s) to connect"
+        onClose={closePicker}
+        footer={
+          <>
+            <Button variant="ghost" disabled={pickerBusy} onClick={closePicker}>Cancel</Button>
+            <Button
+              loading={pickerBusy}
+              disabled={pickerBusy || selectedIds.length === 0}
+              onClick={() => void connectSelected()}
+            >
+              Connect{selectedIds.length > 0 ? ` (${selectedIds.length})` : ""}
+            </Button>
+          </>
+        }
+      >
+        {pickerLoading ? (
+          <LoadingBlock />
+        ) : pickerPages.length === 0 ? (
+          <p className="muted text-sm">
+            No Facebook Pages were found for this account. Make sure your login manages at least one
+            Page, then try again.
+          </p>
+        ) : (
+          <div className="stack" style={{ gap: "0.3rem" }}>
+            {pickerPages.map((p) => (
+              <label
+                key={p.id}
+                className="row"
+                style={{ alignItems: "center", gap: "0.65rem", padding: "0.4rem 0", cursor: "pointer" }}
+              >
+                <input
+                  type="checkbox"
+                  checked={selectedIds.includes(p.id)}
+                  onChange={() => togglePage(p.id)}
+                />
+                <span className="stack" style={{ gap: "0.1rem" }}>
+                  <strong>{p.name ?? p.id}</strong>
+                  <span className="text-xs muted">
+                    Page {p.id}{p.has_instagram ? " · Instagram linked" : ""}
+                  </span>
+                </span>
+              </label>
+            ))}
+          </div>
+        )}
+      </Modal>
     </div>
   );
 }
