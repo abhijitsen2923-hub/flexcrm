@@ -107,6 +107,11 @@ class Settings(BaseSettings):
     meta_app_secret: str | None = None
     meta_oauth_redirect_uri: str | None = None
     meta_webhook_verify_token: str | None = None
+    # Facebook Login for Business defines its permissions/assets in a saved "configuration"
+    # and passes a config_id INSTEAD of scope. Set this to that configuration's id when the
+    # Meta app uses FLB (the "Manage everything on your Page" app type); leave unset to use
+    # the classic scope-based login. Inert either way until meta_app_id is configured.
+    meta_login_config_id: str | None = None
 
     websocket_ping_interval_seconds: int = 20
     websocket_event_buffer_size: int = 200

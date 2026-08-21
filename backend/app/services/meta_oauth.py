@@ -28,13 +28,16 @@ from app.core.config import get_settings
 from app.core.exceptions import ValidationError
 from app.services.meta_graph import MetaGraphClient, MetaGraphError
 
-# Scopes FlexCRM requests to read a Page's lead-gen leads (+ subscribe its webhook).
+# Scopes FlexCRM requests to read a Page's lead-gen leads (+ subscribe its webhook). Only
+# used for the classic scope-based login; a Facebook Login for Business config_id defines its
+# own permission set. business_management was dropped — we never call a Business-Management
+# API (we list Pages via pages_show_list and use the page tokens directly), and it's the
+# heaviest permission to get approved.
 _OAUTH_SCOPES = (
     "pages_show_list",
     "pages_read_engagement",
     "leads_retrieval",
     "pages_manage_metadata",  # to subscribe the page to the app webhook (Phase 2)
-    "business_management",
 )
 _STATE_TTL_SECONDS = 600  # the OAuth round-trip must complete within 10 minutes
 _DIALOG = "https://www.facebook.com/{version}/dialog/oauth"
@@ -96,9 +99,15 @@ class MetaOAuthService:
             "client_id": self._s.meta_app_id,
             "redirect_uri": self._s.meta_oauth_redirect_uri,
             "state": self.build_state(org_id),
-            "scope": ",".join(_OAUTH_SCOPES),
             "response_type": "code",
         }
+        # Facebook Login for Business apps define permissions/assets in a saved configuration
+        # and REPLACE `scope` with `config_id`; classic Facebook Login uses `scope`. Send
+        # whichever this app is set up for. Both return an OAuth `code` we exchange identically.
+        if self._s.meta_login_config_id:
+            params["config_id"] = self._s.meta_login_config_id
+        else:
+            params["scope"] = ",".join(_OAUTH_SCOPES)
         return f"{_DIALOG.format(version=self._s.meta_graph_version)}?{urlencode(params)}"
 
     # --- code exchange -----------------------------------------------------
