@@ -92,6 +92,7 @@ async def test_lead_can_still_attach_existing_customer(client, auth_headers):
             "industry": "education",
             "title": "Existing-customer lead",
             "contact_name": "Peter Gibbons",
+            "contact_phone": "+919900100001",
             "customer_id": customer_id,
         },
     )
@@ -150,6 +151,7 @@ async def test_lead_sold_does_not_double_promote(client, auth_headers):
             "industry": "education",
             "title": "Re-sold lead",
             "contact_name": "Rahul Ojha",
+            "contact_phone": "+919900100002",
         },
     )
     lead_id = create.json()["id"]
@@ -182,7 +184,12 @@ async def test_lead_create_seeds_initial_transition(client, auth_headers):
     create = await client.post(
         "/api/v1/leads",
         headers=auth_headers,
-        json={"industry": "travel", "title": "Bali honeymoon", "contact_name": "Karan Mehta"},
+        json={
+            "industry": "travel",
+            "title": "Bali honeymoon",
+            "contact_name": "Karan Mehta",
+            "contact_phone": "+919900100003",
+        },
     )
     assert create.status_code == 201
     lead_id = create.json()["id"]
@@ -198,7 +205,12 @@ async def test_stage_transition_requires_min_comment(client, auth_headers):
     create = await client.post(
         "/api/v1/leads",
         headers=auth_headers,
-        json={"industry": "education", "title": "Demo lead", "contact_name": "Demo Person"},
+        json={
+            "industry": "education",
+            "title": "Demo lead",
+            "contact_name": "Demo Person",
+            "contact_phone": "+919900100004",
+        },
     )
     lead_id = create.json()["id"]
 
@@ -226,7 +238,12 @@ async def test_put_rejects_stage_code(client, auth_headers):
     create = await client.post(
         "/api/v1/leads",
         headers=auth_headers,
-        json={"industry": "education", "title": "Direct edit", "contact_name": "Edit Tester"},
+        json={
+            "industry": "education",
+            "title": "Direct edit",
+            "contact_name": "Edit Tester",
+            "contact_phone": "+919900100005",
+        },
     )
     lead_id = create.json()["id"]
     rejected = await client.put(
@@ -243,7 +260,12 @@ async def test_invalid_stage_code_for_industry_is_rejected(client, auth_headers)
     create = await client.post(
         "/api/v1/leads",
         headers=auth_headers,
-        json={"industry": "education", "title": "Wrong vertical", "contact_name": "Wrong Industry"},
+        json={
+            "industry": "education",
+            "title": "Wrong vertical",
+            "contact_name": "Wrong Industry",
+            "contact_phone": "+919900100006",
+        },
     )
     lead_id = create.json()["id"]
     bad = await client.post(
@@ -264,6 +286,9 @@ async def test_lead_probability_constraint(client, auth_headers):
             "industry": "education",
             "title": "Invalid probability",
             "contact_name": "Bad Probability",
+            # Present so the 422 below proves the probability constraint fired —
+            # a missing phone is also a 422 and would mask it.
+            "contact_phone": "+919900100007",
             "value": "100",
             "probability": 150,
         },

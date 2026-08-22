@@ -1,7 +1,16 @@
-# Plan (deferred): Real-estate inventory & bookings completion
+# Plan (COMPLETED): Real-estate inventory & bookings completion
 
-Status: **deferred for later development** (agreed 2026-07-02). This documents the
-gap and a concrete build plan so it can be picked up later.
+Status: **done** — kept as a historical record of the gap and how it was closed.
+Originally deferred 2026-07-02; the work has since shipped.
+
+Where it landed:
+- Tower create → `POST /inventory/projects/{project_id}/towers`
+- Unit batch create → `POST /inventory/towers/{tower_id}/units/batch`
+  (plus `PATCH`/`DELETE` for towers and units)
+- UI → the tower/unit manager in `frontend/src/pages/inventory/ProjectsPage.tsx`
+- "New Booking" → wired in `frontend/src/pages/bookings/BookingsPage.tsx`
+
+Everything below is the original 2026-07-02 plan text, unedited.
 
 ## The gap
 

@@ -5,9 +5,12 @@
 //              before the Worker runs; this delegation is a safe fallback.)
 // - scheduled: two daily crons (worker branches on event.cron):
 //                • 30 3 * * *  → reminders + follow-ups + Meta token refresh + a Meta poll
+//                                + the nightly maintenance jobs (customer health,
+//                                  HR scorecards, retention archival)
 //                • 30 15 * * * → a second Meta poll
 //              So the Meta lead-sync poll runs TWICE daily (a backstop; OAuth pages
-//              also get real-time webhooks), token refresh + reminders run ONCE daily.
+//              also get real-time webhooks), token refresh + reminders + maintenance
+//              run ONCE daily.
 //              All calls are secret-guarded (X-Cron-Key === backend CRON_SECRET).
 //
 // NOTE: the previous every-4-min /health/db keep-alive was removed — on Neon's
@@ -22,6 +25,12 @@ const DEFAULT_REMINDERS_URL = `${BACKEND}/api/v1/cron/registration-reminders`;
 const DEFAULT_FOLLOWUP_URL = `${BACKEND}/api/v1/cron/followup-reminders`;
 const DEFAULT_META_SYNC_URL = `${BACKEND}/api/v1/cron/meta-lead-sync`;
 const DEFAULT_META_TOKEN_REFRESH_URL = `${BACKEND}/api/v1/cron/meta-token-refresh`;
+// Nightly maintenance. These three were CLI-only and therefore never ran in
+// production: nothing scheduled them, so retention purging, customer-health
+// re-evaluation and HR scorecards were all silently dormant.
+const DEFAULT_CUSTOMER_HEALTH_URL = `${BACKEND}/api/v1/cron/customer-health`;
+const DEFAULT_SCORECARD_URL = `${BACKEND}/api/v1/cron/scorecard-compute`;
+const DEFAULT_ARCHIVE_URL = `${BACKEND}/api/v1/cron/archive`;
 
 // The daily cron that also carries reminders + follow-ups + token refresh. The
 // second cron (30 15) only runs the Meta poll.
@@ -56,6 +65,12 @@ export default {
       ctx.waitUntil(post(env.REMINDERS_URL || DEFAULT_REMINDERS_URL));
       ctx.waitUntil(post(env.FOLLOWUP_URL || DEFAULT_FOLLOWUP_URL));
       ctx.waitUntil(post(env.META_TOKEN_REFRESH_URL || DEFAULT_META_TOKEN_REFRESH_URL));
+      // Nightly maintenance rides this same cron rather than adding a trigger —
+      // each extra trigger wakes Neon, and the free tier's compute allowance is
+      // the reason the old */4 keep-alive was removed (see the note above).
+      ctx.waitUntil(post(env.CUSTOMER_HEALTH_URL || DEFAULT_CUSTOMER_HEALTH_URL));
+      ctx.waitUntil(post(env.SCORECARD_URL || DEFAULT_SCORECARD_URL));
+      ctx.waitUntil(post(env.ARCHIVE_URL || DEFAULT_ARCHIVE_URL));
     }
   },
 };

@@ -6,7 +6,7 @@ A full-stack CRM (customers, leads, deals, tasks, activities, dashboards, analyt
 - **Frontend** — React 18 + TypeScript + Vite + axios + recharts
 - **Cache** — Redis (in-memory fallback for single-worker dev)
 
-> Authoritative project context for AI-assisted development lives in [.claude/PROJECT_CONTEXT.md](.claude/PROJECT_CONTEXT.md). Read it before changing architecture or adding dependencies.
+> Authoritative project context — architecture, every module, deployment, current status and roadmap — lives in [MEMORY.md](MEMORY.md). Read it before changing architecture or adding dependencies.
 
 ---
 
@@ -100,7 +100,11 @@ cp .env.example .env
 npm run dev                    # http://localhost:5173
 ```
 
-> ⚠️ **Known gap.** `frontend/src/generic-crm.jsx` imports `lucide-react`, which is not yet in `frontend/package.json`. Until that's added you'll need `npm install lucide-react` separately. The frontend also currently has no `index.html` / `main.tsx` mount scaffolding committed — see [.claude/PROJECT_CONTEXT.md §12](.claude/PROJECT_CONTEXT.md#12-known-issues--technical-debt) for the planned monolith split.
+> **Feature flags.** Every module is gated by **both** a build flag (`VITE_FEATURE_*` in
+> `frontend/.env.production`) **and** a per-org toggle granted in Platform Admin — a module
+> shows only when both agree. See [docs/adding-a-module.md](docs/adding-a-module.md).
+> `VITE_API_BASE_URL` is **not** committed; it comes from the Cloudflare build environment,
+> and a deploy that omits it silently points the app at `http://localhost:8000/api/v1`.
 
 ---
 
@@ -128,7 +132,15 @@ cd backend
 pytest                         # runs the full test suite against an in-process sqlite db
 ```
 
-The tests use the ASGI transport (no live server) and spin up an isolated sqlite database per session via [backend/tests/conftest.py](backend/tests/conftest.py).
+The tests use the ASGI transport (no live server) and spin up an isolated sqlite database per test via [backend/tests/conftest.py](backend/tests/conftest.py).
+
+> ⚠️ **The suite runs on a single collapsed schema.** Production is Postgres with
+> schema-per-tenant, which SQLite cannot model — it has no `CREATE SCHEMA`, and cross-database
+> foreign keys are unsupported while every tenant table has FKs into `public`. So the harness
+> maps both `tenant` and `public` onto one schema and stubs tenant provisioning out.
+> **These tests cover business logic, not tenant isolation** — a handful of isolation tests are
+> skipped with that reason and need a real Postgres to be meaningful. See the header comment in
+> `conftest.py` before adding a test that depends on cross-org invisibility.
 
 ---
 
@@ -146,7 +158,7 @@ Request
   ← Pydantic schema (schemas/*.py)
 ```
 
-See [.claude/PROJECT_CONTEXT.md](.claude/PROJECT_CONTEXT.md) for the full layered-architecture rules and what each layer is allowed to do.
+See [MEMORY.md §2](MEMORY.md) for the full layered-architecture rules and what each layer is allowed to do.
 
 ---
 
@@ -161,7 +173,7 @@ See [.claude/PROJECT_CONTEXT.md](.claude/PROJECT_CONTEXT.md) for the full layere
 | `POST /api/v1/auth/refresh`       | Rotate access token                  |
 | `WS   /api/v1/ws/updates?token=…` | Real-time event stream               |
 
-A full endpoint inventory is in [.claude/PROJECT_CONTEXT.md §3](.claude/PROJECT_CONTEXT.md#3-apis--endpoints).
+A full module + endpoint inventory is in [MEMORY.md §3](MEMORY.md).
 
 ---
 

@@ -5,8 +5,16 @@ import pytest
 from sqlalchemy import select, update
 
 from app.database.session import db_manager
+from app.jobs.archive import dispatch_archival
 from app.models import Activity, Customer, Task
-from app.services.archival import ArchivalService
+
+
+async def _run_archival(retention_days: int):
+    """Run the real cross-org archival dispatch — the same entry point the CLI
+    (`python -m app.jobs.archive`) and `POST /cron/archive` use, so these tests
+    cover the per-org loop and not just the raw delete statements."""
+    async with db_manager.session_factory() as session:
+        return await dispatch_archival(session, retention_days=retention_days)
 
 
 async def _create_customer(client, headers, *, company_name: str) -> str:
@@ -75,7 +83,7 @@ async def test_archival_hard_deletes_only_expired_rows(client, auth_headers):
 
     await _backdate_deleted_at(Customer, old_customer_id, datetime.now(UTC) - timedelta(days=120))
 
-    report = await ArchivalService().purge_expired(retention_days=90)
+    report = await _run_archival(90)
     assert report.deleted["customers"] == 1
     assert report.skipped_customers == 0
 
@@ -99,6 +107,7 @@ async def test_archival_skips_customers_with_live_children(client, auth_headers)
             "industry": "education",
             "title": "Live lead",
             "contact_name": "Live Lead Contact",
+            "contact_phone": "+919900300001",
             "value": "100",
             "probability": 10,
             "expected_close_date": (datetime.now(UTC) + timedelta(days=7)).date().isoformat(),
@@ -109,7 +118,7 @@ async def test_archival_skips_customers_with_live_children(client, auth_headers)
     assert (await client.delete(f"/api/v1/customers/{customer_id}", headers=auth_headers)).status_code == 200
     await _backdate_deleted_at(Customer, customer_id, datetime.now(UTC) - timedelta(days=120))
 
-    report = await ArchivalService().purge_expired(retention_days=90)
+    report = await _run_archival(90)
     assert report.deleted.get("customers", 0) == 0
     assert report.skipped_customers == 1
 
@@ -139,7 +148,7 @@ async def test_archival_purges_tasks_and_activities(client, auth_headers):
     await _force_soft_delete(Activity, activity_id, backdate)
     await _backdate_deleted_at(Task, task_id, backdate)
 
-    report = await ArchivalService().purge_expired(retention_days=90)
+    report = await _run_archival(90)
     assert report.deleted["tasks"] == 1
     assert report.deleted["activities"] == 1
 
@@ -160,7 +169,7 @@ async def test_archival_zero_retention_is_a_noop(client, auth_headers):
     assert (await client.delete(f"/api/v1/customers/{customer_id}", headers=auth_headers)).status_code == 200
     await _backdate_deleted_at(Customer, customer_id, datetime.now(UTC) - timedelta(days=999))
 
-    report = await ArchivalService().purge_expired(retention_days=0)
+    report = await _run_archival(0)
     assert report.deleted == {}
 
     async with db_manager.session_factory() as session:
