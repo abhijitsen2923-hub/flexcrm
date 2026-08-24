@@ -21,7 +21,7 @@ import io
 import re
 from dataclasses import dataclass, field
 from decimal import Decimal, InvalidOperation
-from typing import Any
+from typing import Any, NamedTuple
 from uuid import UUID
 
 from sqlalchemy import select
@@ -51,6 +51,22 @@ from app.services.stage_transitions import StageTransitionService
 
 # Column definitions (headers, aliases, parse kinds) live in app.core.lead_csv,
 # keyed per business type, so the template / importer / exporter stay in sync.
+
+
+class StageRef(NamedTuple):
+    """Detached (code, name) snapshot of a PipelineStage row.
+
+    Deliberately NOT the ORM object. The import loop calls `session.rollback()`
+    when a row fails, and rollback EXPIRES every persistent instance. If the
+    stage lookup held ORM objects, the next row's `stage.code` / `stage.name`
+    read would fire a lazy refresh outside an await and raise MissingGreenlet
+    ("greenlet_spawn has not been called") — turning one bad row into a failure
+    for every remaining row in the file. Snapshotting to plain strings is the
+    same defence the Meta jobs use for the same reason
+    (see app/jobs/meta_lead_sync.py).
+    """
+    code: str
+    name: str
 
 
 @dataclass
@@ -201,7 +217,7 @@ class LeadImportService(ServiceBase):
         industry: LeadIndustry,
         initial_code: str,
         allowed_currencies: list[str],
-        stage_lookup: dict[str, PipelineStage],
+        stage_lookup: dict[str, StageRef],
     ) -> tuple[UUID, bool]:
         contact_name = (row.get("contact_name") or "").strip()
         if not contact_name:
@@ -350,11 +366,11 @@ class LeadImportService(ServiceBase):
     def _resolve_stage(
         self,
         raw_value: str | None,
-        stage_lookup: dict[str, PipelineStage],
+        stage_lookup: dict[str, StageRef],
         industry: LeadIndustry,
         *,
         default: str,
-    ) -> PipelineStage:
+    ) -> StageRef:
         if not raw_value:
             stage = stage_lookup.get(default)
             assert stage is not None, "Default stage missing from pipeline_stages — seed broken."
@@ -372,13 +388,15 @@ class LeadImportService(ServiceBase):
             f"Use one of: {', '.join(sorted(s.name for s in stage_lookup.values()))}."
         )
 
-    async def _stage_lookup_for_industry(self, industry: LeadIndustry) -> dict[str, PipelineStage]:
+    async def _stage_lookup_for_industry(self, industry: LeadIndustry) -> dict[str, StageRef]:
         rows = (
             await self.session.execute(
                 select(PipelineStage).where(PipelineStage.industry == industry)
             )
         ).scalars().all()
-        return {row.code: row for row in rows}
+        # Snapshot to StageRef immediately — this lookup outlives the per-row
+        # rollbacks below, and ORM instances do not survive them. See StageRef.
+        return {row.code: StageRef(row.code, row.name) for row in rows}
 
     async def _load_org_or_default_industry(
         self, fallback: LeadIndustry | None

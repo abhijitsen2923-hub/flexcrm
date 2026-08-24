@@ -127,6 +127,31 @@ STAGE_MANAGER_ROLES: frozenset[UserRole] = frozenset({
     UserRole.ops_manager,     # travel
 })
 
+
+# Roles the HR scorecard scores — anyone who can own a lead/deal and therefore
+# accrues revenue, collections, conversion and activity metrics.
+#
+# Same trap as STAGE_MANAGER_ROLES above: this list used to be the legacy
+# {sales, manager, admin} set, which no assignable user has had since the Phase 8
+# remap (migration 20260522_0010) — so the nightly job scored nobody. These are
+# the real post-Phase-8 equivalents across all three verticals.
+#
+# Deliberately excluded: receptionist (intake-only, never owns a closing),
+# support / analyst / fee_admin / accounts / visa_coordinator (non-selling),
+# broker + customer (external portals), and custom (org-defined, so its
+# permissions — and whether it sells at all — vary per tenant).
+SCORECARD_ROLES: frozenset[UserRole] = frozenset({
+    UserRole.owner,            # cross-vertical
+    UserRole.sales_manager,    # real estate
+    UserRole.sales_executive,
+    UserRole.telecaller,
+    UserRole.crm_team,
+    UserRole.academic_admin,   # education
+    UserRole.counselor,
+    UserRole.ops_manager,      # travel
+    UserRole.travel_agent,
+})
+
 # Which lead stage codes each RESTRICTED role may move a lead TO. Roles not listed
 # here — owner, sales_manager (managers), and the education/travel roles — are
 # unrestricted. Restricted roles are all real-estate-only, so these RE stage codes

@@ -13,6 +13,7 @@ whether a tenant schema is active.
 Public API
 ----------
 set_tenant_schema(session, schema_name)   — async; sets schema routing
+clear_tenant_schema(session)              — removes schema routing (public-only queries)
 get_schema(session)                       — returns active schema name or None
 bypass(session)                           — context manager; disables bypass flag
 set_scope(session, org_id)               — compat stub; stores org_id in session.info
@@ -54,6 +55,21 @@ async def set_tenant_schema(session: AsyncSession, schema_name: str) -> None:
         )
     )
     session.info["schema_name"] = schema_name
+
+
+def clear_tenant_schema(session: AsyncSession) -> None:
+    """Stop routing this session's tenant-model queries at any org's schema.
+
+    `set_scope(session, None)` only clears the stored org id — it does NOT undo
+    routing, because routing is driven by session.info["schema_name"] (see the
+    listeners in register_listeners). A cross-org job that finishes its loop
+    without calling this leaves the session pinned to whichever org it happened
+    to visit last, so any follow-up query silently reads or writes that tenant.
+
+    Needed by jobs that touch PUBLIC tables after a per-org loop — e.g. the
+    archival job's `users` pass (app/jobs/archive.py).
+    """
+    session.info.pop("schema_name", None)
 
 
 def get_schema(session: AsyncSession) -> str | None:

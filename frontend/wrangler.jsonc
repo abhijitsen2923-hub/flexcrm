@@ -16,7 +16,8 @@
   },
   // Crons (UTC):
   //  - 30 3 * * *   : daily 03:30 UTC (~09:00 IST) — reminders + follow-ups +
-  //                   Meta token refresh + a Meta lead-sync poll.
+  //                   Meta token refresh + a Meta lead-sync poll + the nightly
+  //                   maintenance jobs (customer health, HR scorecards, archival).
   //  - 30 15 * * *  : daily 15:30 UTC (~21:00 IST) — a second Meta lead-sync poll.
   // => Meta lead-sync runs TWICE daily (backstop; OAuth pages also get real-time
   //    webhooks), token refresh + reminders run ONCE daily. The scheduled() handler
@@ -34,7 +35,10 @@
     "REMINDERS_URL": "https://flexcrm-backend-539170436218.asia-south1.run.app/api/v1/cron/registration-reminders",
     "FOLLOWUP_URL": "https://flexcrm-backend-539170436218.asia-south1.run.app/api/v1/cron/followup-reminders",
     "META_SYNC_URL": "https://flexcrm-backend-539170436218.asia-south1.run.app/api/v1/cron/meta-lead-sync",
-    "META_TOKEN_REFRESH_URL": "https://flexcrm-backend-539170436218.asia-south1.run.app/api/v1/cron/meta-token-refresh"
+    "META_TOKEN_REFRESH_URL": "https://flexcrm-backend-539170436218.asia-south1.run.app/api/v1/cron/meta-token-refresh",
+    "CUSTOMER_HEALTH_URL": "https://flexcrm-backend-539170436218.asia-south1.run.app/api/v1/cron/customer-health",
+    "SCORECARD_URL": "https://flexcrm-backend-539170436218.asia-south1.run.app/api/v1/cron/scorecard-compute",
+    "ARCHIVE_URL": "https://flexcrm-backend-539170436218.asia-south1.run.app/api/v1/cron/archive"
   }
   // NOTE: CRON_SECRET is a Worker *secret*, not a var — set it with
   // `npx wrangler secret put CRON_SECRET` (must match the backend CRON_SECRET).

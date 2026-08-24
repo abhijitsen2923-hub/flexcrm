@@ -11,6 +11,8 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from starlette.websockets import WebSocketDisconnect
 
+from tests.conftest import COLLAPSED_SCHEMA_MAP, apply_collapsed_schema_patches
+
 
 @pytest.fixture
 def ws_client(tmp_path, monkeypatch):
@@ -30,12 +32,21 @@ def ws_client(tmp_path, monkeypatch):
 
     get_settings.cache_clear()
 
-    # Materialize the schema synchronously so the async app shares the same db file.
-    from app import models  # noqa: F401  registers ORM models against the metadata
-    from app.database.base import Base
+    # Same schema-collapse treatment as the async fixture in conftest — this
+    # fixture builds its own engines, so it needs the patches applied here too.
+    # Without them, register() calls the real provision_tenant (Postgres-only
+    # DDL) and the WS handshake's permission lookup hits tenant tables that the
+    # literal "tenant" schema can't provide.
+    apply_collapsed_schema_patches(monkeypatch)
 
-    sync_engine = create_engine(sync_url)
+    from app.database.base import Base, TenantBase
+
+    # Materialize the schema synchronously so the async app shares the same db
+    # file. Base first, so TenantBase's public.* FK stubs collapse onto the real
+    # tables and create_all's checkfirst skips them.
+    sync_engine = create_engine(sync_url, execution_options={"schema_translate_map": COLLAPSED_SCHEMA_MAP})
     Base.metadata.create_all(sync_engine)
+    TenantBase.metadata.create_all(sync_engine)
     sync_engine.dispose()
 
     from app.database.session import db_manager
@@ -47,7 +58,8 @@ def ws_client(tmp_path, monkeypatch):
     with TestClient(application) as client:
         yield client
 
-    teardown_engine = create_engine(sync_url)
+    teardown_engine = create_engine(sync_url, execution_options={"schema_translate_map": COLLAPSED_SCHEMA_MAP})
+    TenantBase.metadata.drop_all(teardown_engine)
     Base.metadata.drop_all(teardown_engine)
     teardown_engine.dispose()
     get_settings.cache_clear()

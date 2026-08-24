@@ -110,8 +110,19 @@ caveat).
 ### Jobs & crons — `app/jobs/*` (each iterates all orgs, per-org schema switch + commit, isolates failures):
 `followup_reminders` (daily), `registration_reminders` (daily), `meta_lead_sync` (poll), `meta_token_refresh`
 (daily), `scorecard_compute` (nightly), `customer_health` (nightly), `archive` (retention purge).
-HTTP crons exposed in `cron.py` (`X-Cron-Key` == `settings.cron_secret`): `/cron/registration-reminders`,
-`/followup-reminders`, `/meta-lead-sync`, `/meta-token-refresh`. (scorecard/health/archive are CLI-only.)
+All seven are exposed as HTTP crons in `cron.py` (`X-Cron-Key` == `settings.cron_secret`) and wired into the
+Worker's `scheduled` handler.
+
+> ⚠️ **Corrected 2026-08-22.** The "each iterates all orgs" claim above was NOT true for three of them.
+> `archive` had no org loop at all, and `customer_health` + `scorecard_compute` called only `set_scope()` —
+> a documented no-op stub — without `set_tenant_schema()`, so every per-tenant query targeted the literal
+> `tenant` schema. All three were CLI-only, so nothing ever invoked them and nothing failed loudly: retention
+> purging, customer-health/churn evaluation and HR scorecards had never run in production. `scorecard_compute`
+> additionally queried the legacy `{sales, manager, admin}` roles (unassignable since migration `0010`) via
+> `list_active_sales_users`, which also had **no `organization_id` filter** — `users` is public and shared, so
+> it returned every tenant's users. Fixed: all three now follow the `followup_reminders` pattern, the role set
+> moved to `SCORECARD_ROLES` in `core/permissions.py`, and `clear_tenant_schema()` was added to `core/tenancy.py`
+> so archival's public `users` pass runs unrouted after the org loop.
 
 ---
 
@@ -238,8 +249,37 @@ built + deployed + verified, **blocked only on Meta App Review** for `leads_retr
 5. **Optional anytime:** an admin-only "inject test lead" via `LeadIngestService` to demo the full flow
    (triage → notify → realtime) before Meta approves. *(Not built.)*
 
-**Other known deferred items:** realtime multi-worker (needs Redis pub/sub); a stale backend test suite
-(`test_lead_import.py` assertions contradict current code); WhatsApp conversational inbox (scoped, deferred).
+**Backend test suite (repaired 2026-08-22).** Previously described here as merely "stale". It was in fact
+structurally broken and had not run since the multi-tenancy migration (`20260522_0006`): `conftest.py` only
+ever called `Base.metadata.create_all`, and 36 of 41 models are `TenantBase` — whose separate
+`MetaData(schema="tenant")` was never passed to `create_all` anywhere in the repo — so no tenant table existed
+in the test DB. The `auth_headers` fixture also asserted `register → 201` while `register` calls
+`provision_tenant()`, which issues Postgres-only DDL (`to_regclass` / `CREATE SCHEMA`) against SQLite.
+Baseline was **18 passed / 12 failed / 44 errors**; now **77 passed / 4 skipped**.
+
+The harness **collapses `tenant` and `public` into one schema** (SQLite has no `CREATE SCHEMA`, and
+cross-database FKs are unsupported while every tenant table has FKs into `public`). So it covers business
+logic, *not* tenant isolation — 4 isolation tests are skipped with that reason and need real Postgres. See the
+header comment in `backend/tests/conftest.py`. `backend/pytest.ini` was added so the documented bare `pytest`
+command works (previously only `python -m pytest` could import `app`).
+
+**Two production bugs the repaired suite immediately exposed:**
+- `Task` had no `assigned_to` relationship while `TaskRepository.default_options` did
+  `selectinload(Task.assigned_to)` → `AttributeError` on **every** task list/get/create/update. The whole
+  Tasks module was 500ing. Same bug class as the one already fixed for `StageTransition.performed_by`.
+- `LeadImportService` held `PipelineStage` **ORM objects** in its stage lookup across the row loop. A failing
+  row calls `session.rollback()`, which expires them, so the *next* row raised `MissingGreenlet` — meaning any
+  CSV import with a mid-file failure aborted every subsequent row, contradicting the documented
+  partial-success behaviour. Now snapshotted to a detached `StageRef`.
+
+**Other known deferred items:** realtime multi-worker (needs Redis pub/sub); WhatsApp conversational inbox
+(scoped, deferred). **Open findings not yet fixed** (surfaced during the 2026-08-22 review, listed most severe
+first): cross-tenant lead assignment (`bulk_reassign` does a bare `UPDATE` with no reference check, and
+`UserRepository` has no org filter, so a lead can be assigned to another org's user); 429 responses carry no
+CORS headers because `CORSMiddleware` is added first and so runs innermost; rate limiting is effectively global
+behind Cloud Run since uvicorn starts without `--proxy-headers`; `EXPOSE_ERROR_DETAIL` and `DOCS_ENABLED`
+default `True` and are not covered by `_reject_insecure_production`; legacy `UserRole.admin` still grants all 24
+permissions; WebSocket auth ignores user status and org lifecycle.
 
 ---
 

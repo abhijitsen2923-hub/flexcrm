@@ -6,6 +6,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database.base import TenantBase
 from app.database.enums import TaskPriority, TaskStatus
+from app.models.user import User  # direct ref to avoid cross-registry string lookup
 from app.models.base import TenantAuditMixin, TenantSoftDeleteMixin, TimestampMixin, UUIDPrimaryKeyMixin
 
 
@@ -35,5 +36,19 @@ class Task(TenantBase, UUIDPrimaryKeyMixin, TimestampMixin, TenantAuditMixin, Te
         Enum(TaskStatus, name="task_status_enum"),
         nullable=False,
         default=TaskStatus.pending,
+    )
+
+    # Cross-schema relationship to public.users. The FK string "public.users.id"
+    # registers a stub table in TenantBase.metadata distinct from the real User
+    # mapper in Base.metadata, so SQLAlchemy can't infer the join — specify it
+    # explicitly (same pattern as Lead.assigned_to / StageTransition.performed_by).
+    # viewonly: the assignee is written via assigned_to_id. Without this
+    # relationship the repository's selectinload(Task.assigned_to) raises
+    # AttributeError and every list/get/create/update of a task 500s.
+    assigned_to = relationship(
+        User,
+        primaryjoin=lambda: Task.assigned_to_id == User.id,
+        foreign_keys=lambda: [Task.assigned_to_id],
+        viewonly=True,
     )
 

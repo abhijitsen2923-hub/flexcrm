@@ -15,10 +15,10 @@ from uuid import UUID
 
 from sqlalchemy import func, select
 
+from app.core.permissions import SCORECARD_ROLES
 from app.database.enums import (
     CustomerLifecycleStage,
     InvoiceStatus,
-    UserRole,
     UserStatus,
 )
 from app.finance.models import Invoice, Payment, SalesOrder
@@ -284,12 +284,21 @@ class ScorecardService(ServiceBase):
         return {k: int(merged[k] / total * 100) for k in DEFAULT_SCORE_WEIGHTS}
 
 
-async def list_active_sales_users(session) -> list[User]:
+async def list_active_sales_users(session, organization_id: UUID) -> list[User]:
+    """Active sales-flavoured users in ONE org.
+
+    `organization_id` is mandatory, not optional. `users` lives in the PUBLIC
+    schema and is shared by every tenant, so an unfiltered query returns users
+    from all orgs — the nightly scorecard job would then write a
+    PerformanceSnapshot for every org's users into every org's schema. Schema
+    routing does not save us here precisely because this table is not routed.
+    """
     rows = (
         await session.execute(
             select(User).where(
+                User.organization_id == organization_id,
                 User.status == UserStatus.active,
-                User.role.in_([UserRole.sales, UserRole.manager, UserRole.admin]),
+                User.role.in_(tuple(SCORECARD_ROLES)),
                 User.is_deleted.is_(False),
             )
         )

@@ -12,10 +12,13 @@ from fastapi import APIRouter, Depends, Header, HTTPException, status
 
 from app.core.config import get_settings
 from app.database.session import db_manager
+from app.jobs.archive import dispatch_archival
+from app.jobs.customer_health import dispatch_customer_health
 from app.jobs.followup_reminders import dispatch_followup_reminders
 from app.jobs.meta_lead_sync import dispatch_meta_lead_sync
 from app.jobs.meta_token_refresh import dispatch_meta_token_refresh
 from app.jobs.registration_reminders import dispatch_registration_reminders
+from app.jobs.scorecard_compute import dispatch_scorecard_compute
 
 router = APIRouter()
 
@@ -64,3 +67,37 @@ async def trigger_meta_token_refresh(_: None = Depends(require_cron_secret)):
     async with db_manager.session_factory() as session:
         counts = await dispatch_meta_token_refresh(session)
     return counts
+
+
+@router.post("/customer-health")
+async def trigger_customer_health(_: None = Depends(require_cron_secret)):
+    """Cross-org: re-evaluate every customer's lifecycle stage and LTV. Fresh session —
+    dispatch switches org scope itself and commits per org. Meant to run nightly."""
+    async with db_manager.session_factory() as session:
+        counts = await dispatch_customer_health(session)
+    return counts
+
+
+@router.post("/scorecard-compute")
+async def trigger_scorecard_compute(_: None = Depends(require_cron_secret)):
+    """Cross-org: write today's HR performance snapshot per active sales user.
+    Idempotent per (user, date). Fresh session — dispatch switches org scope itself
+    and commits per org. Meant to run nightly."""
+    async with db_manager.session_factory() as session:
+        counts = await dispatch_scorecard_compute(session)
+    return counts
+
+
+@router.post("/archive")
+async def trigger_archive(_: None = Depends(require_cron_secret)):
+    """Cross-org: hard-delete rows soft-deleted beyond ARCHIVAL_RETENTION_DAYS.
+    Fresh session — dispatch switches org scope itself, commits per org, then purges
+    the shared public `users` table once with routing cleared. Meant to run nightly."""
+    async with db_manager.session_factory() as session:
+        report = await dispatch_archival(session)
+    return {
+        "cutoff": report.cutoff.isoformat(),
+        "orgs": report.orgs,
+        "deleted": report.deleted,
+        "skipped_customers": report.skipped_customers,
+    }
