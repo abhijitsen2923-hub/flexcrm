@@ -5,6 +5,9 @@ from app.models.deal import Deal
 from app.models.delivery_log import DeliveryLog
 from app.models.lead import Lead
 from app.models.lead_document import LeadDocument
+from app.models.lead_source_connection import LeadSourceConnection
+from app.models.lead_source_delivery import LeadSourceDelivery
+from app.models.lead_source_route import LeadSourceRoute
 from app.models.meta_connection import MetaConnection
 from app.models.meta_page_route import MetaPageRoute
 from app.models.notification import Notification
@@ -28,6 +31,9 @@ __all__ = [
     "DeliveryLog",
     "Lead",
     "LeadDocument",
+    "LeadSourceConnection",
+    "LeadSourceDelivery",
+    "LeadSourceRoute",
     "MetaConnection",
     "MetaPageRoute",
     "Notification",
