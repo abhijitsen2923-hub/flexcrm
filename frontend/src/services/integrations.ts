@@ -88,3 +88,41 @@ export const integrationsService = {
     return data;
   },
 };
+
+// --- 99acres (push-portal) lead ingestion ---
+export interface LeadSourceConnection {
+  id: string;
+  provider: string;
+  label: string | null;
+  external_account_id: string | null;
+  default_industry: string;
+  status: string; // ok | error
+  status_detail: string | null;
+  last_lead_at: string | null;
+  is_active: boolean;
+  created_at: string;
+}
+
+// Returned once on connect: the per-account webhook URL + token are shown a single time
+// (only the token's hash is stored server-side).
+export interface LeadSourceConnectResult {
+  connection: LeadSourceConnection;
+  webhook_url: string;
+  token: string;
+}
+
+export const leadSourceService = {
+  async list99acres(): Promise<LeadSourceConnection[]> {
+    const { data } = await apiClient.get<LeadSourceConnection[]>("/integrations/99acres");
+    return data;
+  },
+  async connect99acres(label: string | null): Promise<LeadSourceConnectResult> {
+    const { data } = await apiClient.post<LeadSourceConnectResult>("/integrations/99acres/connect", {
+      label,
+    });
+    return data;
+  },
+  async disconnect99acres(id: string): Promise<void> {
+    await apiClient.delete(`/integrations/99acres/${id}`);
+  },
+};

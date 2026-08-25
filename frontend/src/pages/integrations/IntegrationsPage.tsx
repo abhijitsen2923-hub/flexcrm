@@ -5,6 +5,9 @@ import { Badge, Button, LoadingBlock, Modal, TextField, useToast } from "../../c
 import { useOrgModules } from "../../context/OrgContext";
 import {
   integrationsService,
+  leadSourceService,
+  type LeadSourceConnection,
+  type LeadSourceConnectResult,
   type MetaConnection,
   type MetaOAuthPage,
   type MetaValidateResult,
@@ -67,6 +70,15 @@ export default function IntegrationsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const oauthHandledRef = useRef(false);
 
+  // 99acres (push-portal) connections.
+  const [leadSources, setLeadSources] = useState<LeadSourceConnection[]>([]);
+  const [lsLoading, setLsLoading] = useState(true);
+  const [lsModalOpen, setLsModalOpen] = useState(false);
+  const [lsLabel, setLsLabel] = useState("");
+  const [lsBusy, setLsBusy] = useState(false);
+  const [lsResult, setLsResult] = useState<LeadSourceConnectResult | null>(null);
+  const [lsCopied, setLsCopied] = useState(false);
+
   async function refresh() {
     setLoading(true);
     try {
@@ -79,6 +91,7 @@ export default function IntegrationsPage() {
   }
   useEffect(() => {
     void refresh();
+    void refreshLeadSources();
   }, []);
 
   // Handle the return leg of the OAuth round-trip: Meta's callback redirects the browser to
@@ -199,6 +212,65 @@ export default function IntegrationsPage() {
       await integrationsService.disconnectMeta(conn.id);
       toast.success("Disconnected", conn.page_name ?? conn.page_id);
       await refresh();
+    } catch (err) {
+      toast.error("Disconnect failed", extractErrorMessage(err));
+    }
+  }
+
+  // --- 99acres ---
+  async function refreshLeadSources() {
+    setLsLoading(true);
+    try {
+      setLeadSources(await leadSourceService.list99acres());
+    } catch {
+      /* leave the list as-is */
+    } finally {
+      setLsLoading(false);
+    }
+  }
+
+  function openConnect99acres() {
+    setLsLabel("");
+    setLsResult(null);
+    setLsCopied(false);
+    setLsModalOpen(true);
+  }
+
+  function closeConnect99acres() {
+    if (lsBusy) return;
+    setLsModalOpen(false);
+    setLsResult(null);
+  }
+
+  async function submitConnect99acres() {
+    setLsBusy(true);
+    try {
+      const result = await leadSourceService.connect99acres(lsLabel.trim() || null);
+      setLsResult(result); // reveal the one-time URL + token
+      await refreshLeadSources();
+    } catch (err) {
+      toast.error("Could not create connection", extractErrorMessage(err));
+    } finally {
+      setLsBusy(false);
+    }
+  }
+
+  async function copyWebhookUrl() {
+    if (!lsResult) return;
+    try {
+      await navigator.clipboard.writeText(lsResult.webhook_url);
+      setLsCopied(true);
+      toast.success("Copied", "Webhook URL copied to clipboard.");
+    } catch {
+      toast.error("Copy failed", "Select the URL and copy it manually.");
+    }
+  }
+
+  async function disconnect99acres(conn: LeadSourceConnection) {
+    try {
+      await leadSourceService.disconnect99acres(conn.id);
+      toast.success("Disconnected", conn.label ?? conn.external_account_id ?? "99acres connection");
+      await refreshLeadSources();
     } catch (err) {
       toast.error("Disconnect failed", extractErrorMessage(err));
     }
@@ -344,6 +416,46 @@ export default function IntegrationsPage() {
         </div>
       </details>
 
+      {/* 99acres Lead Ads (push portal) */}
+      <div className="card" style={{ padding: "1rem 1.25rem" }}>
+        <div className="row row--between" style={{ alignItems: "center", marginBottom: "0.35rem" }}>
+          <strong>99acres Lead Ads</strong>
+          <Button size="sm" variant="ghost" onClick={() => void refreshLeadSources()}>Refresh</Button>
+        </div>
+        <p className="muted text-sm">
+          Generate a private webhook URL, hand it to your 99acres account manager, and enquiries push
+          straight into your pipeline — no login required, tagged <strong>99acres</strong>.
+        </p>
+        {lsLoading ? (
+          <LoadingBlock />
+        ) : leadSources.length > 0 ? (
+          <div className="stack" style={{ gap: "0.5rem", marginTop: "0.5rem" }}>
+            {leadSources.map((c) => (
+              <div key={c.id} className="row row--between" style={{ alignItems: "center", padding: "0.5rem 0", borderTop: "1px solid var(--color-border)" }}>
+                <div className="stack" style={{ gap: "0.15rem" }}>
+                  <strong>{c.label ?? c.external_account_id ?? "99acres connection"}</strong>
+                  <span className="text-xs muted">
+                    {c.external_account_id ? `Account ${c.external_account_id}` : "Account not identified yet"}
+                    {" · "}
+                    {c.last_lead_at ? `Last lead ${formatDateTime(c.last_lead_at)}` : "No leads yet"}
+                    {c.status_detail ? ` · ${c.status_detail}` : ""}
+                  </span>
+                </div>
+                <div className="row" style={{ gap: "0.5rem", alignItems: "center" }}>
+                  <Badge tone={STATUS_TONE[c.status] ?? "neutral"}>{STATUS_LABEL[c.status] ?? c.status}</Badge>
+                  <Button size="sm" variant="ghost" onClick={() => void disconnect99acres(c)}>Disconnect</Button>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="muted text-sm" style={{ marginTop: "0.35rem" }}>No 99acres connections yet.</p>
+        )}
+        <div className="row" style={{ marginTop: "0.75rem" }}>
+          <Button onClick={openConnect99acres}>Connect 99acres</Button>
+        </div>
+      </div>
+
       {/* OAuth Page picker */}
       <Modal
         open={pickerOpen}
@@ -390,6 +502,66 @@ export default function IntegrationsPage() {
                 </span>
               </label>
             ))}
+          </div>
+        )}
+      </Modal>
+
+      {/* 99acres connect modal */}
+      <Modal
+        open={lsModalOpen}
+        title={lsResult ? "Your 99acres webhook URL" : "Connect 99acres"}
+        onClose={closeConnect99acres}
+        footer={
+          lsResult ? (
+            <Button onClick={closeConnect99acres}>Done</Button>
+          ) : (
+            <>
+              <Button variant="ghost" disabled={lsBusy} onClick={closeConnect99acres}>Cancel</Button>
+              <Button loading={lsBusy} disabled={lsBusy} onClick={() => void submitConnect99acres()}>
+                Generate URL
+              </Button>
+            </>
+          )
+        }
+      >
+        {lsResult ? (
+          <div className="stack" style={{ gap: "0.6rem" }}>
+            <div className="error-banner text-sm">
+              ⚠️ Copy this now — it&apos;s shown only once. It&apos;s both the address and the credential,
+              so keep it private.
+            </div>
+            <label className="stack" style={{ gap: "0.25rem" }}>
+              <span className="text-xs muted">Webhook URL — give this to your 99acres account manager</span>
+              <input
+                readOnly
+                value={lsResult.webhook_url}
+                onFocus={(e) => e.currentTarget.select()}
+                style={{ width: "100%", fontFamily: "monospace", fontSize: "0.78rem", padding: "0.5rem" }}
+              />
+            </label>
+            <div className="row">
+              <Button size="sm" onClick={() => void copyWebhookUrl()}>
+                {lsCopied ? "Copied ✓" : "Copy URL"}
+              </Button>
+            </div>
+            <p className="text-xs muted">
+              Set this as the lead callback on that 99acres account; enquiries then arrive automatically,
+              tagged 99acres. To revoke it, disconnect the connection — you&apos;ll generate a fresh URL.
+            </p>
+          </div>
+        ) : (
+          <div className="stack" style={{ gap: "0.5rem" }}>
+            <p className="text-sm muted">
+              We&apos;ll generate a unique, private webhook URL for this 99acres account. The URL is the
+              only thing 99acres needs — no key or login.
+            </p>
+            <TextField
+              id="ls-label"
+              label="Label (optional)"
+              value={lsLabel}
+              onChange={(e) => setLsLabel(e.target.value)}
+              placeholder="e.g. Vriddhi Landmart – 99acres"
+            />
           </div>
         )}
       </Modal>
