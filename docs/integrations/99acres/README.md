@@ -1,7 +1,8 @@
 # 99acres integration — internal design
 
-**Status:** design agreed, build not started. Blocked on 99acres' answers to
-`99acres-information-request.md`.
+**Status:** design + external contract FINAL (`flexcrm-lead-api.md` v1.0, ready to send). Build not
+started. A few operational answers still wanted from 99acres (`99acres-information-request.md`) but none
+block sending the contract or building.
 
 | Document | Audience |
 |---|---|
@@ -13,11 +14,25 @@
 
 ## Confirmed facts
 
-- **Direction:** 99acres pushes to us. They asked for *our* API details, which settles it.
-- **Account model:** every FlexCRM customer holds their **own** 99acres account. There is no
-  master partner account, so this is per-tenant credentials — unlike Meta, where one platform app
-  serves every tenant via OAuth.
-- **Their docs:** none yet. This design deliberately avoids assuming anything about their API.
+- **Direction:** 99acres pushes to us. They asked for *our* API details, which settles it — and later
+  told us to define auth + payload ourselves ("share the complete api details, url and sample payload").
+- **Account model:** every FlexCRM customer holds their **own** 99acres account. There is no master
+  partner account, so this is per-tenant credentials — unlike Meta, where one platform app serves every
+  tenant via OAuth.
+- **Auth (decided):** a secret, high-entropy per-account **token in the URL path** is both the routing
+  key and the credential. 99acres configures a single value (the URL); no header, no signature.
+  TLS-only, token scrubbed from logs, rotatable. Distinct URL per tenant via the public route table.
+- **Payload (decided):** we accept 99acres' **native export field names** as-is (`Name`, `ContactNo`,
+  `EmailId`, `InterestedIn`, `City`, `ResCom`, `Bhk`, `Query`, `ProductCode`, `ReceivedDate`, `Username`,
+  `Type`, `LeadScore`, `ResponseType`, …) — they JSON-encode an export row and POST it; we parse. Unknown
+  fields → notes. Verified against a real export sample (account "Vriddhi Landmart", project "Vriddhica
+  Heritage") — the sample carries real lead PII, so it is **not** committed to the repo.
+- **Dedup (decided):** `lead_id` if present, **else** `sha256(normalised ContactNo + ReceivedDate +
+  ProductCode)`. The sample has **no per-lead id** (`Sno` is an export row counter; `ProductCode` is the
+  shared listing), so the fingerprint fallback is load-bearing; ask 99acres whether their *push* carries
+  a real id (their dashboard export does not).
+- **Their API docs:** none. Design deliberately avoids assuming anything about their API beyond the
+  export sample.
 
 ---
 
@@ -138,7 +153,7 @@ Mirrors how the Meta integration shipped (~10 small, independently reviewable co
 | **P0** | Generalise the seams: `meta_page_routes` → `lead_source_routes` keyed on `(provider, external_account_id)`; add `"99acres": "99acres Lead"` to `_PROVIDER_FALLBACK_NAME`; alias `META_ENC_KEYS` → `INTEGRATION_ENC_KEYS`. No behaviour change; the Meta path must stay green. |
 | **P1** | Data layer: public migration (`down_revision = "20260817_0111"`) + tenant migration (`down_revision = "20260814_t030"`), models, registration in `app/models/__init__.py`. |
 | **P2** | Inbound endpoint: auth verification, persist-then-ACK, tenant resolution, per-delivery error isolation, module gate, rate-limit exemption. |
-| **P3** | Mapper + ingest. Emit the literal `"99acres"` as `source` so it matches `SOURCE_LABELS` and the existing list filter — the Meta mapper does the same rather than calling `normalize_source`. Unmapped fields append to `notes` so nothing is lost. |
+| **P3** | Mapper + ingest. Emit the literal `"99acres"` as `source` so it matches `SOURCE_LABELS` and the existing list filter — the Meta mapper does the same rather than calling `normalize_source`. Unmapped fields append to `notes` so nothing is lost. **Parsing rules (from the real export):** normalise `ContactNo` `91-<10d>` → `+91<10d>` (strip the hyphen/prefix, re-add `+91`); split `InterestedIn` on `\|` into Project / Locality / City (Project → `interest`, Locality+City → `preferred_location`); map `ResCom` `R`→residential / `C`→commercial; parse `ReceivedDate` as `%m/%d/%Y %I:%M %p`; `external_id` = `lead_id` else `sha256(normalised_phone + ReceivedDate + ProductCode)`. |
 | **P4** | Reconcile cron draining unprocessed deliveries. Rides the **existing** `30 3` trigger — a third cron wakes Neon more often, which is why the old keep-alive was removed. |
 | **P5** | Tenant UI. `IntegrationsPage.tsx` is currently a single Meta-specific component; add a 99acres card and lift the shared status chrome. |
 | **P6** | Module flag `portal_99acres` — prefixed to avoid a leading-digit key and to namespace future portals. |
