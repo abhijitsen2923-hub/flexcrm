@@ -31,6 +31,8 @@ export const FEATURES: Record<ModuleKey, boolean> = {
   // per-tenant + per-platform choice is the admin toggle, not the build flag.
   meta_facebook: flag(import.meta.env.VITE_FEATURE_META_LEADS_ENABLED),
   meta_instagram: flag(import.meta.env.VITE_FEATURE_META_LEADS_ENABLED),
+  // 99acres inbound leads (push webhook) — its own build flag.
+  portal_99acres: flag(import.meta.env.VITE_FEATURE_99ACRES_ENABLED),
 };
 
 export type FeatureKey = ModuleKey;
@@ -43,7 +45,7 @@ export function mergeModules(orgModules: Record<ModuleKey, boolean>): Record<Mod
   const keys: ModuleKey[] = [
     "deals", "tasks", "activities", "finance", "hr",
     "inventory", "bookings", "site_visits", "projects",
-    "meta_facebook", "meta_instagram",
+    "meta_facebook", "meta_instagram", "portal_99acres",
   ];
   return Object.fromEntries(
     keys.map((k) => [k, FEATURES[k] && (orgModules[k] ?? false)])

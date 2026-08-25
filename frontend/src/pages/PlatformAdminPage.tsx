@@ -38,6 +38,7 @@ const MODULE_LABELS: Record<ModuleKey, string> = {
   projects: "Projects",
   meta_facebook: "Facebook Lead Ads",
   meta_instagram: "Instagram Lead Ads",
+  portal_99acres: "99acres Lead Ads",
 };
 
 const CORE_MODULES: ModuleKey[] = ["deals", "tasks", "activities"];
@@ -45,9 +46,9 @@ const OPS_MODULES: ModuleKey[] = ["finance", "hr"];
 const RE_MODULES: ModuleKey[] = ["inventory", "bookings", "site_visits", "projects"];
 // Lead-source / messaging integrations. Facebook & Instagram Lead Ads are
 // independent per-tenant toggles (both share one Meta connection, gated by
-// platform). RE-only today; drop the RE gate when a vertical-agnostic
-// integration is added.
-const INTEGRATIONS_MODULES: ModuleKey[] = ["meta_facebook", "meta_instagram"];
+// platform). 99acres is a separate push-webhook lead source. RE-only today;
+// drop the RE gate when a vertical-agnostic integration is added.
+const INTEGRATIONS_MODULES: ModuleKey[] = ["meta_facebook", "meta_instagram", "portal_99acres"];
 
 const INDUSTRY_LABEL: Record<Industry, string> = {
   education: "Education",
@@ -69,6 +70,7 @@ function defaultsForIndustry(industry: Industry): Record<ModuleKey, boolean> {
     projects: isRE,
     meta_facebook: false,
     meta_instagram: false,
+    portal_99acres: false,
   };
 }
 

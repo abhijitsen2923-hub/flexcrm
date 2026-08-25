@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 
 import { Badge, Button, LoadingBlock, Modal, TextField, useToast } from "../../components";
+import { mergeModules } from "../../config/features";
 import { useOrgModules } from "../../context/OrgContext";
 import {
   integrationsService,
@@ -46,6 +47,11 @@ const SETUP_STEPS = [
 export default function IntegrationsPage() {
   const toast = useToast();
   const orgModules = useOrgModules();
+  // Effective per-module access = build flag AND per-org toggle. Gate each integration's
+  // section so a 99acres-only org doesn't see Meta cards (and vice-versa).
+  const modules = mergeModules(orgModules);
+  const showMeta = modules.meta_facebook || modules.meta_instagram;
+  const show99acres = modules.portal_99acres;
   // FB & IG share one connection; the poll ingests only platforms enabled for
   // this workspace (per-tenant admin toggles). Show which are active.
   const activePlatforms = [
@@ -281,8 +287,8 @@ export default function IntegrationsPage() {
       <div>
         <h1>Integrations</h1>
         <p className="muted">
-          Connect <strong>Facebook &amp; Instagram Lead Ads</strong> — new lead-form submissions flow
-          into your pipeline as fresh enquiries, tagged by source.
+          Connect your <strong>lead sources</strong> — new enquiries flow into your pipeline as fresh
+          leads, tagged by source.
         </p>
         {activePlatforms.length > 0 ? (
           <p className="text-xs muted" style={{ marginTop: "0.35rem" }}>
@@ -292,6 +298,8 @@ export default function IntegrationsPage() {
         ) : null}
       </div>
 
+      {showMeta && (
+        <>
       {/* Existing connections */}
       <div className="card" style={{ padding: "1rem 1.25rem" }}>
         <div className="row row--between" style={{ alignItems: "center", marginBottom: "0.5rem" }}>
@@ -415,8 +423,11 @@ export default function IntegrationsPage() {
           </Button>
         </div>
       </details>
+        </>
+      )}
 
       {/* 99acres Lead Ads (push portal) */}
+      {show99acres && (
       <div className="card" style={{ padding: "1rem 1.25rem" }}>
         <div className="row row--between" style={{ alignItems: "center", marginBottom: "0.35rem" }}>
           <strong>99acres Lead Ads</strong>
@@ -455,6 +466,7 @@ export default function IntegrationsPage() {
           <Button onClick={openConnect99acres}>Connect 99acres</Button>
         </div>
       </div>
+      )}
 
       {/* OAuth Page picker */}
       <Modal

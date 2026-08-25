@@ -23,6 +23,7 @@ const ALL_OFF: Record<ModuleKey, boolean> = {
   projects: false,
   meta_facebook: false,
   meta_instagram: false,
+  portal_99acres: false,
 };
 
 interface OrgContextValue {

@@ -14,6 +14,7 @@ MODULE_KEYS = (
     "finance", "hr",                              # Business operations — any industry
     "inventory", "bookings", "site_visits", "projects",  # Real Estate vertical
     "meta_facebook", "meta_instagram",            # Integrations — Meta Lead Ads, per platform
+    "portal_99acres",                             # Integrations — 99acres inbound leads (push)
 )
 
 
