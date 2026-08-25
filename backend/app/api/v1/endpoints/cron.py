@@ -15,6 +15,7 @@ from app.database.session import db_manager
 from app.jobs.archive import dispatch_archival
 from app.jobs.customer_health import dispatch_customer_health
 from app.jobs.followup_reminders import dispatch_followup_reminders
+from app.jobs.lead_source_reconcile import dispatch_lead_source_reconcile
 from app.jobs.meta_lead_sync import dispatch_meta_lead_sync
 from app.jobs.meta_token_refresh import dispatch_meta_token_refresh
 from app.jobs.registration_reminders import dispatch_registration_reminders
@@ -66,6 +67,16 @@ async def trigger_meta_token_refresh(_: None = Depends(require_cron_secret)):
     connection. Meant to run daily."""
     async with db_manager.session_factory() as session:
         counts = await dispatch_meta_token_refresh(session)
+    return counts
+
+
+@router.post("/lead-source-reconcile")
+async def trigger_lead_source_reconcile(_: None = Depends(require_cron_secret)):
+    """Cross-org: replay any 99acres deliveries the persist-then-ACK background step didn't finish
+    (status received/failed). Idempotent — dedupes on external_id. Fresh session; dispatch switches
+    org scope itself and commits per delivery. Backstop for the push-only ingest; runs 2x/day."""
+    async with db_manager.session_factory() as session:
+        counts = await dispatch_lead_source_reconcile(session)
     return counts
 
 
