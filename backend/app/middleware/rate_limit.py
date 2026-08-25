@@ -10,7 +10,14 @@ from app.core.logging import request_id_context
 class RateLimitMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         settings = get_settings()
-        if request.url.path in {"/health", "/docs", "/openapi.json", "/redoc"}:
+        path = request.url.path
+        # Inbound webhooks (Meta, 99acres, …) are authenticated by their own token/signature and
+        # must not be IP-rate-limited: behind Cloud Run every caller shares one client IP (uvicorn
+        # runs without --proxy-headers), so a shared limiter would throttle all tenants' leads at
+        # once. They ACK-then-process, so volume is bounded server-side anyway.
+        if path in {"/health", "/docs", "/openapi.json", "/redoc"} or path.startswith(
+            f"{settings.api_v1_prefix}/webhooks/"
+        ):
             return await call_next(request)
 
         client_host = request.client.host if request.client else "unknown"

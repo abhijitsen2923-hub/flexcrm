@@ -37,6 +37,11 @@ class LeadSourceConnection(
 
     # "99acres" | future portals.
     provider: Mapped[str] = mapped_column(String(20), nullable=False)
+    # SHA-256 (hex) of this connection's URL token — the join key to its PUBLIC
+    # lead_source_routes row (routing lives in public; config lives here). Not a secret
+    # (a hash); lets the inbound handler find THIS connection after switching schema, and
+    # lets disconnect release the exact route. Globally unique via the public route.
+    token_hash: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     # The portal account this connection represents (e.g. the 99acres Username). Nullable
     # until learned from the first delivered lead.
     external_account_id: Mapped[str | None] = mapped_column(String(64), nullable=True)

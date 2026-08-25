@@ -1,23 +1,25 @@
-"""Public inbound webhooks (no user session). Currently: Meta Lead Ads.
+"""Public inbound webhooks (no user session): Meta Lead Ads + 99acres.
 
-Meta delivers every tenant's events to these ONE-per-type callbacks. Security is by
-payload, not by session: the leadgen GET handshake checks the verify token; the leadgen
-POST checks the `X-Hub-Signature-256` HMAC over the raw body; the deauthorize +
-data-deletion callbacks verify Meta's `signed_request` (HMAC with the app secret). Routing
-to the right tenant is by `page_id` (leadgen) or Facebook `user_id` (deauth/data-deletion)
-via the public MetaPageRoute registry. A fresh db session is used (like cron) because the
-handlers switch org scope per page.
+Security is by payload/token, not by session. Meta: the leadgen GET handshake checks the verify
+token; the leadgen POST checks `X-Hub-Signature-256`; deauthorize/data-deletion verify the
+`signed_request`. 99acres: the URL path token IS the credential (its hash resolves the tenant via
+the public lead_source_routes). All handlers use a fresh db session (like cron) because they switch
+org scope per delivery. This whole prefix is exempt from IP rate limiting (see middleware) — the
+callers authenticate themselves and behind Cloud Run share one client IP.
 """
 import hashlib
 import json
 import secrets
+from uuid import UUID
 
-from fastapi import APIRouter, Form, HTTPException, Query, Request, status
+from fastapi import APIRouter, BackgroundTasks, Form, HTTPException, Query, Request, status
 from fastapi.responses import PlainTextResponse
 
 from app.core.config import get_settings
 from app.core.logging import get_logger
+from app.core.tenancy import set_scope, set_tenant_schema
 from app.database.session import db_manager
+from app.services.lead_source_service import LeadSourceService
 from app.services.meta_connection import purge_connections_for_user
 from app.services.meta_oauth import parse_signed_request
 from app.services.meta_webhook import MetaWebhookService, verify_signature
@@ -120,3 +122,82 @@ async def meta_data_deletion_status(code: str | None = None):
         "Your FlexCRM Meta connection data has been deleted. "
         f"Confirmation code: {code or 'n/a'}"
     )
+
+
+# --- 99acres inbound leads (push) -----------------------------------------
+# 99acres POSTs each lead to a per-account URL whose path token IS the credential. We resolve the
+# token → tenant, DURABLY STORE the raw body, ACK 200, then map + ingest in the background. Unlike
+# Meta there's no poll to re-fetch, so persist-first is what guarantees no paid-for lead is lost.
+
+
+async def _process_99acres_delivery(delivery_id: UUID, organization_id: UUID, schema_name: str) -> None:
+    """Background task (runs after the 200): map + ingest one stored delivery. Own session; the
+    service handles its own commits + error isolation and never raises. A failure just leaves a
+    replayable `failed` delivery for the reconcile cron."""
+    async with db_manager.session_factory() as session:
+        try:
+            set_scope(session, organization_id)
+            await set_tenant_schema(session, schema_name)
+            await LeadSourceService(session).process_delivery(delivery_id, organization_id=organization_id)
+        except Exception:  # noqa: BLE001 — never surface; cron reconciles
+            logger.warning("99acres delivery processing failed for %s", delivery_id, exc_info=True)
+
+
+# A lead payload is tiny; cap the body so an unauthenticated flood can't force multi-MB
+# JSON parsing (this prefix is rate-limit-exempt and uvicorn imposes no default cap).
+_MAX_99ACRES_BODY = 256 * 1024  # 256 KB
+
+
+@router.post("/99acres/{token}")
+async def receive_99acres(token: str, request: Request, background: BackgroundTasks):
+    """Receive one 99acres lead. Resolve the URL token → tenant, persist the raw body, ACK 200,
+    and process asynchronously. 404 = unknown/inactive token; 413 = body too large; 422 = malformed
+    or missing Name/ContactNo (the delivery is still stored for audit).
+
+    Ordering matters (DoS hardening): validate the URL token in a short-lived session and release
+    its connection BEFORE reading the attacker-controlled body — so a bogus-token flood 404s without
+    materialising/parsing a large body or holding a pooled connection across the read."""
+    # 1) Authenticate on the URL token FIRST — cheap, indexed, own session released immediately.
+    async with db_manager.session_factory() as auth_session:
+        route = await LeadSourceService(auth_session).resolve_route(token)
+        if route is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Unknown or inactive token.")
+        organization_id = route.organization_id
+        schema_name = route.schema_name
+        token_hash = route.token_hash
+
+    # 2) Now that the caller is authenticated, cap + read + parse the body.
+    content_length = request.headers.get("content-length")
+    if content_length and content_length.isdigit() and int(content_length) > _MAX_99ACRES_BODY:
+        raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="Body too large.")
+    raw = await request.body()
+    if len(raw) > _MAX_99ACRES_BODY:
+        raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="Body too large.")
+    try:
+        payload = json.loads(raw) if raw else None
+    except ValueError:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Malformed JSON body.")
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Body must be a JSON object.")
+
+    # 3) Persist first (own commit) so a later fault can't lose the lead, then validate.
+    async with db_manager.session_factory() as session:
+        svc = LeadSourceService(session)
+        set_scope(session, organization_id)
+        await set_tenant_schema(session, schema_name)
+        delivery_id = await svc.persist_delivery(token_hash, payload)
+
+        name = str(payload.get("Name") or payload.get("name") or "").strip()
+        phone = str(payload.get("ContactNo") or payload.get("contact_no") or payload.get("phone") or "").strip()
+        if not name or not phone:
+            await svc.mark_delivery(
+                delivery_id, status="ignored", error="Name and ContactNo are required."
+            )
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Name and ContactNo are required.",
+            )
+
+    # ACK now; map + ingest after the response is sent.
+    background.add_task(_process_99acres_delivery, delivery_id, organization_id, schema_name)
+    return {"status": "accepted", "lead_id": payload.get("lead_id") or payload.get("leadId")}

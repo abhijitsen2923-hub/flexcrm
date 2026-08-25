@@ -35,6 +35,7 @@ def upgrade() -> None:
         sa.Column("deleted_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("deleted_by_id", sa.Uuid(), nullable=True),
         sa.Column("provider", sa.String(20), nullable=False),
+        sa.Column("token_hash", sa.String(64), nullable=False),
         sa.Column("external_account_id", sa.String(64), nullable=True),
         sa.Column("label", sa.String(255), nullable=True),
         sa.Column("default_industry", sa.String(20), nullable=False),
@@ -50,6 +51,7 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(["deleted_by_id"], ["public.users.id"], ondelete="SET NULL"),
         sa.ForeignKeyConstraint(["integration_user_id"], ["public.users.id"], ondelete="SET NULL"),
     )
+    op.create_index("ix_lead_source_connections_token_hash", "lead_source_connections", ["token_hash"])
     op.create_index("ix_lead_source_connections_created_by_id", "lead_source_connections", ["created_by_id"])
     op.create_index("ix_lead_source_connections_updated_by_id", "lead_source_connections", ["updated_by_id"])
     op.create_index("ix_lead_source_connections_is_deleted", "lead_source_connections", ["is_deleted"])
@@ -87,4 +89,5 @@ def downgrade() -> None:
     op.drop_index("ix_lead_source_connections_is_deleted", table_name="lead_source_connections")
     op.drop_index("ix_lead_source_connections_updated_by_id", table_name="lead_source_connections")
     op.drop_index("ix_lead_source_connections_created_by_id", table_name="lead_source_connections")
+    op.drop_index("ix_lead_source_connections_token_hash", table_name="lead_source_connections")
     op.drop_table("lead_source_connections")
