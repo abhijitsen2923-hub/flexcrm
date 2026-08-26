@@ -4,6 +4,7 @@ from uuid import UUID
 from app.core.exceptions import AuthorizationError, NotFoundError, ValidationError
 from app.core.logging import get_logger
 from app.core.permissions import STAGE_MANAGER_ROLES, can_set_stage
+from app.core.tenancy import current_org
 from app.database.enums import LeadIndustry, PipelineStageCategory, UnitStatus, UserRole
 from app.models.lead import Lead
 from app.models.pipeline_stage import PipelineStage  # noqa: F401  (kept for type hinting context)
@@ -11,6 +12,7 @@ from app.models.stage_transition import StageTransition
 from app.repositories.leads import LeadRepository
 from app.repositories.pipeline_stages import PipelineStageRepository
 from app.repositories.stage_transitions import StageTransitionRepository
+from app.repositories.users import UserRepository
 from app.schemas.stage_transition import MIN_COMMENT_LENGTH, StageTransitionCreate
 from app.services.base import ServiceBase
 from app.services.customer_promotion import CustomerPromotionService
@@ -64,6 +66,7 @@ class StageTransitionService(ServiceBase):
         self.notification_service = NotificationService(session)
         self.promotion_service = CustomerPromotionService(session)
         self.document_service = LeadDocumentService(session)
+        self.user_repository = UserRepository(session)
 
     async def list_transitions(self, lead_id: UUID) -> list[StageTransition]:
         lead = await self.lead_repository.get(lead_id)
@@ -201,6 +204,14 @@ class StageTransitionService(ServiceBase):
             # fall back to the user recording the booking — so the promoted
             # customer always has an owner even for roles that can't pick a user.
             if payload.assigned_to_id is not None:
+                # Org-scoped: the explicit salesperson pick must be a user in this
+                # tenant — `users` is shared, so an unscoped id could point at
+                # another org's user (cross-tenant IDOR guard).
+                assignee = await self.user_repository.get_in_org(
+                    payload.assigned_to_id, current_org(self.session)
+                )
+                if assignee is None:
+                    raise NotFoundError("Assigned user not found.")
                 lead.assigned_to_id = payload.assigned_to_id
             elif lead.assigned_to_id is None:
                 lead.assigned_to_id = actor_id

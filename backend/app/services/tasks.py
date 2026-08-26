@@ -3,6 +3,7 @@ from uuid import UUID
 from fastapi import BackgroundTasks
 
 from app.core.exceptions import NotFoundError
+from app.core.tenancy import current_org
 from app.repositories.tasks import TaskRepository
 from app.repositories.users import UserRepository
 from app.schemas.common import PaginationParams
@@ -101,7 +102,8 @@ class TaskService(ServiceBase):
     async def _ensure_assignee(self, assigned_to_id: UUID | None) -> None:
         if assigned_to_id is None:
             return
-        user = await self.user_repository.get(assigned_to_id)
+        # Org-scoped: prevent assigning a task to a user in another tenant (IDOR).
+        user = await self.user_repository.get_in_org(assigned_to_id, current_org(self.session))
         if user is None:
             raise NotFoundError("Assigned user not found.")
 
@@ -112,7 +114,7 @@ class TaskService(ServiceBase):
         resource_title: str,
         background_tasks: BackgroundTasks | None,
     ) -> None:
-        assignee = await self.user_repository.get(assignee_id)
+        assignee = await self.user_repository.get_in_org(assignee_id, current_org(self.session))
         if assignee is None:
             return
         await self.notification_service.create_notification(user_id=assignee_id, message=message)

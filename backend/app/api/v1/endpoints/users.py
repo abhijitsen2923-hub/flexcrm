@@ -58,13 +58,27 @@ async def update_user(
     current_user=Depends(get_current_user),
     session: AsyncSession = Depends(get_db_session),
 ):
-    # Users can update themselves; updating others requires USER_MANAGE.
-    if current_user.id != user_id:
-        from app.api.deps import load_effective_permissions
+    # Authorization model:
+    #  - Updating another user requires USER_MANAGE.
+    #  - Privileged fields (role, status) may ONLY be changed by a USER_MANAGE
+    #    holder — never through a self-service update. Without this guard any
+    #    user could PUT /users/{self} {"role": "owner"} and self-escalate to
+    #    full permissions (the self-update path skipped the permission check).
+    from app.api.deps import load_effective_permissions
 
-        effective = await load_effective_permissions(session, current_user)
-        if PermissionCode.USER_MANAGE not in effective:
-            raise AuthorizationError("You do not have permission to update this user.")
+    effective = await load_effective_permissions(session, current_user)
+    can_manage = PermissionCode.USER_MANAGE in effective
+
+    if current_user.id != user_id and not can_manage:
+        raise AuthorizationError("You do not have permission to update this user.")
+
+    if not can_manage:
+        privileged = {"role", "status"} & payload.model_fields_set
+        if privileged:
+            raise AuthorizationError(
+                "Changing role or status requires the User Manage permission."
+            )
+
     return await UserService(session).update_user(user_id, payload, actor_id=current_user.id)
 
 

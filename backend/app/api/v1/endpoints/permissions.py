@@ -21,7 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.api.deps import get_current_user, load_effective_permissions, require_permissions
-from app.core.exceptions import ConflictError, NotFoundError
+from app.core.exceptions import AuthorizationError, ConflictError, NotFoundError
 from app.core.permissions import (
     PermissionCode,
     ROLE_PERMISSION_DEFAULTS,
@@ -132,6 +132,15 @@ async def grant_permission(
     target = await UserService(session).get_user(user_id)
     if target is None:
         raise NotFoundError("User not found.")
+
+    # Privilege-escalation guard: a grantor may only grant permissions they
+    # themselves hold (platform admins excepted). Without this, any USER_MANAGE
+    # holder could grant ORG_MANAGE / FINANCE_REFUND — to another user or to
+    # themselves — and escalate beyond their own level.
+    if not getattr(current_user, "is_platform_admin", False):
+        caller_effective = await load_effective_permissions(session, current_user)
+        if payload.permission_code not in caller_effective:
+            raise AuthorizationError("You can only grant permissions that you already hold.")
 
     existing = (
         await session.execute(

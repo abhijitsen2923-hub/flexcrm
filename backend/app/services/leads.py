@@ -57,6 +57,12 @@ class LeadService(ServiceBase):
         """
         if not lead_ids:
             return 0
+        # Guard against cross-tenant assignment: the target owner must be a user
+        # in THIS org. `users` is a shared table, so an unscoped id could point
+        # at another tenant's user (IDOR). See UserRepository.get_in_org.
+        assignee = await self.user_repository.get_in_org(assigned_to_id, current_org(self.session))
+        if assignee is None:
+            raise NotFoundError("Assigned user not found.")
         result = await self.session.execute(
             update(Lead)
             .where(Lead.id.in_(lead_ids), Lead.is_deleted.is_(False))
@@ -353,7 +359,7 @@ class LeadService(ServiceBase):
             if customer is None:
                 raise NotFoundError("Customer not found.")
         if assigned_to_id:
-            assignee = await self.user_repository.get(assigned_to_id)
+            assignee = await self.user_repository.get_in_org(assigned_to_id, current_org(self.session))
             if assignee is None:
                 raise NotFoundError("Assigned user not found.")
 
@@ -364,7 +370,7 @@ class LeadService(ServiceBase):
         resource_title: str,
         background_tasks: BackgroundTasks | None,
     ) -> None:
-        assignee = await self.user_repository.get(assignee_id)
+        assignee = await self.user_repository.get_in_org(assignee_id, current_org(self.session))
         if assignee is None:
             return
         await self.notification_service.create_notification(user_id=assignee_id, message=message)
