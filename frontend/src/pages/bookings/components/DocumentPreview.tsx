@@ -90,6 +90,12 @@ export function DocumentPreview({ html, title = "Document", onClose, pdf }: Prop
         srcDoc={html}
         title={title}
         className="doc-preview__frame"
+        // Block script execution inside the document (no allow-scripts) so a
+        // malicious field injected into the server-rendered HTML can't run and
+        // reach the parent's localStorage/session. allow-same-origin +
+        // allow-modals keep the Print button (contentWindow.print()) working;
+        // the document is static HTML, so nothing else is lost.
+        sandbox="allow-same-origin allow-modals"
       />
     </div>
   );
