@@ -62,6 +62,15 @@ def create_app() -> FastAPI:
         openapi_url="/openapi.json" if settings.docs_enabled else None,
         lifespan=lifespan,
     )
+    # Middleware order note: add_middleware() puts the LAST-added middleware
+    # OUTERMOST. We want, outer→inner: CORS → RequestContext → RateLimit → app.
+    #  - CORS must be outermost so its Access-Control-* headers are attached to
+    #    EVERY response, including the RateLimit 429 short-circuit and error
+    #    responses (otherwise the browser reports a CORS error, not the real 429).
+    #  - RequestContext must sit above RateLimit so request_id is populated when
+    #    the limiter builds its 429 body.
+    app.add_middleware(RateLimitMiddleware)
+    app.add_middleware(RequestContextMiddleware)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origins,
@@ -69,8 +78,6 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
-    app.add_middleware(RateLimitMiddleware)
-    app.add_middleware(RequestContextMiddleware)
     register_exception_handlers(app)
     app.include_router(api_router, prefix=settings.api_v1_prefix)
 

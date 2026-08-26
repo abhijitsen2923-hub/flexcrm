@@ -49,12 +49,22 @@ async def meta_webhook_verify(
     raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Verification failed.")
 
 
+_MAX_META_BODY = 256 * 1024  # 256 KB — leadgen notifications are tiny; cap the unauth read.
+
+
 @router.post("/meta")
 async def meta_webhook_receive(request: Request):
     """Receive a leadgen notification. Verify the signature over the RAW body, then route +
     ingest. ALWAYS ACK 200 once the signature is valid — Meta retries non-200 aggressively,
     and the poll is our backstop for anything a single delivery fails to ingest."""
+    # Rate-limit-exempt + unauthenticated until the signature check → cap the body
+    # first so a crafted large payload can't force unbounded in-memory buffering.
+    content_length = request.headers.get("content-length")
+    if content_length and content_length.isdigit() and int(content_length) > _MAX_META_BODY:
+        raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="Body too large.")
     raw = await request.body()
+    if len(raw) > _MAX_META_BODY:
+        raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="Body too large.")
     if not verify_signature(raw, request.headers.get("X-Hub-Signature-256")):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid signature.")
     try:

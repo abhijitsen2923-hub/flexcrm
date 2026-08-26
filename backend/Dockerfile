@@ -74,4 +74,7 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
 ENTRYPOINT ["/app/docker-entrypoint.sh"]
 # Shell form so $PORT expands. Cloud Run injects PORT (default 8080); falls
 # back to 8000 locally under docker-compose where PORT is unset.
-CMD ["sh", "-c", "exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
+# --proxy-headers + trusted forwarding: behind Cloud Run, honour X-Forwarded-For
+# so request.client.host is the REAL client IP (not Google's front-end IP). This
+# is what makes the per-IP rate limiter actually distinguish clients.
+CMD ["sh", "-c", "exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000} --proxy-headers --forwarded-allow-ips=*"]

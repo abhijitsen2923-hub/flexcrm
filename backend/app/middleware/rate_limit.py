@@ -12,9 +12,10 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         settings = get_settings()
         path = request.url.path
         # Inbound webhooks (Meta, 99acres, …) are authenticated by their own token/signature and
-        # must not be IP-rate-limited: behind Cloud Run every caller shares one client IP (uvicorn
-        # runs without --proxy-headers), so a shared limiter would throttle all tenants' leads at
-        # once. They ACK-then-process, so volume is bounded server-side anyway.
+        # must not be IP-rate-limited: a single upstream (Meta / 99acres) delivers ALL tenants'
+        # leads from a small set of source IPs, so a per-IP limiter would throttle everyone at once.
+        # They ACK-then-process, so volume is bounded server-side anyway. (uvicorn now runs with
+        # --proxy-headers, so request.client.host below is the real client IP, not Cloud Run's LB.)
         if path in {"/health", "/docs", "/openapi.json", "/redoc"} or path.startswith(
             f"{settings.api_v1_prefix}/webhooks/"
         ):

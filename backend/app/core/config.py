@@ -146,6 +146,14 @@ class Settings(BaseSettings):
         if self.environment not in {"staging", "production"}:
             return self
 
+        # Harden the info-leak defaults in every deployed env, regardless of what
+        # was passed. Their plain defaults are True for local-dev ergonomics, but
+        # a staging/production deploy must never expose Swagger/OpenAPI or leak
+        # exception detail in 500s. Forcing them here means a forgotten override
+        # can't reopen the hole. (Flip these in code if you ever need docs in prod.)
+        self.docs_enabled = False
+        self.expose_error_detail = False
+
         problems: list[str] = []
         if self.jwt_secret_key == _DEFAULT_JWT_ACCESS:
             problems.append("JWT_SECRET_KEY is the placeholder; set a real 32+ byte secret")
