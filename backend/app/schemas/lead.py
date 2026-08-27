@@ -157,6 +157,10 @@ class LeadRead(ORMModel):
     expected_close_date: date | None = None
     source: str | None = None
     campaign: str | None = None
+    # External provenance (set only on ingested leads): which connector and the
+    # portal's own id (e.g. the 99acres lead_id). Surfaced in the lead detail.
+    source_provider: str | None = None
+    external_id: str | None = None
     interest: str | None = None
     last_comment_preview: str | None = None
     last_comment_at: datetime | None = None

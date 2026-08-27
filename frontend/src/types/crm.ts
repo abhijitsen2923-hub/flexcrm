@@ -305,6 +305,12 @@ export interface Lead {
   budget_max: string | null;
   preferred_location: string | null;
   possession_preference: string | null;
+  // Free-text notes (external leads carry the source's message + attribution here).
+  notes: string | null;
+  // External provenance (ingested leads only): connector + the portal's own id
+  // (e.g. the 99acres lead_id). Shown in the lead detail's "Source ID" row.
+  source_provider: string | null;
+  external_id: string | null;
   created_by_id: string | null;
   updated_by_id: string | null;
   created_at: string;

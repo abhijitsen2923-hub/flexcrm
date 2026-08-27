@@ -204,10 +204,16 @@ export function LeadDrawer({ open, lead, onClose, onTransitionRequest, onLogged,
               <DetailRow label="Contact" value={lead.contact_name || "—"} />
               <DetailRow label="Email" value={lead.contact_email ?? "—"} />
               <DetailRow label="Phone" value={lead.contact_phone ?? "—"} />
+              {lead.contact_phone_alt && <DetailRow label="Alt phone" value={lead.contact_phone_alt} />}
               <DetailRow label="Company" value={lead.company_name ?? "—"} />
               <DetailRow label="Industry" value={titleCase(lead.industry)} />
               <DetailRow label={interestLabel} value={lead.interest ?? "—"} />
               <DetailRow label="Source" value={lead.source ?? "—"} />
+              {lead.external_id && <DetailRow label="Source ID" value={lead.external_id} />}
+              <DetailRow label="Location" value={lead.preferred_location ?? "—"} />
+              {isRealEstate && lead.possession_preference && (
+                <DetailRow label="Possession" value={lead.possession_preference} />
+              )}
               {isRealEstate ? (
                 <DetailRow label="Budget" value={budgetText} />
               ) : (
@@ -215,6 +221,7 @@ export function LeadDrawer({ open, lead, onClose, onTransitionRequest, onLogged,
               )}
               <DetailRow label="Probability" value={`${lead.probability}%`} />
               <DetailRow label="Expected close" value={formatDate(lead.expected_close_date)} />
+              <DetailRow label="Created" value={formatDateTime(lead.created_at)} />
               <DetailRow
                 label="Customer"
                 value={
@@ -240,6 +247,12 @@ export function LeadDrawer({ open, lead, onClose, onTransitionRequest, onLogged,
                   ) : "—"
                 }
               />
+              {lead.notes && (
+                <DetailRow
+                  label="Notes"
+                  value={<span style={{ whiteSpace: "pre-wrap" }}>{lead.notes}</span>}
+                />
+              )}
 
               <div className="card" style={{ padding: "0.75rem 1rem" }}>
                 <div className="row row--between" style={{ alignItems: "center", marginBottom: "0.5rem" }}>

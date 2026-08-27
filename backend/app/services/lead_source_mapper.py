@@ -15,6 +15,12 @@ from __future__ import annotations
 
 import hashlib
 import re
+from datetime import datetime, timedelta, timezone
+
+# 99acres sends India-local naive datetimes; IST is a fixed +05:30 (no DST), so a fixed
+# offset avoids any tzdata/zoneinfo dependency in the slim runtime image.
+_IST = timezone(timedelta(hours=5, minutes=30))
+_RECEIVED_FORMATS = ("%Y-%m-%d %H:%M:%S", "%m/%d/%Y %I:%M %p", "%m/%d/%Y %I:%M:%S %p")
 
 # 99acres columns we surface as attribution in notes (in this order), if present + non-empty.
 _ATTRIBUTION_FIELDS: tuple[tuple[str, str], ...] = (
@@ -44,6 +50,32 @@ def normalize_phone(raw: str | None) -> str | None:
     if len(digits) == 11 and digits.startswith("0"):
         return f"+91{digits[1:]}"
     return f"+{digits}"
+
+
+def parse_received_date(raw: str | None) -> datetime | None:
+    """Parse 99acres' `ReceivedDate` → an aware UTC datetime, so an ingested lead can be dated
+    to the actual enquiry time (not our ingestion time). Accepts the live-push format
+    `YYYY-MM-DD HH:MM:SS`, the dashboard-export `MM/DD/YYYY hh:mm AM/PM`, and ISO-8601. Naive
+    values are read as IST. Returns None when empty/unparseable (→ caller falls back to
+    ingestion time); the raw value is also kept verbatim in notes, so nothing is lost."""
+    raw = (raw or "").strip()
+    if not raw:
+        return None
+    dt: datetime | None = None
+    for fmt in _RECEIVED_FORMATS:
+        try:
+            dt = datetime.strptime(raw, fmt)
+            break
+        except ValueError:
+            dt = None
+    if dt is None:
+        try:
+            dt = datetime.fromisoformat(raw)
+        except ValueError:
+            return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=_IST)
+    return dt.astimezone(timezone.utc)
 
 
 def _get(payload: dict, *keys: str) -> str:
@@ -111,6 +143,12 @@ def map_99acres_lead(payload: dict) -> tuple[str, dict]:
         notes.extend(attribution)
     if notes:
         fields["notes"] = "\n".join(notes)
+
+    # Date the lead to the enquiry time (ReceivedDate) when parseable — the ingest layer maps
+    # `source_created_at` onto the lead's created_at. Falls back to ingestion time otherwise.
+    received_dt = parse_received_date(_get(payload, "ReceivedDate", "received_date"))
+    if received_dt is not None:
+        fields["source_created_at"] = received_dt
 
     # external_id: portal lead_id if given, else fingerprint.
     lead_id = _get(payload, "lead_id", "leadId", "LeadId")

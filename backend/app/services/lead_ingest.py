@@ -119,6 +119,10 @@ class LeadIngestService(ServiceBase):
             "created_by_id": actor_id,
             "updated_by_id": actor_id,
         }
+        # Date the lead to the source's enquiry time when the mapper supplied one (e.g. the
+        # 99acres ReceivedDate); otherwise created_at falls to the server_default now().
+        if fields.get("source_created_at") is not None:
+            base["created_at"] = fields["source_created_at"]
         # Guard every bounded VARCHAR against arbitrary-length provider data so an
         # over-length value can't raise an uncaught DataError mid-savepoint.
         base = _clamp_str_fields(base)
