@@ -2,7 +2,8 @@ export function formatDate(iso: string | null | undefined): string {
   if (!iso) return "—";
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return "—";
-  return date.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+  // India-only product: render dates in IST regardless of the viewer's browser TZ.
+  return date.toLocaleDateString(undefined, { timeZone: "Asia/Kolkata", year: "numeric", month: "short", day: "numeric" });
 }
 
 
@@ -10,7 +11,9 @@ export function formatDateTime(iso: string | null | undefined): string {
   if (!iso) return "—";
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return "—";
+  // India-only product: render date+time in IST regardless of the viewer's browser TZ.
   return date.toLocaleString(undefined, {
+    timeZone: "Asia/Kolkata",
     year: "numeric",
     month: "short",
     day: "numeric",
