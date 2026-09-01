@@ -1,4 +1,4 @@
-import { ChevronLeft, ChevronRight } from "lucide-react";
+import { ChevronLeft, ChevronRight, ChevronsRight } from "lucide-react";
 
 import { Button } from "./Button";
 
@@ -9,15 +9,31 @@ interface PaginationProps {
   total: number;
   totalPages: number;
   onPageChange: (page: number) => void;
+  // Opt-in extras (used by Leads). When omitted the bar renders exactly as before,
+  // so the other list pages are unaffected.
+  pageSizeOptions?: number[];
+  onPageSizeChange?: (pageSize: number) => void;
+  showJumpToLast?: boolean;
 }
 
 
-export function Pagination({ page, pageSize, total, totalPages, onPageChange }: PaginationProps) {
+export function Pagination({
+  page,
+  pageSize,
+  total,
+  totalPages,
+  onPageChange,
+  pageSizeOptions,
+  onPageSizeChange,
+  showJumpToLast = false,
+}: PaginationProps) {
   if (total === 0) {
     return null;
   }
   const start = (page - 1) * pageSize + 1;
   const end = Math.min(page * pageSize, total);
+  const lastPage = Math.max(totalPages, 1);
+  const showPageSize = Boolean(pageSizeOptions && onPageSizeChange);
 
   return (
     <div className="pagination">
@@ -25,6 +41,22 @@ export function Pagination({ page, pageSize, total, totalPages, onPageChange }: 
         Showing <strong>{start}</strong>–<strong>{end}</strong> of <strong>{total}</strong>
       </div>
       <div className="pagination__controls">
+        {showPageSize && (
+          <label className="pagination__page-size" style={{ display: "flex", alignItems: "center", gap: "0.35rem" }}>
+            <span className="text-xs muted">Per page</span>
+            <select
+              value={pageSize}
+              onChange={(e) => onPageSizeChange?.(Number(e.target.value))}
+              aria-label="Rows per page"
+            >
+              {pageSizeOptions?.map((n) => (
+                <option key={n} value={n}>
+                  {n}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
         <Button
           size="sm"
           variant="secondary"
@@ -35,7 +67,7 @@ export function Pagination({ page, pageSize, total, totalPages, onPageChange }: 
           Prev
         </Button>
         <span style={{ minWidth: 70, textAlign: "center" }}>
-          Page {page} / {Math.max(totalPages, 1)}
+          Page {page} / {lastPage}
         </span>
         <Button
           size="sm"
@@ -46,6 +78,17 @@ export function Pagination({ page, pageSize, total, totalPages, onPageChange }: 
           Next
           <ChevronRight size={14} />
         </Button>
+        {showJumpToLast && (
+          <Button
+            size="sm"
+            variant="secondary"
+            disabled={page >= lastPage}
+            onClick={() => onPageChange(lastPage)}
+          >
+            Last
+            <ChevronsRight size={14} />
+          </Button>
+        )}
       </div>
     </div>
   );

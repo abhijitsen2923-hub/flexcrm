@@ -139,6 +139,7 @@ export default function LeadsPage() {
 
   const [view, setView] = useState<ViewMode>("list");
   const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
   const [industryFilter, setIndustryFilter] = useState<LeadIndustry | "">(defaultIndustry);
   const [stageFilter, setStageFilter] = useState<string[]>([]);   // multi-select stage codes
   const [nextActionOn, setNextActionOn] = useState<string>("");   // YYYY-MM-DD "due on" filter
@@ -221,7 +222,7 @@ export default function LeadsPage() {
     }
     return {
       page,
-      page_size: 20,
+      page_size: pageSize,
       industry: industryFilter || undefined,
       // Comma-joined so the backend can `stage_code IN (...)` — a single stage still works.
       stage_code: stageFilter.length ? stageFilter.join(",") : undefined,
@@ -234,7 +235,7 @@ export default function LeadsPage() {
       assigned_to_id: ownerFilter || undefined,
       search: search || undefined
     };
-  }, [page, industryFilter, stageFilter, nextActionOn, stageChangedFrom, stageChangedTo, sourceFilter, campaignFilter, ownerFilter, search]);
+  }, [page, pageSize, industryFilter, stageFilter, nextActionOn, stageChangedFrom, stageChangedTo, sourceFilter, campaignFilter, ownerFilter, search]);
 
   function toggleStage(code: string) {
     setStageFilter((prev) => (prev.includes(code) ? prev.filter((c) => c !== code) : [...prev, code]));
@@ -326,7 +327,7 @@ export default function LeadsPage() {
   useEffect(() => {
     if (!canAssign) return;
     let cancelled = false;
-    // page_size is capped at 100 server-side (422 above that).
+    // page_size is capped at 200 server-side (422 above that).
     void usersService
       .list({ page_size: 100 })
       .then((res) => { if (!cancelled) setAssignableUsers(res.items); })
@@ -1130,6 +1131,9 @@ export default function LeadsPage() {
               total={pagination.total}
               totalPages={pagination.total_pages}
               onPageChange={setPage}
+              pageSizeOptions={[20, 50, 100, 200]}
+              onPageSizeChange={(size) => { setPageSize(size); setPage(1); }}
+              showJumpToLast
             />
           </>
         ) : (
