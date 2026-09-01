@@ -124,7 +124,7 @@ export function App() {
                         {FEATURES.bookings && <Route path="trackers/registration" element={<RegistrationTrackerPage />} />}
                         {FEATURES.bookings && <Route path="trackers/possession" element={<PossessionTrackerPage />} />}
                         {FEATURES.bookings && <Route path="channel-partners" element={<ChannelPartnersPage />} />}
-                        {(FEATURES.meta_facebook || FEATURES.meta_instagram || FEATURES.portal_99acres) && <Route path="integrations" element={<IntegrationsPage />} />}
+                        {(FEATURES.meta_facebook || FEATURES.meta_instagram || FEATURES.portal_99acres || FEATURES.sheet_leads) && <Route path="integrations" element={<IntegrationsPage />} />}
                         <Route path="users" element={<UsersPage />} />
                         <Route path="admin" element={<PlatformAdminPage />} />
                         <Route path="*" element={<NotFoundPage />} />

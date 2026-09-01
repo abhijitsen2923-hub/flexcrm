@@ -33,6 +33,8 @@ export const FEATURES: Record<ModuleKey, boolean> = {
   meta_instagram: flag(import.meta.env.VITE_FEATURE_META_LEADS_ENABLED),
   // 99acres inbound leads (push webhook) — its own build flag.
   portal_99acres: flag(import.meta.env.VITE_FEATURE_99ACRES_ENABLED),
+  // Google Sheet lead sync (pull) — its own build flag.
+  sheet_leads: flag(import.meta.env.VITE_FEATURE_SHEET_LEADS_ENABLED),
 };
 
 export type FeatureKey = ModuleKey;
@@ -45,7 +47,7 @@ export function mergeModules(orgModules: Record<ModuleKey, boolean>): Record<Mod
   const keys: ModuleKey[] = [
     "deals", "tasks", "activities", "finance", "hr",
     "inventory", "bookings", "site_visits", "projects",
-    "meta_facebook", "meta_instagram", "portal_99acres",
+    "meta_facebook", "meta_instagram", "portal_99acres", "sheet_leads",
   ];
   return Object.fromEntries(
     keys.map((k) => [k, FEATURES[k] && (orgModules[k] ?? false)])

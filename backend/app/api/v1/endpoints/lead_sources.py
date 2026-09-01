@@ -15,10 +15,13 @@ from app.core.config import get_settings
 from app.core.permissions import PermissionCode
 from app.database.session import get_db_session
 from app.schemas.lead_source import (
+    GoogleSheetConnectRequest,
+    GoogleSheetConnectResponse,
     LeadSourceConnectionRead,
     LeadSourceConnectRequest,
     LeadSourceConnectResponse,
 )
+from app.services.google_sheet_service import GoogleSheetService
 from app.services.lead_source_service import LeadSourceService
 
 router = APIRouter()
@@ -64,4 +67,53 @@ async def disconnect_99acres(
     session: AsyncSession = Depends(get_db_session),
 ):
     await LeadSourceService(session).disconnect(connection_id, actor_id=current_user.id)
+    return {"status": "disconnected"}
+
+
+# --- Google Sheets (pull) lead source -------------------------------------
+
+@router.get("/google-sheets/service-account")
+async def google_sheet_service_account(
+    current_user=Depends(require_permissions(PermissionCode.ORG_MANAGE)),
+):
+    """The platform service-account email the tenant must share their sheet (Viewer) with."""
+    return {"email": get_settings().google_sa_email}
+
+
+@router.post(
+    "/google-sheets/connect",
+    response_model=GoogleSheetConnectResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def connect_google_sheet(
+    payload: GoogleSheetConnectRequest,
+    current_user=Depends(require_permissions(PermissionCode.ORG_MANAGE)),
+    session: AsyncSession = Depends(get_db_session),
+):
+    """Verify the service account can read the sheet (it must be shared with the SA email), then
+    store the connection. The poll cron then ingests rows on a schedule."""
+    conn = await GoogleSheetService(session).connect(
+        sheet_id=payload.sheet_id, label=payload.label, actor_id=current_user.id
+    )
+    return GoogleSheetConnectResponse(
+        connection=LeadSourceConnectionRead.model_validate(conn),
+        service_account_email=get_settings().google_sa_email,
+    )
+
+
+@router.get("/google-sheets", response_model=list[LeadSourceConnectionRead])
+async def list_google_sheets(
+    current_user=Depends(require_permissions(PermissionCode.ORG_MANAGE)),
+    session: AsyncSession = Depends(get_db_session),
+):
+    return await GoogleSheetService(session).list_connections()
+
+
+@router.delete("/google-sheets/{connection_id}")
+async def disconnect_google_sheet(
+    connection_id: UUID,
+    current_user=Depends(require_permissions(PermissionCode.ORG_MANAGE)),
+    session: AsyncSession = Depends(get_db_session),
+):
+    await GoogleSheetService(session).disconnect(connection_id, actor_id=current_user.id)
     return {"status": "disconnected"}

@@ -15,6 +15,7 @@ from app.database.session import db_manager
 from app.jobs.archive import dispatch_archival
 from app.jobs.customer_health import dispatch_customer_health
 from app.jobs.followup_reminders import dispatch_followup_reminders
+from app.jobs.google_sheet_sync import dispatch_google_sheet_sync
 from app.jobs.lead_source_reconcile import dispatch_lead_source_reconcile
 from app.jobs.meta_lead_sync import dispatch_meta_lead_sync
 from app.jobs.meta_token_refresh import dispatch_meta_token_refresh
@@ -77,6 +78,16 @@ async def trigger_lead_source_reconcile(_: None = Depends(require_cron_secret)):
     org scope itself and commits per delivery. Backstop for the push-only ingest; runs 2x/day."""
     async with db_manager.session_factory() as session:
         counts = await dispatch_lead_source_reconcile(session)
+    return counts
+
+
+@router.post("/google-sheet-sync")
+async def trigger_google_sheet_sync(_: None = Depends(require_cron_secret)):
+    """Cross-org: poll every org with the `sheet_leads` module + an active Google Sheet connection,
+    reading the sheet and ingesting new rows as leads (idempotent on external_id). Fresh session;
+    dispatch switches org scope itself and commits per row."""
+    async with db_manager.session_factory() as session:
+        counts = await dispatch_google_sheet_sync(session)
     return counts
 
 

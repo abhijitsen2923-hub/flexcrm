@@ -2,7 +2,7 @@
 from datetime import datetime
 from uuid import UUID
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.schemas.common import ORMModel
 
@@ -32,3 +32,18 @@ class LeadSourceConnectResponse(BaseModel):
     connection: LeadSourceConnectionRead
     webhook_url: str
     token: str
+
+
+# --- Google Sheets (pull) lead source -------------------------------------
+
+class GoogleSheetConnectRequest(BaseModel):
+    # The Sheet ID (the `/d/<ID>/` segment of the sheet URL) — distinct per tenant.
+    sheet_id: str = Field(min_length=1, max_length=64)
+    label: str | None = None
+
+
+class GoogleSheetConnectResponse(BaseModel):
+    connection: LeadSourceConnectionRead
+    # The platform service-account email the tenant must share their sheet with (Viewer).
+    service_account_email: str | None = None
+

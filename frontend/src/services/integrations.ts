@@ -126,3 +126,33 @@ export const leadSourceService = {
     await apiClient.delete(`/integrations/99acres/${id}`);
   },
 };
+
+// Google Sheet lead sync (pull). The tenant shares their sheet (Viewer) with the platform
+// service-account email, pastes the Sheet ID, and connect() verifies read access before saving.
+export interface GoogleSheetConnectResult {
+  connection: LeadSourceConnection;
+  service_account_email: string | null;
+}
+
+export const googleSheetsService = {
+  async serviceAccountEmail(): Promise<string | null> {
+    const { data } = await apiClient.get<{ email: string | null }>(
+      "/integrations/google-sheets/service-account",
+    );
+    return data.email;
+  },
+  async list(): Promise<LeadSourceConnection[]> {
+    const { data } = await apiClient.get<LeadSourceConnection[]>("/integrations/google-sheets");
+    return data;
+  },
+  async connect(sheetId: string, label: string | null): Promise<GoogleSheetConnectResult> {
+    const { data } = await apiClient.post<GoogleSheetConnectResult>(
+      "/integrations/google-sheets/connect",
+      { sheet_id: sheetId, label },
+    );
+    return data;
+  },
+  async disconnect(id: string): Promise<void> {
+    await apiClient.delete(`/integrations/google-sheets/${id}`);
+  },
+};

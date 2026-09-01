@@ -6,6 +6,7 @@ import { mergeModules } from "../../config/features";
 import { useOrgModules } from "../../context/OrgContext";
 import {
   integrationsService,
+  googleSheetsService,
   leadSourceService,
   type LeadSourceConnection,
   type LeadSourceConnectResult,
@@ -52,6 +53,7 @@ export default function IntegrationsPage() {
   const modules = mergeModules(orgModules);
   const showMeta = modules.meta_facebook || modules.meta_instagram;
   const show99acres = modules.portal_99acres;
+  const showSheets = modules.sheet_leads;
   // FB & IG share one connection; the poll ingests only platforms enabled for
   // this workspace (per-tenant admin toggles). Show which are active.
   const activePlatforms = [
@@ -84,6 +86,14 @@ export default function IntegrationsPage() {
   const [lsBusy, setLsBusy] = useState(false);
   const [lsResult, setLsResult] = useState<LeadSourceConnectResult | null>(null);
   const [lsCopied, setLsCopied] = useState(false);
+  // Google Sheet lead sync state.
+  const [sheetConns, setSheetConns] = useState<LeadSourceConnection[]>([]);
+  const [sheetLoading, setSheetLoading] = useState(true);
+  const [sheetSaEmail, setSheetSaEmail] = useState<string | null>(null);
+  const [sheetId, setSheetId] = useState("");
+  const [sheetLabel, setSheetLabel] = useState("");
+  const [sheetBusy, setSheetBusy] = useState(false);
+  const [sheetError, setSheetError] = useState<string | null>(null);
 
   async function refresh() {
     setLoading(true);
@@ -98,6 +108,7 @@ export default function IntegrationsPage() {
   useEffect(() => {
     void refresh();
     void refreshLeadSources();
+    void refreshSheets();
   }, []);
 
   // Handle the return leg of the OAuth round-trip: Meta's callback redirects the browser to
@@ -277,6 +288,51 @@ export default function IntegrationsPage() {
       await leadSourceService.disconnect99acres(conn.id);
       toast.success("Disconnected", conn.label ?? conn.external_account_id ?? "99acres connection");
       await refreshLeadSources();
+    } catch (err) {
+      toast.error("Disconnect failed", extractErrorMessage(err));
+    }
+  }
+
+  // --- Google Sheets ---
+  async function refreshSheets() {
+    setSheetLoading(true);
+    try {
+      const [list, email] = await Promise.all([
+        googleSheetsService.list(),
+        googleSheetsService.serviceAccountEmail().catch(() => null),
+      ]);
+      setSheetConns(list);
+      setSheetSaEmail(email);
+    } catch {
+      /* leave the list as-is */
+    } finally {
+      setSheetLoading(false);
+    }
+  }
+
+  async function connectSheet() {
+    const id = sheetId.trim();
+    if (!id) return;
+    setSheetBusy(true);
+    setSheetError(null);
+    try {
+      await googleSheetsService.connect(id, sheetLabel.trim() || null);
+      setSheetId("");
+      setSheetLabel("");
+      toast.success("Connected", "Google Sheet connected — leads will sync automatically.");
+      await refreshSheets();
+    } catch (err) {
+      setSheetError(extractErrorMessage(err));
+    } finally {
+      setSheetBusy(false);
+    }
+  }
+
+  async function disconnectSheet(conn: LeadSourceConnection) {
+    try {
+      await googleSheetsService.disconnect(conn.id);
+      toast.success("Disconnected", conn.label ?? conn.external_account_id ?? "Google Sheet");
+      await refreshSheets();
     } catch (err) {
       toast.error("Disconnect failed", extractErrorMessage(err));
     }
@@ -464,6 +520,74 @@ export default function IntegrationsPage() {
         )}
         <div className="row" style={{ marginTop: "0.75rem" }}>
           <Button onClick={openConnect99acres}>Connect 99acres</Button>
+        </div>
+      </div>
+      )}
+
+      {/* Google Sheet lead sync (pull) */}
+      {showSheets && (
+      <div className="card" style={{ padding: "1rem 1.25rem" }}>
+        <div className="row row--between" style={{ alignItems: "center", marginBottom: "0.35rem" }}>
+          <strong>Google Sheet Leads</strong>
+          <Button size="sm" variant="ghost" onClick={() => void refreshSheets()}>Refresh</Button>
+        </div>
+        <p className="muted text-sm">
+          Sync leads from a Google Sheet. Share your sheet (Viewer) with{" "}
+          <strong>{sheetSaEmail ?? "our service account"}</strong>, then paste the Sheet ID (the{" "}
+          <code>/d/&lt;ID&gt;/</code> part of the sheet URL). New rows arrive as leads automatically.
+        </p>
+        {sheetLoading ? (
+          <LoadingBlock />
+        ) : sheetConns.length > 0 ? (
+          <div className="stack" style={{ gap: "0.5rem", marginTop: "0.5rem" }}>
+            {sheetConns.map((c) => (
+              <div key={c.id} className="row row--between" style={{ alignItems: "center", padding: "0.5rem 0", borderTop: "1px solid var(--color-border)" }}>
+                <div className="stack" style={{ gap: "0.15rem" }}>
+                  <strong>{c.label ?? c.external_account_id ?? "Google Sheet"}</strong>
+                  <span className="text-xs muted">
+                    {c.external_account_id ? `Sheet ${c.external_account_id}` : "No sheet id"}
+                    {" · "}
+                    {c.last_lead_at ? `Last lead ${formatDateTime(c.last_lead_at)}` : "No leads yet"}
+                    {c.status_detail ? ` · ${c.status_detail}` : ""}
+                  </span>
+                </div>
+                <div className="row" style={{ gap: "0.5rem", alignItems: "center" }}>
+                  <Badge tone={STATUS_TONE[c.status] ?? "neutral"}>{STATUS_LABEL[c.status] ?? c.status}</Badge>
+                  <Button size="sm" variant="ghost" onClick={() => void disconnectSheet(c)}>Disconnect</Button>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="muted text-sm" style={{ marginTop: "0.35rem" }}>No sheets connected yet.</p>
+        )}
+        <div className="stack" style={{ gap: "0.5rem", marginTop: "0.75rem" }}>
+          <TextField
+            id="sheet-id"
+            label="Sheet ID"
+            value={sheetId}
+            onChange={(e) => setSheetId(e.target.value)}
+            placeholder="e.g. 1AbCdEf… (from the sheet URL)"
+          />
+          <TextField
+            id="sheet-label"
+            label="Label (optional)"
+            value={sheetLabel}
+            onChange={(e) => setSheetLabel(e.target.value)}
+            placeholder="e.g. Meta Leads – Vadodara"
+          />
+          {sheetError && (
+            <p className="text-sm" style={{ color: "var(--color-danger)" }}>{sheetError}</p>
+          )}
+          <div className="row">
+            <Button
+              loading={sheetBusy}
+              disabled={sheetBusy || !sheetId.trim()}
+              onClick={() => void connectSheet()}
+            >
+              Connect sheet
+            </Button>
+          </div>
         </div>
       </div>
       )}

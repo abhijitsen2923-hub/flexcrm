@@ -37,6 +37,7 @@
     "META_SYNC_URL": "https://flexcrm-backend-539170436218.asia-south1.run.app/api/v1/cron/meta-lead-sync",
     "META_TOKEN_REFRESH_URL": "https://flexcrm-backend-539170436218.asia-south1.run.app/api/v1/cron/meta-token-refresh",
     "LEAD_SOURCE_RECONCILE_URL": "https://flexcrm-backend-539170436218.asia-south1.run.app/api/v1/cron/lead-source-reconcile",
+    "GOOGLE_SHEET_SYNC_URL": "https://flexcrm-backend-539170436218.asia-south1.run.app/api/v1/cron/google-sheet-sync",
     "CUSTOMER_HEALTH_URL": "https://flexcrm-backend-539170436218.asia-south1.run.app/api/v1/cron/customer-health",
     "SCORECARD_URL": "https://flexcrm-backend-539170436218.asia-south1.run.app/api/v1/cron/scorecard-compute",
     "ARCHIVE_URL": "https://flexcrm-backend-539170436218.asia-south1.run.app/api/v1/cron/archive"

@@ -113,6 +113,13 @@ class Settings(BaseSettings):
     # the classic scope-based login. Inert either way until meta_app_id is configured.
     meta_login_config_id: str | None = None
 
+    # --- Google Sheets lead source (one shared, platform-owned service account) ---
+    # `google_sa_key_json` is the SA's JSON key (as a string); it authorizes read-only
+    # access to any sheet a tenant shares with `google_sa_email`. Unset => the feature is
+    # inert (connect + poll are no-ops), so it's safe-by-default until configured.
+    google_sa_key_json: str | None = None
+    google_sa_email: str | None = None
+
     websocket_ping_interval_seconds: int = 20
     websocket_event_buffer_size: int = 200
 

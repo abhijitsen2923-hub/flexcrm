@@ -27,6 +27,8 @@ const DEFAULT_META_SYNC_URL = `${BACKEND}/api/v1/cron/meta-lead-sync`;
 const DEFAULT_META_TOKEN_REFRESH_URL = `${BACKEND}/api/v1/cron/meta-token-refresh`;
 // 99acres inbound backstop: replay any push delivery the persist-then-ACK background step missed.
 const DEFAULT_LEAD_SOURCE_RECONCILE_URL = `${BACKEND}/api/v1/cron/lead-source-reconcile`;
+// Google Sheet lead sync (pull): read tenant-connected sheets and ingest new rows as leads.
+const DEFAULT_GOOGLE_SHEET_SYNC_URL = `${BACKEND}/api/v1/cron/google-sheet-sync`;
 // Nightly maintenance. These three were CLI-only and therefore never ran in
 // production: nothing scheduled them, so retention purging, customer-health
 // re-evaluation and HR scorecards were all silently dormant.
@@ -62,6 +64,7 @@ export default {
     // reconcile replays any push delivery whose inline processing didn't finish.
     ctx.waitUntil(post(env.META_SYNC_URL || DEFAULT_META_SYNC_URL));
     ctx.waitUntil(post(env.LEAD_SOURCE_RECONCILE_URL || DEFAULT_LEAD_SOURCE_RECONCILE_URL));
+    ctx.waitUntil(post(env.GOOGLE_SHEET_SYNC_URL || DEFAULT_GOOGLE_SHEET_SYNC_URL));
 
     // Once-daily work rides only the morning cron. (event.cron is undefined when
     // triggered manually via the dashboard "Trigger" button — treat that as daily.)

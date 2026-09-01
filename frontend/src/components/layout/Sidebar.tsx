@@ -59,7 +59,7 @@ const NAV: ReadonlyArray<NavItem> = [
   { to: "/trackers/registration", label: "Registration", icon: FileCheck2, requires: ["LEAD_MANAGE"], moduleKey: "bookings" },
   { to: "/trackers/possession", label: "Possession", icon: KeyRound, requires: ["LEAD_MANAGE"], moduleKey: "bookings" },
   { to: "/channel-partners", label: "Channel Partners", icon: Handshake, requires: ["USER_VIEW"], moduleKey: "bookings" },
-  { to: "/integrations", label: "Integrations", icon: Plug, requires: ["ORG_MANAGE"], moduleKeys: ["meta_facebook", "meta_instagram", "portal_99acres"] },
+  { to: "/integrations", label: "Integrations", icon: Plug, requires: ["ORG_MANAGE"], moduleKeys: ["meta_facebook", "meta_instagram", "portal_99acres", "sheet_leads"] },
   // Always-visible
   { to: "/analytics", label: "Analytics", icon: BarChart3, requires: ["ANALYTICS_VIEW"] },
   { to: "/users", label: "Users", icon: Users, requires: ["USER_VIEW"] }
