@@ -13,7 +13,7 @@ import {
 } from "../components";
 import { FEATURES } from "../config/features";
 import { usePermissions } from "../hooks/usePermissions";
-import { useRealtimeEvent } from "../realtime";
+import { useRealtimeRefresh } from "../realtime";
 import {
   financeService,
   type CollectionEntry,
@@ -81,15 +81,15 @@ export default function FinancePage() {
     void load();
   }, [load]);
 
-  useRealtimeEvent((event) => {
-    if (
+  useRealtimeRefresh(
+    (event) =>
       event.event.startsWith("sales_order.") ||
       event.event.startsWith("payment.") ||
-      event.event.startsWith("refund.")
-    ) {
+      event.event.startsWith("refund."),
+    () => {
       void load();
-    }
-  });
+    },
+  );
 
   async function fetchReport() {
     try {

@@ -29,7 +29,7 @@ import { CHART_AXIS, CHART_GRID, CHART_PALETTE, CHART_PRIMARY } from "../config/
 import { useOrg } from "../context/OrgContext";
 import { useDashboard } from "../hooks/useDashboard";
 import { usePermissions } from "../hooks/usePermissions";
-import { useRealtimeEvent } from "../realtime";
+import { useRealtimeRefresh } from "../realtime";
 import { channelPartnersService } from "../services/channelPartners";
 import type { ChannelPartnerListItem } from "../types/partner";
 import { formatCurrency, formatInr, formatNumber, formatRelative } from "../utils/format";
@@ -87,17 +87,20 @@ export default function DashboardPage() {
     }
   }, [dashboard.error, toast]);
 
-  useRealtimeEvent((event) => {
-    if (
+  // Coalesce realtime-driven refreshes — a bulk lead import (Google Sheet sync / CSV) broadcasts
+  // many events at once, and refetching the dashboard's 6 endpoints per event trips the rate
+  // limiter. useRealtimeRefresh collapses a burst into at most one refresh per few seconds.
+  useRealtimeRefresh(
+    (event) =>
       event.event.startsWith("customer.") ||
       event.event.startsWith("lead.") ||
       event.event.startsWith("deal.") ||
       event.event.startsWith("task.") ||
-      event.event.startsWith("unit.")
-    ) {
+      event.event.startsWith("unit."),
+    () => {
       void dashboard.refresh();
-    }
-  });
+    },
+  );
 
   if (dashboard.loading && dashboard.summary.total_customers === 0) {
     return <LoadingBlock label="Loading dashboard…" />;

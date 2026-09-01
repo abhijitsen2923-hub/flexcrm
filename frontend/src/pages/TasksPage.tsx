@@ -17,7 +17,7 @@ import {
   type DataTableColumn
 } from "../components";
 import { useTasks } from "../hooks/useTasks";
-import { useRealtimeEvent } from "../realtime";
+import { useRealtimeRefresh } from "../realtime";
 import type { Task, TaskPriority, TaskStatus } from "../types";
 import { extractErrorMessage } from "../utils/errors";
 import { formatDateTime } from "../utils/format";
@@ -83,11 +83,12 @@ export default function TasksPage() {
   const [deleting, setDeleting] = useState<Task | null>(null);
   const [deleteSubmitting, setDeleteSubmitting] = useState(false);
 
-  useRealtimeEvent((event) => {
-    if (event.event.startsWith("task.")) {
+  useRealtimeRefresh(
+    (event) => event.event.startsWith("task."),
+    () => {
       void refresh();
-    }
-  });
+    },
+  );
 
   function openCreate() {
     setEditing(null);

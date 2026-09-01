@@ -16,7 +16,7 @@ import {
   type DataTableColumn
 } from "../components";
 import { useDeals } from "../hooks/useDeals";
-import { useRealtimeEvent } from "../realtime";
+import { useRealtimeRefresh } from "../realtime";
 import { customersService } from "../services/customers";
 import type { Customer, Deal, DealStage, DealStatus } from "../types";
 import { extractErrorMessage } from "../utils/errors";
@@ -89,11 +89,12 @@ export default function DealsPage() {
   const [deleting, setDeleting] = useState<Deal | null>(null);
   const [deleteSubmitting, setDeleteSubmitting] = useState(false);
 
-  useRealtimeEvent((event) => {
-    if (event.event.startsWith("deal.")) {
+  useRealtimeRefresh(
+    (event) => event.event.startsWith("deal."),
+    () => {
       void refresh();
-    }
-  });
+    },
+  );
 
   function openCreate() {
     setEditing(null);

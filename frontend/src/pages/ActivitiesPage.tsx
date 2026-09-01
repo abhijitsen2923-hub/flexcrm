@@ -12,7 +12,7 @@ import {
   TextareaField,
   useToast
 } from "../components";
-import { useRealtimeEvent } from "../realtime";
+import { useRealtimeRefresh } from "../realtime";
 import { activitiesService } from "../services/activities";
 import { customersService } from "../services/customers";
 import type {
@@ -82,11 +82,12 @@ export default function ActivitiesPage() {
       .catch(() => undefined);
   }, []);
 
-  useRealtimeEvent((event) => {
-    if (event.event.startsWith("activity.") || event.event.startsWith("customer.")) {
+  useRealtimeRefresh(
+    (event) => event.event.startsWith("activity.") || event.event.startsWith("customer."),
+    () => {
       void refresh();
-    }
-  });
+    },
+  );
 
   const customerOptions = useMemo(
     () => customers.map((customer) => ({ value: customer.id, label: customer.company_name })),

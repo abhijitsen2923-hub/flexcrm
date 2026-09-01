@@ -19,7 +19,7 @@ import {
 import { CustomerDrawer } from "../components/customers/CustomerDrawer";
 import { useCustomers } from "../hooks/useCustomers";
 import { usePermissions } from "../hooks/usePermissions";
-import { useRealtimeEvent } from "../realtime";
+import { useRealtimeRefresh } from "../realtime";
 import type { Customer, CustomerLifecycleStage, CustomerStatus } from "../types";
 import { exportsService } from "../services/exports";
 import { extractErrorMessage } from "../utils/errors";
@@ -94,11 +94,12 @@ export default function CustomersPage() {
   // Customer 360 detail drawer (click a row).
   const [detailCustomer, setDetailCustomer] = useState<Customer | null>(null);
 
-  useRealtimeEvent((event) => {
-    if (event.event.startsWith("customer.")) {
+  useRealtimeRefresh(
+    (event) => event.event.startsWith("customer."),
+    () => {
       void refresh();
-    }
-  });
+    },
+  );
 
   function openCreate() {
     setEditing(null);

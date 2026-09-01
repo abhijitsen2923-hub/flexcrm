@@ -259,3 +259,37 @@ export function useRealtimeEvent(handler: (event: RealtimeEnvelope) => void): vo
     return subscribe((event) => handlerRef.current(event));
   }, [subscribe]);
 }
+
+
+/**
+ * Throttled refresh on matching realtime events. A bulk operation — e.g. a Google Sheet lead
+ * sync, a CSV import, or a bulk reassign — broadcasts many events at once; calling `refresh` on
+ * EVERY event floods the page's endpoints and trips the per-client rate limiter (429 storm).
+ * This coalesces a burst into at most one `refresh` per `delayMs`: the first matching event
+ * schedules the refresh and further events during that window are dropped. `match` selects which
+ * events count; `refresh` is read via a ref so callers can pass an inline closure without
+ * re-subscribing every render.
+ */
+export function useRealtimeRefresh(
+  match: (event: RealtimeEnvelope) => boolean,
+  refresh: () => void,
+  delayMs = 2500,
+): void {
+  const refreshRef = useRef(refresh);
+  refreshRef.current = refresh;
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(
+    () => () => {
+      if (timer.current) clearTimeout(timer.current);
+    },
+    [],
+  );
+  useRealtimeEvent((event) => {
+    if (!match(event)) return;
+    if (timer.current !== null) return; // a refresh is already queued — coalesce the burst
+    timer.current = setTimeout(() => {
+      timer.current = null;
+      refreshRef.current();
+    }, delayMs);
+  });
+}

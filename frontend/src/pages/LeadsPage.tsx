@@ -21,7 +21,7 @@ import { usePipelines } from "../context/PipelineContext";
 import { useAuth } from "../hooks/useAuth";
 import { useLeads } from "../hooks/useLeads";
 import { usePermissions } from "../hooks/usePermissions";
-import { useRealtimeEvent } from "../realtime";
+import { useRealtimeRefresh } from "../realtime";
 import { exportsService } from "../services/exports";
 import { channelPartnersService, type PartnerOption } from "../services/channelPartners";
 import { leadsService, type LeadDuplicate, type LeadImportResult } from "../services/leads";
@@ -269,12 +269,13 @@ export default function LeadsPage() {
   // Auto-refresh when any lead.* envelope arrives — covers create, update,
   // stage_changed, deleted. The dependency array is empty in useRealtimeEvent
   // (it subscribes once), but it always has the latest `refresh` via a ref.
-  useRealtimeEvent((event) => {
-    if (event.event.startsWith("lead.")) {
+  useRealtimeRefresh(
+    (event) => event.event.startsWith("lead."),
+    () => {
       void refresh();
       void loadCampaigns();
-    }
-  });
+    },
+  );
 
   // Filter options = predefined campaigns + any custom ones actually on leads
   // (deduped, predefined first). This is what makes imported campaigns filterable.
