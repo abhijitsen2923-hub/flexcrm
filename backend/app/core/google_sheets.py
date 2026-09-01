@@ -46,12 +46,14 @@ def _client():
 
 
 def read_rows(sheet_id: str) -> list[dict]:
-    """Read the first worksheet of `sheet_id` as a list of row dicts (header row → cell values).
-    Raises SheetNotConfigured (feature off) or SheetAccessError (not shared / bad id / API error)."""
+    """Read EVERY worksheet (tab) of `sheet_id` as a combined list of row dicts (each tab's header row
+    → cell values), so a multi-form sheet (FORM1 + FORM2 + …) is fully ingested. A tab whose header is
+    unusable (no header row, or duplicate/blank column names — e.g. a summary tab) is skipped rather than
+    failing the whole sync. Raises SheetNotConfigured (feature off) or SheetAccessError (not shared / bad
+    id / can't open the spreadsheet)."""
     gc = _client()
     try:
-        worksheet = gc.open_by_key(sheet_id).sheet1
-        return worksheet.get_all_records()  # list[dict], keyed by the header row
+        worksheets = gc.open_by_key(sheet_id).worksheets()
     except SheetNotConfigured:
         raise
     except Exception as exc:  # noqa: BLE001 — normalize every gspread/google error to one type
@@ -59,6 +61,14 @@ def read_rows(sheet_id: str) -> list[dict]:
             "Could not read the sheet — check that it is shared (Viewer) with the service account "
             "and that the Sheet ID is correct."
         ) from exc
+    rows: list[dict] = []
+    for ws in worksheets:
+        try:
+            rows.extend(ws.get_all_records())  # list[dict], keyed by this tab's header row
+        except Exception:  # noqa: BLE001 — skip a tab with an unusable header; keep the other tabs
+            logger.warning("google_sheets: skipped worksheet %r (unreadable header)", getattr(ws, "title", "?"))
+            continue
+    return rows
 
 
 def verify_access(sheet_id: str) -> int:
