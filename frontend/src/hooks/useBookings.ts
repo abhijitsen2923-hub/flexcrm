@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { bookingsService, type CreateBookingPayload } from "../services/bookings";
-import { useRealtimeEvent } from "../realtime";
+import { useRealtimeRefresh } from "../realtime";
 import type { Booking, BookingStep, PricingSnapshot } from "../types/realestate";
 
 export function useBookings(filters?: { unitId?: string; customerId?: string; status?: string }) {
@@ -25,8 +25,8 @@ export function useBookings(filters?: { unitId?: string; customerId?: string; st
 
   // A unit status change (confirm/register/sell/cancel) alters booking rows too —
   // keep the list fresh across tabs.
-  useRealtimeEvent((event) => {
-    if (event.event === "unit.status_changed") void refresh();
+  useRealtimeRefresh((event) => event.event === "unit.status_changed", () => {
+    void refresh();
   });
 
   const create = useCallback(async (payload: CreateBookingPayload) => {

@@ -87,7 +87,7 @@ export default function PossessionTrackerPage() {
     return getList(id).filter(Boolean).length;
   }
 
-  if (loading) return <LoadingBlock label="Loading possession tracker…" />;
+  if (loading && bookings.length === 0) return <LoadingBlock label="Loading possession tracker…" />;
 
   return (
     <div className="tracker-page">

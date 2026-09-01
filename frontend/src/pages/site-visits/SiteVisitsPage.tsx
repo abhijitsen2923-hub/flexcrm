@@ -45,7 +45,7 @@ export default function SiteVisitsPage() {
   const { visits, loading, schedule, updateFeedback } = useSiteVisits();
   const [view, setView] = useState<ViewMode>("calendar");
 
-  if (loading) return <LoadingBlock label="Loading site visits…" />;
+  if (loading && visits.length === 0) return <LoadingBlock label="Loading site visits…" />;
 
   return (
     <div className="sv-page">

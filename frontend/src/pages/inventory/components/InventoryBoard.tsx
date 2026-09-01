@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useRealtimeEvent } from "../../../realtime";
+import { useRealtimeRefresh } from "../../../realtime";
 import { formatInr } from "../../../utils/format";
 import type { Project, Tower, Unit, UnitStatus, UnitType } from "../../../types/realestate";
 import { UnitDetailPanel } from "./UnitDetailPanel";
@@ -107,10 +107,8 @@ export function InventoryBoard({ projects, onStatusChange, onRefresh, filterFloo
   const [selectedUnit, setSelectedUnit] = useState<(Unit & { towerName: string; projectName: string }) | null>(null);
   const [typeFilter, setTypeFilter] = useState<UnitType | "all">("all");
 
-  useRealtimeEvent((event) => {
-    if (event.event === "unit.status_changed") {
-      onRefresh();
-    }
+  useRealtimeRefresh((event) => event.event === "unit.status_changed", () => {
+    onRefresh();
   });
 
   if (projects.length === 0) {

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { inventoryService } from "../services/inventory";
-import { useRealtimeEvent } from "../realtime";
+import { useRealtimeRefresh } from "../realtime";
 import type { Project, UnitStatus } from "../types/realestate";
 
 export function useInventory() {
@@ -25,8 +25,8 @@ export function useInventory() {
 
   // Keep inventory live across tabs/users: any unit status change (book, confirm,
   // register, sell, cancel, archive) is broadcast — re-pull so views don't go stale.
-  useRealtimeEvent((event) => {
-    if (event.event === "unit.status_changed") void refresh();
+  useRealtimeRefresh((event) => event.event === "unit.status_changed", () => {
+    void refresh();
   });
 
   const updateUnitStatus = useCallback(async (unitId: string, status: UnitStatus) => {

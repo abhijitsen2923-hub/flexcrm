@@ -424,7 +424,7 @@ export default function ProjectsPage() {
     },
   ];
 
-  if (loading) return <LoadingBlock label="Loading projects…" />;
+  if (loading && projects.length === 0) return <LoadingBlock label="Loading projects…" />;
 
   return (
     <div className="projects-page">

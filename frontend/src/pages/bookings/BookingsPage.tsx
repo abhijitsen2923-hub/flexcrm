@@ -356,7 +356,7 @@ export default function BookingsPage() {
     { key: "createdAt", header: "Created", render: (b) => formatDate(b.createdAt) },
   ];
 
-  if (loading) return <LoadingBlock label="Loading bookings…" />;
+  if (loading && bookings.length === 0) return <LoadingBlock label="Loading bookings…" />;
 
   const unitSearch = unitQuery.trim().toLowerCase();
   const filteredUnits = unitSearch

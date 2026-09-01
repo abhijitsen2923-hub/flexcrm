@@ -70,7 +70,7 @@ export default function InventoryPage() {
         </div>
       </div>
 
-      {loading ? (
+      {loading && projects.length === 0 ? (
         <div className="inventory-page__loading">
           {Array.from({ length: 3 }).map((_, i) => (
             <div key={i} className="skeleton-card" aria-busy="true" style={{ height: 180 }} />

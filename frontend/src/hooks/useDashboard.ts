@@ -39,6 +39,10 @@ export function useDashboard() {
   const [conversionAnalytics, setConversionAnalytics] = useState(initialConversion);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<unknown>(null);
+  // True once the first fetch has completed (success or failure). Pages guard their
+  // full-screen loader on `!initialized` — so a background refetch never blanks the page,
+  // and a legitimate zero value (new / lead-only / no-revenue org) doesn't keep the loader up.
+  const [initialized, setInitialized] = useState(false);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -66,6 +70,7 @@ export function useDashboard() {
       throw requestError;
     } finally {
       setLoading(false);
+      setInitialized(true);
     }
   }, []);
 
@@ -82,6 +87,7 @@ export function useDashboard() {
     conversionAnalytics,
     loading,
     error,
+    initialized,
     refresh
   };
 }

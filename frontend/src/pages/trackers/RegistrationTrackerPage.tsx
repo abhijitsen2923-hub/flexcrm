@@ -35,7 +35,7 @@ export default function RegistrationTrackerPage() {
   const effectiveFilter = projectFilter === "all" || groups.some((g) => g.projectId === projectFilter) ? projectFilter : "all";
   const visibleGroups = effectiveFilter === "all" ? groups : groups.filter((g) => g.projectId === effectiveFilter);
 
-  if (loading) return <LoadingBlock label="Loading registration tracker…" />;
+  if (loading && bookings.length === 0) return <LoadingBlock label="Loading registration tracker…" />;
 
   return (
     <div className="tracker-page">

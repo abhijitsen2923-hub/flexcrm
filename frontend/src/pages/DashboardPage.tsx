@@ -102,7 +102,7 @@ export default function DashboardPage() {
     },
   );
 
-  if (dashboard.loading && dashboard.summary.total_customers === 0) {
+  if (dashboard.loading && !dashboard.initialized) {
     return <LoadingBlock label="Loading dashboard…" />;
   }
 
@@ -226,7 +226,7 @@ export default function DashboardPage() {
                     <XAxis dataKey="label" stroke={CHART_AXIS} fontSize={12} />
                     <YAxis stroke={CHART_AXIS} fontSize={12} />
                     <Tooltip />
-                    <Line type="monotone" dataKey="value" stroke={CHART_PRIMARY} strokeWidth={2} dot={false} />
+                    <Line type="monotone" dataKey="value" stroke={CHART_PRIMARY} strokeWidth={2} dot={false} isAnimationActive={false} />
                   </LineChart>
                 </ResponsiveContainer>
               </div>
@@ -242,6 +242,7 @@ export default function DashboardPage() {
                 <PieChart>
                   <Pie
                     data={charts.lead_stage_breakdown}
+                    isAnimationActive={false}
                     dataKey="value"
                     nameKey="label"
                     innerRadius={50}
@@ -271,6 +272,7 @@ export default function DashboardPage() {
                   <PieChart>
                     <Pie
                       data={invCharts.inventory_status_breakdown}
+                      isAnimationActive={false}
                       dataKey="value"
                       nameKey="label"
                       innerRadius={50}
@@ -310,7 +312,7 @@ export default function DashboardPage() {
                       <XAxis dataKey="label" stroke={CHART_AXIS} fontSize={12} />
                       <YAxis stroke={CHART_AXIS} fontSize={12} />
                       <Tooltip />
-                      <Bar dataKey="value" fill={CHART_PRIMARY} radius={[4, 4, 0, 0]} />
+                      <Bar dataKey="value" fill={CHART_PRIMARY} radius={[4, 4, 0, 0]} isAnimationActive={false} />
                     </BarChart>
                   </ResponsiveContainer>
                 </div>

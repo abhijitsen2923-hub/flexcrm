@@ -34,7 +34,7 @@ export default function AnalyticsPage() {
     }
   }, [dashboard.error, toast]);
 
-  if (dashboard.loading && dashboard.revenueAnalytics.total_closed_revenue === "0") {
+  if (dashboard.loading && !dashboard.initialized) {
     return <LoadingBlock label="Loading analytics…" />;
   }
 
@@ -71,7 +71,7 @@ export default function AnalyticsPage() {
                   <XAxis dataKey="label" stroke={CHART_AXIS} fontSize={12} />
                   <YAxis stroke={CHART_AXIS} fontSize={12} />
                   <Tooltip />
-                  <Line type="monotone" dataKey="value" stroke={CHART_PRIMARY} strokeWidth={2} dot={false} />
+                  <Line type="monotone" dataKey="value" stroke={CHART_PRIMARY} strokeWidth={2} dot={false} isAnimationActive={false} />
                 </LineChart>
               </ResponsiveContainer>
             </div>
@@ -115,7 +115,7 @@ export default function AnalyticsPage() {
                 <XAxis dataKey="label" stroke={CHART_AXIS} fontSize={12} />
                 <YAxis stroke={CHART_AXIS} fontSize={12} />
                 <Tooltip />
-                <Bar dataKey="value" fill={CHART_PRIMARY} radius={[4, 4, 0, 0]} />
+                <Bar dataKey="value" fill={CHART_PRIMARY} radius={[4, 4, 0, 0]} isAnimationActive={false} />
               </BarChart>
             </ResponsiveContainer>
           </div>
