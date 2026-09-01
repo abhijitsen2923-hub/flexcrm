@@ -147,7 +147,12 @@ class LeadRead(ORMModel):
     title: str
     salutation: str | None = None
     contact_name: str
-    contact_email: EmailStr | None = None
+    # Read models use plain `str`, not `EmailStr`: ingested leads (Meta / Google
+    # Sheet / 99acres) can carry a non-RFC value in the email column (placeholder
+    # like "N/A", a malformed address). The DB stores it as-is, so re-validating
+    # the format at serialization time would raise ResponseValidationError and 500
+    # the entire list page. Write models (LeadCreate/LeadUpdate) keep EmailStr.
+    contact_email: str | None = None
     contact_phone: str | None = None
     contact_phone_alt: str | None = None
     company_name: str | None = None
@@ -193,7 +198,7 @@ class LeadDuplicate(ORMModel):
     lead_number: int
     title: str
     contact_name: str
-    contact_email: EmailStr | None = None
+    contact_email: str | None = None  # read model — see LeadRead note (no EmailStr re-validation)
     contact_phone: str | None = None
     stage_code: str
 

@@ -13,7 +13,7 @@ class CustomerCompact(ORMModel):
     id: UUID
     company_name: str
     contact_name: str
-    email: EmailStr | None = None
+    email: str | None = None  # read model — no EmailStr re-validation (see LeadRead note)
     status: CustomerStatus
 
 
@@ -45,7 +45,7 @@ class CustomerSourceLead(ORMModel):
 
 
 class CustomerRead(CustomerCompact):
-    email: EmailStr | None = None
+    email: str | None = None  # read model — no EmailStr re-validation (see LeadRead note)
     phone: str | None = None
     address: str | None = None
     source: str | None = None
