@@ -16,20 +16,21 @@
   },
   // Crons (UTC):
   //  - 30 3 * * *   : daily 03:30 UTC (~09:00 IST) — reminders + follow-ups +
-  //                   Meta token refresh + a Meta lead-sync poll + 99acres reconcile
+  //                   Meta token refresh + Meta lead-sync + 99acres reconcile + Google Sheet sync
   //                   + the nightly maintenance jobs (customer health, HR scorecards, archival).
-  //  - 30 15 * * *  : daily 15:30 UTC (~21:00 IST) — a second Meta lead-sync poll + 99acres reconcile.
-  // => Meta lead-sync runs TWICE daily (backstop; OAuth pages also get real-time
-  //    webhooks), token refresh + reminders run ONCE daily. The scheduled() handler
-  //    branches on event.cron (worker/index.js).
+  //  - 15 11 * * *  : daily 11:15 UTC (16:45 IST) — Meta lead-sync + 99acres reconcile + Google Sheet sync.
+  //  - 30 15 * * *  : daily 15:30 UTC (~21:00 IST) — Meta lead-sync + 99acres reconcile + Google Sheet sync.
+  // => The lead-pull trio (Meta lead-sync, 99acres reconcile, Google Sheet sync) runs on EVERY cron
+  //    (now 3x daily: 09:00, 16:45, 21:00 IST); token refresh + reminders + maintenance run ONCE daily
+  //    (only on the 03:30 cron). The scheduled() handler branches on event.cron (worker/index.js).
   // NOTE: the old */4 keep-alive ping was REMOVED — on Neon's free tier it kept
   // the compute awake 24/7 and burned the monthly compute allowance, which
   // hard-suspends the DB for the rest of the cycle (total outage). We now let
   // Neon auto-suspend when idle; the first request after idle wakes it (~2-5s,
-  // covered by the client's retry). The twice-daily Meta poll wakes Neon only
-  // twice a day, so it's free-tier-safe. Re-add a keep-alive only on a paid plan.
+  // covered by the client's retry). The lead-pull crons wake Neon 3x a day, which
+  // is still free-tier-safe. Re-add a keep-alive only on a paid plan.
   "triggers": {
-    "crons": ["30 3 * * *", "30 15 * * *"]
+    "crons": ["30 3 * * *", "15 11 * * *", "30 15 * * *"]
   },
   "vars": {
     "REMINDERS_URL": "https://flexcrm-backend-539170436218.asia-south1.run.app/api/v1/cron/registration-reminders",
