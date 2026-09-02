@@ -19,8 +19,12 @@ Usage
     python scripts/backfill_sheet_campaign.py            # PREVIEW only (no writes)
     python scripts/backfill_sheet_campaign.py --apply     # perform the update
 
-Environment
-    SYNC_DATABASE_URL  Synchronous PostgreSQL URL (read from settings/.env).
+Environment (no app deps required — only psycopg2)
+    Reads the DB URL from SYNC_DATABASE_URL or DATABASE_URL (an env var, or a
+    KEY=VALUE line in backend/.env). An async URL (postgresql+asyncpg://...) is
+    accepted and normalised for psycopg2. In Cloud Shell:
+        pip install psycopg2-binary
+        export DATABASE_URL='postgresql://USER:PASS@HOST/DB?sslmode=require'
 
 Safety
     - Preview (default) counts + prints samples; writes NOTHING.
@@ -33,20 +37,46 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 import re
-import sys
 from contextlib import contextmanager
 from typing import Iterator
 
 import psycopg2
 from psycopg2.extras import RealDictCursor
 
-# Ensure the app package is importable (run from the backend/ directory).
-sys.path.insert(0, ".")
-from app.core.config import get_settings  # noqa: E402
-
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
+
+
+def _resolve_db_url() -> str:
+    """DB URL from SYNC_DATABASE_URL / DATABASE_URL (env, then backend/.env),
+    normalised to a plain sync URL psycopg2 accepts (async driver suffix stripped).
+    Kept dependency-free on purpose so this runs in a bare Cloud Shell."""
+    values: dict[str, str] = {}
+    for key in ("SYNC_DATABASE_URL", "DATABASE_URL"):
+        if os.environ.get(key):
+            values[key] = os.environ[key]
+    env_path = os.path.join(os.getcwd(), ".env")
+    if os.path.exists(env_path):
+        with open(env_path, encoding="utf-8") as fh:
+            for line in fh:
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                key, _, val = line.partition("=")
+                key = key.strip()
+                if key in ("SYNC_DATABASE_URL", "DATABASE_URL") and key not in values:
+                    values[key] = val.strip().strip('"').strip("'")
+    url = values.get("SYNC_DATABASE_URL") or values.get("DATABASE_URL")
+    if not url:
+        raise SystemExit(
+            "No DB URL found. Set SYNC_DATABASE_URL or DATABASE_URL, e.g.\n"
+            "  export DATABASE_URL='postgresql://USER:PASS@HOST/DB?sslmode=require'"
+        )
+    for driver in ("+asyncpg", "+psycopg2", "+psycopg"):
+        url = url.replace(driver, "")
+    return url
 
 # The attribution line the mapper writes into notes is exactly "campaign: <value>"
 # on its own line — match it line-anchored so we never pick up a substring from a
@@ -121,8 +151,7 @@ def backfill_schema(cur, schema: str, apply: bool) -> tuple[int, int, list[tuple
 
 
 def run(apply: bool = False) -> None:
-    settings = get_settings()
-    url = settings.sync_database_url
+    url = _resolve_db_url()
     logger.info("Connecting to %s", url.split("@")[-1])  # mask credentials
     logger.info("Mode: %s", "APPLY (writing)" if apply else "PREVIEW (no writes)")
 
