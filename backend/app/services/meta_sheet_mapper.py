@@ -25,6 +25,7 @@ _PHONE_KEYS = ("phone_number", "phone", "mobile", "contact_number")
 _ID_KEYS = ("id", "lead_id", "leadgen_id", "lead id")
 _CREATED_KEYS = ("created_time", "created", "created_at", "date", "timestamp")
 _PLATFORM_KEYS = ("platform", "source_platform")
+_CAMPAIGN_KEYS = ("campaign_name", "campaign")
 
 # Meta form-question columns we recognise → CRM fields. Anything not listed (campaign/ad/form
 # names + any custom question) is preserved in notes.
@@ -72,12 +73,16 @@ def map_sheet_row(row: dict) -> tuple[str, dict]:
 
     platform = _get(row, *_PLATFORM_KEYS).lower()
     source = "instagram" if ("instagram" in platform or platform == "ig") else "facebook"
+    campaign = _get(row, *_CAMPAIGN_KEYS)
 
     fields: dict = {
         "contact_name": name or None,
         "contact_phone": phone,
         "contact_email": email,
         "source": source,
+        # Map the Meta campaign name onto the dedicated CRM `campaign` column (not just
+        # notes) so it shows in the Leads list column and drives the Campaign filter.
+        "campaign": campaign or None,
     }
     for aliases, target in _QUESTION_MAP:
         val = _get(row, *aliases)
@@ -90,7 +95,7 @@ def map_sheet_row(row: dict) -> tuple[str, dict]:
         fields["source_created_at"] = created_dt
 
     # Title (Meta gives none): "<interest/campaign> — <Name>" / fallbacks.
-    lead_for = fields.get("interest") or _get(row, "campaign_name")
+    lead_for = fields.get("interest") or campaign
     title = f"{lead_for} — {name}".strip(" —") if (lead_for or name) else "Meta Lead"
     fields["title"] = title
 
@@ -101,7 +106,7 @@ def map_sheet_row(row: dict) -> tuple[str, dict]:
         notes.append("— Meta —")
         notes.extend(attribution)
     known: set[str] = set()
-    for group in (_NAME_KEYS, _EMAIL_KEYS, _PHONE_KEYS, _ID_KEYS, _CREATED_KEYS, _PLATFORM_KEYS):
+    for group in (_NAME_KEYS, _EMAIL_KEYS, _PHONE_KEYS, _ID_KEYS, _CREATED_KEYS, _PLATFORM_KEYS, _CAMPAIGN_KEYS):
         known.update(k.lower() for k in group)
     for aliases, _t in _QUESTION_MAP:
         known.update(k.lower() for k in aliases)
