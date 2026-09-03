@@ -69,6 +69,9 @@ async def list_leads(
     # regardless of any client-supplied assigned_to_id (anti-poaching, BR-2).
     if current_user.role in ASSIGNED_ONLY_LEAD_ROLES:
         filters.assigned_to_id = current_user.id
+        # Reps are scoped to their own leads, so an "unassigned" (owner IS NULL)
+        # filter would contradict that and return nothing — ignore it for them.
+        filters.unassigned = None
     items, total = await LeadService(session).list_leads(pagination, filters)
     return PaginatedResponse[LeadRead](items=items, pagination=build_page_meta(total, pagination))
 

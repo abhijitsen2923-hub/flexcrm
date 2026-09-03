@@ -210,6 +210,10 @@ class LeadFilterParams(SearchSortParams):
     source: str | None = None
     campaign: str | None = None
     assigned_to_id: UUID | None = None
+    # Owner/admin triage: filter to leads with no owner (assigned_to_id IS NULL) so
+    # they can be handed out. A plain bool because the generic filter builder can't
+    # express IS NULL from assigned_to_id=None (that just means "any owner").
+    unassigned: bool | None = None
     partner_id: UUID | None = None
     # Filter to leads whose next action (call/follow-up) is due within a datetime
     # range. The client sends the selected LOCAL day's UTC boundaries (tz-correct),

@@ -20,6 +20,7 @@ export interface LeadListQuery extends PaginationQuery, SearchSortQuery {
   source?: string;
   campaign?: string;
   assigned_to_id?: string;
+  unassigned?: boolean;       // owner/admin: filter to leads with no owner (triage)
   // Selected local day's UTC boundaries — leads whose next action is due that day.
   next_action_from?: string;
   next_action_to?: string;

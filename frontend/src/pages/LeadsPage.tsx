@@ -232,7 +232,10 @@ export default function LeadsPage() {
       stage_changed_to,
       source: sourceFilter || undefined,
       campaign: campaignFilter || undefined,
-      assigned_to_id: ownerFilter || undefined,
+      // "__unassigned__" is a sentinel (an empty string would be stripped by
+      // buildQueryString): map it to the backend `unassigned` flag, not an owner id.
+      assigned_to_id: ownerFilter && ownerFilter !== "__unassigned__" ? ownerFilter : undefined,
+      unassigned: ownerFilter === "__unassigned__" ? true : undefined,
       search: search || undefined
     };
   }, [page, pageSize, industryFilter, stageFilter, nextActionOn, stageChangedFrom, stageChangedTo, sourceFilter, campaignFilter, ownerFilter, search]);
@@ -1039,6 +1042,7 @@ export default function LeadsPage() {
               style={{ minWidth: 200 }}
             >
               <option value="">All owners</option>
+              <option value="__unassigned__">Unassigned</option>
               {assignableUsers.map((u) => (
                 <option key={u.id} value={u.id}>
                   {u.first_name} {u.last_name}
