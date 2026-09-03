@@ -159,13 +159,13 @@ SCORECARD_ROLES: frozenset[UserRole] = frozenset({
 # telecaller = calling-phase + lost outcomes; sales_executive/crm_team = the full
 # active flow EXCEPT `new_enquiry` (intake) and `sold` (closing is manager-only).
 _FULL_ACTIVE_EXCEPT_INTAKE_AND_CLOSE = frozenset({
-    "call", "follow_up", "site_visit_confirmed", "site_visit_done", "interested",
+    "call", "did_not_pickup", "follow_up", "site_visit_confirmed", "site_visit_done", "interested",
     "booked", "agreement_payment", "registration", "possession",
     "not_interested", "disqualified",
 })
 ROLE_STAGE_ACCESS: dict[UserRole, frozenset[str]] = {
     UserRole.receptionist: frozenset({"new_enquiry", "call"}),
-    UserRole.telecaller: frozenset({"call", "follow_up", "not_interested", "disqualified"}),
+    UserRole.telecaller: frozenset({"call", "did_not_pickup", "follow_up", "not_interested", "disqualified"}),
     UserRole.sales_executive: _FULL_ACTIVE_EXCEPT_INTAKE_AND_CLOSE,
     UserRole.crm_team: _FULL_ACTIVE_EXCEPT_INTAKE_AND_CLOSE,
 }

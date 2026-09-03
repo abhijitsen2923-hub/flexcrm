@@ -52,24 +52,30 @@ TRAVEL_STAGES: list[PipelineStageSeed] = [
 ]
 
 
-# Real-estate lifecycle v2 (13 stages). Codes are stable identifiers; `sold` is
+# Real-estate lifecycle v2 (14 stages). Codes are stable identifiers; `sold` is
 # kept as the closed_won terminal so the promotion / sales-order / brokerage
 # side-effects keyed off SOLD_STAGE_CODE keep working. `not_interested` +
 # `disqualified` reuse the shared closed_lost codes so reopen logic works.
+# `did_not_pickup` (position 3, the call outcome when a lead can't be reached) is
+# an ACTIVE stage — the lead stays in the funnel and is re-worked once reached, so
+# it must NOT go into stage_transitions.CLOSED_LOST_STAGE_CODES. It uses a distinct
+# code (not the education/travel `did_not_pick`, which is closed_lost) precisely to
+# stay out of that shared, industry-agnostic closed-lost set.
 REAL_ESTATE_STAGES: list[PipelineStageSeed] = [
     ("real_estate", 1,  "new_enquiry",          "New Enquiry",          "active",      False),
     ("real_estate", 2,  "call",                 "Call",                 "active",      True),
-    ("real_estate", 3,  "follow_up",            "Follow-up",            "active",      True),
-    ("real_estate", 4,  "site_visit_confirmed", "Site Visit Confirmed", "active",      True),
-    ("real_estate", 5,  "site_visit_done",      "Site Visit Done",      "active",      True),
-    ("real_estate", 6,  "interested",           "Interested",           "active",      True),
-    ("real_estate", 7,  "booked",               "Booked / Token",       "active",      True),
-    ("real_estate", 8,  "agreement_payment",    "Agreement / Payment",  "active",      True),
-    ("real_estate", 9,  "registration",         "Registration",         "active",      True),
-    ("real_estate", 10, "possession",           "Possession",           "active",      True),
-    ("real_estate", 11, "sold",                 "Sold / Closed",        "closed_won",  True),
-    ("real_estate", 12, "not_interested",       "Not Interested",       "closed_lost", True),
-    ("real_estate", 13, "disqualified",         "Disqualified",         "closed_lost", True),
+    ("real_estate", 3,  "did_not_pickup",       "Did Not Pickup",       "active",      True),
+    ("real_estate", 4,  "follow_up",            "Follow-up",            "active",      True),
+    ("real_estate", 5,  "site_visit_confirmed", "Site Visit Confirmed", "active",      True),
+    ("real_estate", 6,  "site_visit_done",      "Site Visit Done",      "active",      True),
+    ("real_estate", 7,  "interested",           "Interested",           "active",      True),
+    ("real_estate", 8,  "booked",               "Booked / Token",       "active",      True),
+    ("real_estate", 9,  "agreement_payment",    "Agreement / Payment",  "active",      True),
+    ("real_estate", 10, "registration",         "Registration",         "active",      True),
+    ("real_estate", 11, "possession",           "Possession",           "active",      True),
+    ("real_estate", 12, "sold",                 "Sold / Closed",        "closed_won",  True),
+    ("real_estate", 13, "not_interested",       "Not Interested",       "closed_lost", True),
+    ("real_estate", 14, "disqualified",         "Disqualified",         "closed_lost", True),
 ]
 
 

@@ -6,14 +6,14 @@ import type { UserRole } from "../types/crm";
 // is the source of truth; this only trims the UI so users don't pick a stage
 // they'll be 403'd on.
 const FULL_ACTIVE = [
-  "call", "follow_up", "site_visit_confirmed", "site_visit_done", "interested",
+  "call", "did_not_pickup", "follow_up", "site_visit_confirmed", "site_visit_done", "interested",
   "booked", "agreement_payment", "registration", "possession",
   "not_interested", "disqualified",
 ];
 
 const ROLE_STAGE_ACCESS: Partial<Record<UserRole, readonly string[]>> = {
   receptionist: ["new_enquiry", "call"],
-  telecaller: ["call", "follow_up", "not_interested", "disqualified"],
+  telecaller: ["call", "did_not_pickup", "follow_up", "not_interested", "disqualified"],
   sales_executive: FULL_ACTIVE,
   crm_team: FULL_ACTIVE,
 };
