@@ -45,7 +45,7 @@ interface StageTransitionModalProps {
     next_action_date: string | null;
     attachment_path: string | null;
     mentions: string[];
-    site_visit?: { project_id: string; scheduled_at: string } | null;
+    site_visits?: { project_id: string; scheduled_at: string }[];
     assigned_to_id?: string | null;
     booking?: {
       unit_id: string;
@@ -73,7 +73,7 @@ export function StageTransitionModal({
 
   const [comment, setComment] = useState("");
   const [nextAction, setNextAction] = useState(""); // datetime-local (date + time)
-  const [siteProjectId, setSiteProjectId] = useState("");
+  const [siteProjectIds, setSiteProjectIds] = useState<string[]>([]);
   const [siteDateTime, setSiteDateTime] = useState("");
   // "Booked / Token" capture.
   const [unitId, setUnitId] = useState("");
@@ -90,7 +90,7 @@ export function StageTransitionModal({
     if (open) {
       setComment("");
       setNextAction("");
-      setSiteProjectId("");
+      setSiteProjectIds([]);
       setSiteDateTime("");
       setUnitId("");
       setTokenAmount("");
@@ -131,7 +131,7 @@ export function StageTransitionModal({
   );
 
   const trimmedLength = useMemo(() => comment.trim().length, [comment]);
-  const siteVisitReady = !isSiteVisitStage || Boolean(siteProjectId && siteDateTime);
+  const siteVisitReady = !isSiteVisitStage || (siteProjectIds.length > 0 && Boolean(siteDateTime));
   // Salesperson is only required when there ARE users to pick from. Booking roles
   // without USER_VIEW (e.g. crm_team) get an empty list — they book with the owner
   // defaulted server-side (their own id) rather than being blocked.
@@ -156,10 +156,13 @@ export function StageTransitionModal({
         next_action_date: nextAction ? new Date(nextAction).toISOString() : null,
         attachment_path: null,
         mentions: [],
-        site_visit:
-          isSiteVisitStage && siteProjectId && siteDateTime
-            ? { project_id: siteProjectId, scheduled_at: new Date(siteDateTime).toISOString() }
-            : null,
+        site_visits:
+          isSiteVisitStage && siteProjectIds.length > 0 && siteDateTime
+            ? siteProjectIds.map((id) => ({
+                project_id: id,
+                scheduled_at: new Date(siteDateTime).toISOString()
+              }))
+            : [],
         assigned_to_id: isBookedStage ? (salespersonId || null) : undefined,
         booking:
           isBookedStage && Number(tokenAmount) > 0
@@ -230,18 +233,49 @@ export function StageTransitionModal({
         />
 
         {isSiteVisitStage && (
-          <div className="form-grid">
-            <SelectField
-              id="sv-project"
-              label="Site (project)"
-              value={siteProjectId}
-              onChange={(event) => setSiteProjectId(event.target.value)}
-              options={[
-                { value: "", label: "Select a site…" },
-                ...projects.map((p) => ({ value: p.id, label: p.name }))
-              ]}
-              hint="A site visit is booked on the calendar for this lead."
-            />
+          <div className="stack" style={{ gap: "0.6rem" }}>
+            <div className="stack" style={{ gap: "0.35rem" }}>
+              <span className="muted text-sm">Sites (projects) — select one or more</span>
+              {projects.length === 0 ? (
+                <span className="muted text-sm">No projects yet — add one in Inventory first.</span>
+              ) : (
+                <div
+                  className="stack"
+                  style={{
+                    gap: "0.3rem",
+                    maxHeight: 180,
+                    overflowY: "auto",
+                    padding: "0.5rem 0.75rem",
+                    border: "1px solid var(--color-border)",
+                    borderRadius: "var(--radius-sm)"
+                  }}
+                >
+                  {projects.map((p) => (
+                    <label
+                      key={p.id}
+                      className="row"
+                      style={{ gap: "0.5rem", alignItems: "center", cursor: "pointer" }}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={siteProjectIds.includes(p.id)}
+                        onChange={(event) =>
+                          setSiteProjectIds((prev) =>
+                            event.target.checked ? [...prev, p.id] : prev.filter((id) => id !== p.id)
+                          )
+                        }
+                      />
+                      <span>{p.name}</span>
+                    </label>
+                  ))}
+                </div>
+              )}
+              <span className="muted text-xs">
+                {siteProjectIds.length > 0
+                  ? `${siteProjectIds.length} site visit${siteProjectIds.length === 1 ? "" : "s"} will be booked (one per site) at the date & time below.`
+                  : "One visit is booked per selected site at the date & time below."}
+              </span>
+            </div>
             <TextField
               id="sv-datetime"
               label="Visit date & time"

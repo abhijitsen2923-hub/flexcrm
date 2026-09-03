@@ -1445,18 +1445,22 @@ export default function LeadsPage() {
         onClose={() => setTransitionOpen(false)}
         onSubmit={async (payload) => {
           if (!transitionLeadState) return;
-          // `site_visit` is a separate calendar call; `booking`/`assigned_to_id`
-          // travel with the transition (the backend records the token + promotes).
-          const { site_visit, ...transitionPayload } = payload;
+          // `site_visits` are separate calendar calls (one per selected site);
+          // `booking`/`assigned_to_id` travel with the transition (the backend
+          // records the token + promotes).
+          const { site_visits, ...transitionPayload } = payload;
           await transitionLead(transitionLeadState.id, transitionPayload);
-          // When moving to the Site Visit stage, book the visit on the calendar.
-          if (site_visit) {
+          // When moving to the Site Visit stage, book one visit per selected site.
+          const visits = site_visits ?? [];
+          let bookedCount = 0;
+          for (const visit of visits) {
             try {
               await siteVisitsService.create({
                 leadId: transitionLeadState.id,
-                projectId: site_visit.project_id,
-                scheduledAt: site_visit.scheduled_at,
+                projectId: visit.project_id,
+                scheduledAt: visit.scheduled_at,
               });
+              bookedCount += 1;
             } catch (err) {
               toast.error("Site visit not booked", extractErrorMessage(err));
             }
@@ -1465,8 +1469,8 @@ export default function LeadsPage() {
             "Stage updated",
             transitionPayload.booking
               ? "Booked · token recorded, lead promoted to a customer"
-              : site_visit
-                ? "Moved · site visit booked on the calendar"
+              : bookedCount > 0
+                ? `Moved · ${bookedCount} site visit${bookedCount === 1 ? "" : "s"} booked on the calendar`
                 : `Moved to ${transitionTarget?.name ?? payload.to_stage_code}`
           );
           setDrawerKey((k) => k + 1);

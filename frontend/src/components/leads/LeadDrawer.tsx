@@ -6,7 +6,9 @@ import { Badge, Button, LoadingBlock, EmptyState } from "../../components";
 import { usePipelines } from "../../context/PipelineContext";
 import { useAuth } from "../../hooks/useAuth";
 import { leadsService } from "../../services/leads";
+import { siteVisitsService } from "../../services/site-visits";
 import type { Lead, LeadCallLog, PipelineStage, StageTransition } from "../../types";
+import type { SiteVisit } from "../../types/realestate";
 import { formatCurrency, formatDate, formatDateTime, formatRelative } from "../../utils/format";
 import { industryInterestLabel, pipelineCategoryTone, titleCase } from "../../utils/options";
 import { canSetStage } from "../../utils/stageAccess";
@@ -16,11 +18,12 @@ import { LeadBookingsTab } from "./LeadBookingsTab";
 // Mirror the stage-transition comment floor so a DNP is captured "like Call".
 const MIN_DNP_COMMENT = 10;
 
-type TabKey = "overview" | "bookings" | "history" | "activity";
+type TabKey = "overview" | "bookings" | "siteVisits" | "history" | "activity";
 
 const TAB_LABELS: Record<TabKey, string> = {
   overview: "Overview",
   bookings: "Booking & Payments",
+  siteVisits: "Site Visits",
   history: "Stage History",
   activity: "Activity",
 };
@@ -47,6 +50,8 @@ export function LeadDrawer({ open, lead, onClose, onTransitionRequest, onLogged,
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyError, setHistoryError] = useState(false);
   const [calls, setCalls] = useState<LeadCallLog[]>([]);
+  const [visits, setVisits] = useState<SiteVisit[]>([]);
+  const [visitsLoading, setVisitsLoading] = useState(false);
   // "Did Not Pick" inline form — logs a DNP with a comment + a scheduled next call.
   const [dnpOpen, setDnpOpen] = useState(false);
   const [dnpComment, setDnpComment] = useState("");
@@ -101,6 +106,22 @@ export function LeadDrawer({ open, lead, onClose, onTransitionRequest, onLogged,
     return () => { cancelled = true; };
   }, [open, lead?.id, refreshKey]);
 
+  // Site visits (real-estate only) — a lead can have many; list them all.
+  useEffect(() => {
+    if (!open || !lead || lead.industry !== "real_estate") {
+      setVisits([]);
+      return;
+    }
+    let cancelled = false;
+    setVisitsLoading(true);
+    void siteVisitsService
+      .list({ leadId: lead.id })
+      .then((rows) => { if (!cancelled) setVisits(rows); })
+      .catch(() => { if (!cancelled) setVisits([]); })
+      .finally(() => { if (!cancelled) setVisitsLoading(false); });
+    return () => { cancelled = true; };
+  }, [open, lead?.id, refreshKey]);
+
   // Reset the DNP form when switching leads.
   useEffect(() => {
     setDnpOpen(false);
@@ -139,9 +160,10 @@ export function LeadDrawer({ open, lead, onClose, onTransitionRequest, onLogged,
   const interestLabel = industryInterestLabel(lead.industry);
   const isRealEstate = lead.industry === "real_estate";
   const tabs: TabKey[] = isRealEstate
-    ? ["overview", "bookings", "history", "activity"]
+    ? ["overview", "bookings", "siteVisits", "history", "activity"]
     : ["overview", "history", "activity"];
-  const activeTab: TabKey = tab === "bookings" && !isRealEstate ? "overview" : tab;
+  const activeTab: TabKey =
+    (tab === "bookings" || tab === "siteVisits") && !isRealEstate ? "overview" : tab;
 
   // Real-estate leads carry a budget range (budget_min/max), not a single value —
   // show the range instead of `value` (which defaults to 0 for RE). Mirrors the
@@ -198,6 +220,31 @@ export function LeadDrawer({ open, lead, onClose, onTransitionRequest, onLogged,
         <div className="drawer__body">
           {activeTab === "bookings" && isRealEstate && (
             <LeadBookingsTab leadId={lead.id} customerId={lead.customer_id} refreshKey={refreshKey} />
+          )}
+          {activeTab === "siteVisits" && isRealEstate && (
+            <div className="stack">
+              {visitsLoading && visits.length === 0 ? (
+                <LoadingBlock label="Loading site visits…" />
+              ) : visits.length === 0 ? (
+                <EmptyState
+                  title="No site visits"
+                  description="Move this lead to “Site Visit Confirmed” to book one or more visits."
+                />
+              ) : (
+                visits.map((v) => (
+                  <div key={v.id} className="card" style={{ padding: "0.75rem 1rem" }}>
+                    <div className="row row--between">
+                      <strong>{v.project?.name ?? "Site"}</strong>
+                      <span className="muted text-sm">{formatDateTime(v.scheduledAt)}</span>
+                    </div>
+                    <div className="muted text-sm" style={{ marginTop: 4 }}>
+                      {v.attended === null ? "Not recorded" : v.attended ? "Attended" : "Absent"}
+                      {v.feedback ? ` · ${v.feedback}` : ""}
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
           )}
           {activeTab === "overview" && (
             <div className="stack">
