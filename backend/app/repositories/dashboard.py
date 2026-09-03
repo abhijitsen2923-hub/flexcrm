@@ -16,11 +16,19 @@ class DashboardRepository:
     def __init__(self, session):
         self.session = session
 
-    async def summary(self) -> dict[str, int | Decimal]:
+    async def summary(self, owner_id=None) -> dict[str, int | Decimal]:
         total_customers = int(
             (await self.session.execute(select(func.count()).select_from(Customer).where(Customer.is_deleted.is_(False)))).scalar_one()
         )
         # "Active" leads = stage category 'active' (not closed-won, not closed-lost).
+        # When owner_id is set (a front-line rep), scope to leads assigned to them —
+        # mirroring the leads-list rule — so their dashboard reflects their own pipeline.
+        active_leads_where = [
+            Lead.is_deleted.is_(False),
+            PipelineStage.category == PipelineStageCategory.active,
+        ]
+        if owner_id is not None:
+            active_leads_where.append(Lead.assigned_to_id == owner_id)
         active_leads = int(
             (
                 await self.session.execute(
@@ -31,10 +39,7 @@ class DashboardRepository:
                         (PipelineStage.industry == Lead.industry)
                         & (PipelineStage.code == Lead.stage_code),
                     )
-                    .where(
-                        Lead.is_deleted.is_(False),
-                        PipelineStage.category == PipelineStageCategory.active,
-                    )
+                    .where(*active_leads_where)
                 )
             ).scalar_one()
         )
@@ -49,15 +54,18 @@ class DashboardRepository:
             ).scalar_one()
             or Decimal("0")
         )
+        overdue_where = [
+            Task.is_deleted.is_(False),
+            Task.status.not_in([TaskStatus.completed, TaskStatus.cancelled]),
+            Task.due_date.is_not(None),
+            Task.due_date < datetime.now(UTC),
+        ]
+        if owner_id is not None:
+            overdue_where.append(Task.assigned_to_id == owner_id)
         overdue_tasks = int(
             (
                 await self.session.execute(
-                    select(func.count()).select_from(Task).where(
-                        Task.is_deleted.is_(False),
-                        Task.status.not_in([TaskStatus.completed, TaskStatus.cancelled]),
-                        Task.due_date.is_not(None),
-                        Task.due_date < datetime.now(UTC),
-                    )
+                    select(func.count()).select_from(Task).where(*overdue_where)
                 )
             ).scalar_one()
         )
@@ -95,10 +103,13 @@ class DashboardRepository:
             buckets[label] = buckets.get(label, Decimal("0")) + Decimal(amount)
         return sorted(buckets.items())
 
-    async def lead_stage_breakdown(self) -> list[tuple[str, int]]:
+    async def lead_stage_breakdown(self, owner_id=None) -> list[tuple[str, int]]:
         # Group by the human-readable stage name (joined from pipeline_stages)
         # so dashboard charts show "Counseling Session Booked" rather than
-        # an opaque slug.
+        # an opaque slug. Rep-scoped (owner_id) → only their assigned leads.
+        where = [Lead.is_deleted.is_(False)]
+        if owner_id is not None:
+            where.append(Lead.assigned_to_id == owner_id)
         rows = (
             await self.session.execute(
                 select(PipelineStage.name, func.count(Lead.id))
@@ -107,17 +118,20 @@ class DashboardRepository:
                     (Lead.industry == PipelineStage.industry)
                     & (Lead.stage_code == PipelineStage.code),
                 )
-                .where(Lead.is_deleted.is_(False))
+                .where(*where)
                 .group_by(PipelineStage.name)
             )
         ).all()
         return [(name, count) for name, count in rows]
 
-    async def task_status_breakdown(self) -> list[tuple[str, int]]:
+    async def task_status_breakdown(self, owner_id=None) -> list[tuple[str, int]]:
+        where = [Task.is_deleted.is_(False)]
+        if owner_id is not None:
+            where.append(Task.assigned_to_id == owner_id)
         rows = (
             await self.session.execute(
                 select(Task.status, func.count(Task.id))
-                .where(Task.is_deleted.is_(False))
+                .where(*where)
                 .group_by(Task.status)
             )
         ).all()

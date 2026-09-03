@@ -19,11 +19,13 @@ class DashboardService:
         self.repository = DashboardRepository(session)
         self.cache_ttl = get_settings().cache_ttl_seconds
 
-    def _cache_key(self, name: str) -> str:
+    def _cache_key(self, name: str, owner_id=None) -> str:
         # Scope by tenant schema so one tenant's cached dashboard is never served
         # to another (shared Redis). Falls back to "public" when no schema is set.
+        # Also scope by owner_id: a rep's own-leads view must never share a key with
+        # the org-wide (owner/manager) view, or one would be served to the other.
         scope = get_schema(self.session) or "public"
-        return f"dashboard:{name}:{scope}"
+        return f"dashboard:{name}:{scope}:{owner_id or 'all'}"
 
     async def _read_cache(self, cache_key: str, model_cls):
         """Return a validated model from cache, or None on miss / stale entry.
@@ -39,25 +41,27 @@ class DashboardService:
             await cache_client.delete(cache_key)
             return None
 
-    async def get_summary(self) -> DashboardSummaryResponse:
-        cache_key = self._cache_key("summary")
+    async def get_summary(self, owner_id=None) -> DashboardSummaryResponse:
+        cache_key = self._cache_key("summary", owner_id)
         cached = await self._read_cache(cache_key, DashboardSummaryResponse)
         if cached is not None:
             return cached
 
-        summary = DashboardSummaryResponse(**await self.repository.summary())
+        summary = DashboardSummaryResponse(**await self.repository.summary(owner_id))
         await cache_client.set_json(cache_key, summary.model_dump(mode="json"), self.cache_ttl)
         return summary
 
-    async def get_charts(self) -> DashboardChartsResponse:
-        cache_key = self._cache_key("charts")
+    async def get_charts(self, owner_id=None) -> DashboardChartsResponse:
+        cache_key = self._cache_key("charts", owner_id)
         cached = await self._read_cache(cache_key, DashboardChartsResponse)
         if cached is not None:
             return cached
 
+        # revenue_trend stays org-wide (deals have no per-user owner); the lead/task
+        # breakdowns are scoped to the rep when owner_id is set.
         revenue_trend = [ChartPoint(label=label, value=Decimal(value)) for label, value in await self.repository.revenue_trend()]
-        lead_stage_breakdown = [ChartPoint(label=label, value=value) for label, value in await self.repository.lead_stage_breakdown()]
-        task_status_breakdown = [ChartPoint(label=label, value=value) for label, value in await self.repository.task_status_breakdown()]
+        lead_stage_breakdown = [ChartPoint(label=label, value=value) for label, value in await self.repository.lead_stage_breakdown(owner_id)]
+        task_status_breakdown = [ChartPoint(label=label, value=value) for label, value in await self.repository.task_status_breakdown(owner_id)]
         response = DashboardChartsResponse(
             revenue_trend=revenue_trend,
             lead_stage_breakdown=lead_stage_breakdown,
