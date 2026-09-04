@@ -18,10 +18,20 @@ export function Spinner({ size, label }: SpinnerProps) {
 }
 
 
-export function LoadingBlock({ label = "Loading…" }: { label?: string }) {
+export function LoadingBlock({
+  label = "Loading…",
+  slow = false,
+  slowLabel = "Waking the server, one moment…"
+}: {
+  label?: string;
+  /** When true (a fetch running unusually long — likely a cold backend), show
+   * the reassuring `slowLabel` instead of the generic label. */
+  slow?: boolean;
+  slowLabel?: string;
+}) {
   return (
     <div className="loading-block">
-      <Spinner label={label} />
+      <Spinner label={slow ? slowLabel : label} />
     </div>
   );
 }

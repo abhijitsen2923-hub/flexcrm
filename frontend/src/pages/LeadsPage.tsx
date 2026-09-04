@@ -6,10 +6,10 @@ import {
   Button,
   DataTable,
   EmptyState,
-  LoadingBlock,
   Modal,
   Pagination,
   SelectField,
+  SkeletonTable,
   TextField,
   useToast,
   type DataTableColumn
@@ -1119,7 +1119,7 @@ export default function LeadsPage() {
             )}
             <div className="table-wrap table-wrap--leads" style={{ border: "none", borderRadius: 0, boxShadow: "none" }}>
               {loading && leads.length === 0 ? (
-                <LoadingBlock label="Loading leads…" />
+                <SkeletonTable cols={6} rows={8} />
               ) : (
                 <DataTable
                   columns={columns}

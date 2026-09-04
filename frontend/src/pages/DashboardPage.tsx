@@ -21,7 +21,8 @@ import {
   Button,
   Card,
   EmptyState,
-  LoadingBlock,
+  SkeletonCard,
+  SkeletonKpiRow,
   useToast
 } from "../components";
 import { mergeModules } from "../config/features";
@@ -103,7 +104,26 @@ export default function DashboardPage() {
   );
 
   if (dashboard.loading && !dashboard.initialized) {
-    return <LoadingBlock label="Loading dashboard…" />;
+    return (
+      <>
+        <div className="page-header">
+          <div className="page-header__titles">
+            <h1>Dashboard</h1>
+            <p>Real-time snapshot of your pipeline, tasks, and activity.</p>
+          </div>
+        </div>
+        <SkeletonKpiRow count={4} />
+        <div className="dashboard-grid" style={{ marginTop: "1rem" }}>
+          <SkeletonCard rows={6} />
+          <SkeletonCard rows={6} />
+        </div>
+        {dashboard.slow && (
+          <p className="muted text-sm" style={{ marginTop: "0.75rem" }}>
+            Waking the server, one moment…
+          </p>
+        )}
+      </>
+    );
   }
 
   const { summary, charts, recentActivities } = dashboard;

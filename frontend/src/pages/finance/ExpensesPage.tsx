@@ -8,9 +8,9 @@ import {
   EmptyState,
   FileUploadField,
   KpiCard,
-  LoadingBlock,
   Modal,
   SelectField,
+  SkeletonTable,
   TextField,
   TextareaField,
   useToast,
@@ -111,13 +111,13 @@ export default function ExpensesPage() {
   async function refreshAll() {
     setLoading(true);
     try {
-      const [cats, vends] = await Promise.all([
-        financeService.listCategories("expense"),
-        financeService.listVendors({ is_active: true })
+      // Fire the expense list in parallel with the lookups — the list is what
+      // the user is waiting for, so it must not queue behind categories/vendors.
+      await Promise.all([
+        loadExpenses(),
+        financeService.listCategories("expense").then(setCategories),
+        financeService.listVendors({ is_active: true }).then(setVendors)
       ]);
-      setCategories(cats);
-      setVendors(vends);
-      await loadExpenses();
     } catch (e) {
       toast.error("Failed to load expenses", extractErrorMessage(e));
     } finally {
@@ -285,8 +285,6 @@ export default function ExpensesPage() {
     { key: "status", header: "Status", render: (x) => <Badge tone={STATUS_TONE[x.status]}>{x.status}</Badge> }
   ];
 
-  if (loading && expenses.length === 0) return <LoadingBlock label="Loading expenses…" />;
-
   const categoryOptions = categories.map((c) => ({ value: c.id, label: c.name }));
   const vendorOptions = [{ value: "", label: "— none —" }, ...vendors.map((v) => ({ value: v.id, label: v.name }))];
 
@@ -318,13 +316,17 @@ export default function ExpensesPage() {
             options={[{ value: "", label: "All categories" }, ...categoryOptions]}
           />
         </div>
-        <DataTable
-          columns={columns}
-          rows={expenses}
-          rowKey={(x) => x.id}
-          onRowClick={(x) => void openExpense(x)}
-          empty={<EmptyState title="No expenses" description="Add an expense to get started." />}
-        />
+        {loading && expenses.length === 0 ? (
+          <SkeletonTable cols={5} rows={8} />
+        ) : (
+          <DataTable
+            columns={columns}
+            rows={expenses}
+            rowKey={(x) => x.id}
+            onRowClick={(x) => void openExpense(x)}
+            empty={<EmptyState title="No expenses" description="Add an expense to get started." />}
+          />
+        )}
       </Card>
 
       <Modal

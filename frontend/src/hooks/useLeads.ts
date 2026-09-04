@@ -1,4 +1,4 @@
-import { useCallback, useEffect } from "react";
+import { useCallback, useEffect, useMemo } from "react";
 
 import {
   leadsService,
@@ -8,6 +8,7 @@ import {
   type StageTransitionPayload
 } from "../services/leads";
 import type { LeadListResponse } from "../types";
+import { invalidate } from "./resourceCache";
 import { useAsyncResource } from "./useAsyncResource";
 
 
@@ -22,15 +23,22 @@ const initialLeadsResponse: LeadListResponse = {
 };
 
 export function useLeads(query: LeadListQuery = {}) {
-  const { data, loading, error, execute } = useAsyncResource(leadsService.list, initialLeadsResponse);
+  const cacheKey = useMemo(() => `leads:${JSON.stringify(query)}`, [query]);
+  const { data, loading, isValidating, slow, error, execute } = useAsyncResource(
+    leadsService.list,
+    initialLeadsResponse,
+    { cacheKey }
+  );
 
   const refresh = useCallback(async () => {
     await execute(query);
   }, [execute, query]);
 
+  // Drop every cached leads view so the next visit (any filter/page) refetches.
   const createLead = useCallback(
     async (payload: LeadCreatePayload) => {
       await leadsService.create(payload);
+      invalidate("leads:");
       await refresh();
     },
     [refresh]
@@ -39,6 +47,7 @@ export function useLeads(query: LeadListQuery = {}) {
   const updateLead = useCallback(
     async (leadId: string, payload: LeadUpdatePayload) => {
       await leadsService.update(leadId, payload);
+      invalidate("leads:");
       await refresh();
     },
     [refresh]
@@ -47,6 +56,7 @@ export function useLeads(query: LeadListQuery = {}) {
   const deleteLead = useCallback(
     async (leadId: string) => {
       await leadsService.remove(leadId);
+      invalidate("leads:");
       await refresh();
     },
     [refresh]
@@ -55,6 +65,7 @@ export function useLeads(query: LeadListQuery = {}) {
   const transitionLead = useCallback(
     async (leadId: string, payload: StageTransitionPayload) => {
       await leadsService.createTransition(leadId, payload);
+      invalidate("leads:");
       await refresh();
     },
     [refresh]
@@ -68,6 +79,8 @@ export function useLeads(query: LeadListQuery = {}) {
     leads: data.items,
     pagination: data.pagination,
     loading,
+    isValidating,
+    slow,
     error,
     refresh,
     createLead,

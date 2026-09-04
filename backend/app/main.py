@@ -1,4 +1,5 @@
-from contextlib import asynccontextmanager
+import asyncio
+from contextlib import asynccontextmanager, suppress
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -31,23 +32,37 @@ logger = get_logger(__name__)
 register_tenancy_listeners()
 
 
+async def _background_tenant_upgrade() -> None:
+    # Best-effort: bring existing tenant schemas up to head so their tables match
+    # the ORM models (e.g. a newly added column). Idempotent (schemas at head are
+    # no-ops); failures are logged, never fatal.
+    try:
+        await upgrade_all_tenant_schemas()
+        logger.info("background tenant-schema upgrade complete")
+    except Exception:  # noqa: BLE001 — never let a best-effort migration crash the worker
+        logger.exception("background tenant-schema upgrade failed (continuing)")
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     db_manager.configure()
     await cache_client.connect()
     await ensure_platform_admin()
-    # Best-effort: bring existing tenant schemas up to head before serving, so
-    # their tables match the ORM models (e.g. a newly added leads column). New
-    # tenants already get migrations at provision time; this closes the gap for
-    # existing ones and avoids a window where queries hit a missing column.
-    # Idempotent (schemas at head are no-ops); failures are logged, never fatal.
-    try:
-        await upgrade_all_tenant_schemas()
-    except Exception:  # noqa: BLE001 — never block startup on best-effort migration
-        logger.exception("startup tenant-schema upgrade failed (continuing)")
+    # Run the tenant-schema upgrade as a background task rather than awaiting it
+    # before serving: on a cold start (Cloud Run min-instances=0 + Neon wake) this
+    # avoids blocking the first request behind O(tenants) Alembic upgrades, so the
+    # app becomes ready immediately and schemas catch up a moment later. New
+    # tenants still migrate at provision time. (Public-schema migrations run at
+    # deploy via docker-entrypoint.sh, so only per-tenant upgrades move off-path.)
+    logger.info("scheduling background tenant-schema upgrade")
+    upgrade_task = asyncio.create_task(_background_tenant_upgrade())
     try:
         yield
     finally:
+        if not upgrade_task.done():
+            upgrade_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await upgrade_task
         await cache_client.disconnect()
         await db_manager.dispose()
 

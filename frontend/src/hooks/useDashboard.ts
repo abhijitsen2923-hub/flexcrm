@@ -9,6 +9,7 @@ import type {
   DashboardSummary,
   RecentActivities
 } from "../types";
+import { getCached, setCached } from "./resourceCache";
 
 
 const initialSummary: DashboardSummary = {
@@ -30,23 +31,48 @@ const initialRevenue: AnalyticsRevenue = { total_closed_revenue: "0", open_pipel
 const initialLeads: AnalyticsLeads = { total_leads: 0, won_leads: 0, stage_breakdown: [], source_breakdown: [] };
 const initialConversion: AnalyticsConversion = { lead_to_win_rate: 0, deal_win_rate: 0, average_probability: 0 };
 
+// The dashboard aggregates six endpoints, so it's cached as one combined payload
+// under a single key — a revisit paints the last snapshot instantly and refreshes
+// in the background.
+const CACHE_KEY = "dashboard:v1";
+
+interface DashboardPayload {
+  summary: DashboardSummary;
+  charts: DashboardCharts;
+  recentActivities: RecentActivities;
+  revenueAnalytics: AnalyticsRevenue;
+  leadAnalytics: AnalyticsLeads;
+  conversionAnalytics: AnalyticsConversion;
+}
+
 export function useDashboard() {
-  const [summary, setSummary] = useState(initialSummary);
-  const [charts, setCharts] = useState(initialCharts);
-  const [recentActivities, setRecentActivities] = useState(initialRecentActivities);
-  const [revenueAnalytics, setRevenueAnalytics] = useState(initialRevenue);
-  const [leadAnalytics, setLeadAnalytics] = useState(initialLeads);
-  const [conversionAnalytics, setConversionAnalytics] = useState(initialConversion);
+  const cached = () => getCached<DashboardPayload>(CACHE_KEY);
+
+  const [summary, setSummary] = useState(() => cached()?.summary ?? initialSummary);
+  const [charts, setCharts] = useState(() => cached()?.charts ?? initialCharts);
+  const [recentActivities, setRecentActivities] = useState(() => cached()?.recentActivities ?? initialRecentActivities);
+  const [revenueAnalytics, setRevenueAnalytics] = useState(() => cached()?.revenueAnalytics ?? initialRevenue);
+  const [leadAnalytics, setLeadAnalytics] = useState(() => cached()?.leadAnalytics ?? initialLeads);
+  const [conversionAnalytics, setConversionAnalytics] = useState(() => cached()?.conversionAnalytics ?? initialConversion);
   const [loading, setLoading] = useState(false);
+  const [isValidating, setIsValidating] = useState(false);
+  const [slow, setSlow] = useState(false);
   const [error, setError] = useState<unknown>(null);
-  // True once the first fetch has completed (success or failure). Pages guard their
-  // full-screen loader on `!initialized` — so a background refetch never blanks the page,
-  // and a legitimate zero value (new / lead-only / no-revenue org) doesn't keep the loader up.
-  const [initialized, setInitialized] = useState(false);
+  // True once we have data to show — from cache immediately, or after the first
+  // fetch. Pages gate their full-screen loader on `!initialized`, so a warm cache
+  // or a background refetch never blanks the page.
+  const [initialized, setInitialized] = useState(() => getCached<DashboardPayload>(CACHE_KEY) !== undefined);
 
   const refresh = useCallback(async () => {
-    setLoading(true);
+    const warm = getCached<DashboardPayload>(CACHE_KEY) !== undefined;
+    if (warm) {
+      setIsValidating(true);
+    } else {
+      setLoading(true);
+    }
     setError(null);
+    setSlow(false);
+    const slowTimer = setTimeout(() => setSlow(true), 4000);
 
     try {
       const [summaryResponse, chartsResponse, recentResponse, revenueResponse, leadsResponse, conversionResponse] =
@@ -65,11 +91,22 @@ export function useDashboard() {
       setRevenueAnalytics(revenueResponse);
       setLeadAnalytics(leadsResponse);
       setConversionAnalytics(conversionResponse);
+      setCached(CACHE_KEY, {
+        summary: summaryResponse,
+        charts: chartsResponse,
+        recentActivities: recentResponse,
+        revenueAnalytics: revenueResponse,
+        leadAnalytics: leadsResponse,
+        conversionAnalytics: conversionResponse
+      });
     } catch (requestError) {
       setError(requestError);
       throw requestError;
     } finally {
+      clearTimeout(slowTimer);
       setLoading(false);
+      setIsValidating(false);
+      setSlow(false);
       setInitialized(true);
     }
   }, []);
@@ -86,6 +123,8 @@ export function useDashboard() {
     leadAnalytics,
     conversionAnalytics,
     loading,
+    isValidating,
+    slow,
     error,
     initialized,
     refresh

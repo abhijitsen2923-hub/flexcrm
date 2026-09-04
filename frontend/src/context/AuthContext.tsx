@@ -8,6 +8,7 @@ import {
   type PropsWithChildren
 } from "react";
 
+import { clearResourceCache } from "../hooks/resourceCache";
 import { authService } from "../services/auth";
 import { authStorage } from "../services/storage";
 import type { LoginPayload, RegisterPayload, StoredSession, User } from "../types";
@@ -68,6 +69,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
       const sessionInvalid = !authStorage.get() || status === 401 || status === 403;
       if (sessionInvalid) {
         authStorage.clear();
+        clearResourceCache();
         setUser(null);
         setSession(null);
       } else {
@@ -105,6 +107,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
     try {
       await authService.logout();
     } finally {
+      clearResourceCache();
       setUser(null);
       setSession(null);
     }

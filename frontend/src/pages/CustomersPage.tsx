@@ -7,10 +7,10 @@ import {
   ConfirmDialog,
   DataTable,
   EmptyState,
-  LoadingBlock,
   Modal,
   Pagination,
   SelectField,
+  SkeletonTable,
   TextField,
   TextareaField,
   useToast,
@@ -74,7 +74,7 @@ export default function CustomersPage() {
     [page, search, statusFilter]
   );
 
-  const { customers, pagination, loading, refresh, createCustomer, updateCustomer, deleteCustomer } =
+  const { customers, pagination, loading, isValidating, refresh, createCustomer, updateCustomer, deleteCustomer } =
     useCustomers(query);
 
   const { has: hasPerm } = usePermissions();
@@ -283,7 +283,7 @@ export default function CustomersPage() {
             size="sm"
             icon={<RefreshCw size={14} />}
             onClick={() => void refresh()}
-            loading={loading}
+            loading={loading || isValidating}
           >
             Refresh
           </Button>
@@ -344,7 +344,7 @@ export default function CustomersPage() {
         </div>
         <div className="table-wrap" style={{ border: "none", borderRadius: 0, boxShadow: "none" }}>
           {loading && customers.length === 0 ? (
-            <LoadingBlock label="Loading customers…" />
+            <SkeletonTable cols={5} rows={8} />
           ) : (
             <DataTable
               columns={columns}

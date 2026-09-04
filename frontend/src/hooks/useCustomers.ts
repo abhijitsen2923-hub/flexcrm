@@ -1,7 +1,8 @@
-import { useCallback, useEffect } from "react";
+import { useCallback, useEffect, useMemo } from "react";
 
 import { customersService, type CustomerListQuery, type CustomerPayload } from "../services/customers";
 import type { CustomerListResponse } from "../types";
+import { invalidate } from "./resourceCache";
 import { useAsyncResource } from "./useAsyncResource";
 
 
@@ -16,7 +17,12 @@ const initialCustomersResponse: CustomerListResponse = {
 };
 
 export function useCustomers(query: CustomerListQuery = {}) {
-  const { data, loading, error, execute } = useAsyncResource(customersService.list, initialCustomersResponse);
+  const cacheKey = useMemo(() => `customers:${JSON.stringify(query)}`, [query]);
+  const { data, loading, isValidating, slow, error, execute } = useAsyncResource(
+    customersService.list,
+    initialCustomersResponse,
+    { cacheKey }
+  );
 
   const refresh = useCallback(async () => {
     await execute(query);
@@ -25,6 +31,7 @@ export function useCustomers(query: CustomerListQuery = {}) {
   const createCustomer = useCallback(
     async (payload: CustomerPayload) => {
       await customersService.create(payload);
+      invalidate("customers:");
       await refresh();
     },
     [refresh]
@@ -33,6 +40,7 @@ export function useCustomers(query: CustomerListQuery = {}) {
   const updateCustomer = useCallback(
     async (customerId: string, payload: Partial<CustomerPayload>) => {
       await customersService.update(customerId, payload);
+      invalidate("customers:");
       await refresh();
     },
     [refresh]
@@ -41,6 +49,7 @@ export function useCustomers(query: CustomerListQuery = {}) {
   const deleteCustomer = useCallback(
     async (customerId: string) => {
       await customersService.remove(customerId);
+      invalidate("customers:");
       await refresh();
     },
     [refresh]
@@ -54,6 +63,8 @@ export function useCustomers(query: CustomerListQuery = {}) {
     customers: data.items,
     pagination: data.pagination,
     loading,
+    isValidating,
+    slow,
     error,
     refresh,
     createCustomer,
