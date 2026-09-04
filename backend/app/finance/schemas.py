@@ -569,3 +569,77 @@ class BudgetRead(ORMModel):
     variance: Decimal  # amount − actual
     used_pct: float  # 0..100+ (0 when amount is 0)
     notes: str | None = None
+
+
+# ---- Bank & cash accounts (Phase 3) ----
+
+class FinanceAccountCreate(ORMModel):
+    name: str = Field(min_length=1, max_length=120)
+    account_type: str = Field(default="bank", pattern=r"^(bank|cash)$")
+    opening_balance: Decimal = Decimal("0")
+    currency: str = Field(default="INR", max_length=3)
+    account_number: str | None = Field(default=None, max_length=40)
+    ifsc: str | None = Field(default=None, max_length=15)
+    notes: str | None = None
+
+
+class FinanceAccountUpdate(ORMModel):
+    name: str | None = Field(default=None, min_length=1, max_length=120)
+    account_type: str | None = Field(default=None, pattern=r"^(bank|cash)$")
+    opening_balance: Decimal | None = None
+    currency: str | None = Field(default=None, max_length=3)
+    account_number: str | None = Field(default=None, max_length=40)
+    ifsc: str | None = Field(default=None, max_length=15)
+    notes: str | None = None
+    is_active: bool | None = None
+
+
+class FinanceAccountRead(ORMModel):
+    id: UUID
+    name: str
+    account_type: str
+    opening_balance: Decimal
+    currency: str
+    account_number: str | None = None
+    ifsc: str | None = None
+    notes: str | None = None
+    is_active: bool
+    current_balance: Decimal  # opening + all in − all out
+    cleared_balance: Decimal  # opening + reconciled in − reconciled out
+    unreconciled_count: int
+
+
+class BankTransactionCreate(ORMModel):
+    txn_date: date
+    description: str = Field(min_length=1, max_length=255)
+    direction: str = Field(pattern=r"^(in|out)$")
+    amount: Decimal = Field(gt=0)
+    reference: str | None = Field(default=None, max_length=120)
+    category_id: UUID | None = None
+    notes: str | None = None
+
+
+class BankTransactionUpdate(ORMModel):
+    txn_date: date | None = None
+    description: str | None = Field(default=None, min_length=1, max_length=255)
+    direction: str | None = Field(default=None, pattern=r"^(in|out)$")
+    amount: Decimal | None = Field(default=None, gt=0)
+    reference: str | None = Field(default=None, max_length=120)
+    category_id: UUID | None = None
+    is_reconciled: bool | None = None
+    notes: str | None = None
+
+
+class BankTransactionRead(ORMModel):
+    id: UUID
+    account_id: UUID
+    txn_date: date
+    description: str
+    direction: str
+    amount: Decimal
+    reference: str | None = None
+    category_id: UUID | None = None
+    category_name: str | None = None
+    is_reconciled: bool
+    reconciled_on: date | None = None
+    notes: str | None = None

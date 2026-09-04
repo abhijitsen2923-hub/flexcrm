@@ -295,3 +295,57 @@ export interface BudgetWritePayload {
   amount: number;
   notes?: string | null;
 }
+
+export type AccountType = "bank" | "cash";
+export type TxnDirection = "in" | "out";
+
+export interface FinanceAccount {
+  id: string;
+  name: string;
+  account_type: AccountType;
+  opening_balance: string;
+  currency: string;
+  account_number: string | null;
+  ifsc: string | null;
+  notes: string | null;
+  is_active: boolean;
+  current_balance: string;
+  cleared_balance: string;
+  unreconciled_count: number;
+}
+
+export interface FinanceAccountWritePayload {
+  name: string;
+  account_type: AccountType;
+  opening_balance: number;
+  currency?: string;
+  account_number?: string | null;
+  ifsc?: string | null;
+  notes?: string | null;
+  is_active?: boolean;
+}
+
+export interface BankTransaction {
+  id: string;
+  account_id: string;
+  txn_date: string;
+  description: string;
+  direction: TxnDirection;
+  amount: string;
+  reference: string | null;
+  category_id: string | null;
+  category_name: string | null;
+  is_reconciled: boolean;
+  reconciled_on: string | null;
+  notes: string | null;
+}
+
+export interface BankTransactionWritePayload {
+  txn_date: string;
+  description: string;
+  direction: TxnDirection;
+  amount: number;
+  reference?: string | null;
+  category_id?: string | null;
+  notes?: string | null;
+}

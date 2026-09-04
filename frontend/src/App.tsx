@@ -45,6 +45,7 @@ const CustomerDemandsPage = lazy(() => import("./pages/finance/CustomerDemandsPa
 const ReportsPage = lazy(() => import("./pages/finance/ReportsPage"));
 const PayrollPage = lazy(() => import("./pages/finance/PayrollPage"));
 const BudgetsPage = lazy(() => import("./pages/finance/BudgetsPage"));
+const BankPage = lazy(() => import("./pages/finance/BankPage"));
 const HRPage = lazy(() => import("./pages/HRPage"));
 // Real-estate modules
 const InventoryPage = lazy(() => import("./pages/inventory/InventoryPage"));
@@ -137,6 +138,7 @@ export function App() {
                         {FEATURES.finance && <Route path="finance/reports" element={<ReportsPage />} />}
                         {FEATURES.finance && <Route path="finance/payroll" element={<PayrollPage />} />}
                         {FEATURES.finance && <Route path="finance/budgets" element={<BudgetsPage />} />}
+                        {FEATURES.finance && <Route path="finance/bank" element={<BankPage />} />}
                         {FEATURES.hr && <Route path="hr" element={<HRPage />} />}
                         {/* Real-estate modules */}
                         {FEATURES.projects && <Route path="projects" element={<ProjectsPage />} />}

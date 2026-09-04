@@ -19,6 +19,10 @@ import type {
   PayrollRunResult,
   Budget,
   BudgetWritePayload,
+  FinanceAccount,
+  FinanceAccountWritePayload,
+  BankTransaction,
+  BankTransactionWritePayload,
   FinanceSettings,
   FinanceSummary,
   ManualIncome,
@@ -325,5 +329,44 @@ export const financeService = {
   },
   async deleteBudget(id: string): Promise<void> {
     await apiClient.delete(`/finance/budgets/${id}`);
+  },
+
+  // ---- Bank & cash accounts (Phase 3) ----
+  async listAccounts(includeInactive = false): Promise<FinanceAccount[]> {
+    const { data } = await apiClient.get<FinanceAccount[]>("/finance/accounts", {
+      params: includeInactive ? { include_inactive: true } : undefined
+    });
+    return data;
+  },
+  async createAccount(payload: FinanceAccountWritePayload): Promise<FinanceAccount> {
+    const { data } = await apiClient.post<FinanceAccount>("/finance/accounts", payload);
+    return data;
+  },
+  async updateAccount(id: string, payload: Partial<FinanceAccountWritePayload>): Promise<FinanceAccount> {
+    const { data } = await apiClient.patch<FinanceAccount>(`/finance/accounts/${id}`, payload);
+    return data;
+  },
+  async deleteAccount(id: string): Promise<void> {
+    await apiClient.delete(`/finance/accounts/${id}`);
+  },
+  async listTransactions(accountId: string, reconciled?: boolean): Promise<BankTransaction[]> {
+    const { data } = await apiClient.get<BankTransaction[]>(`/finance/accounts/${accountId}/transactions`, {
+      params: reconciled === undefined ? undefined : { reconciled }
+    });
+    return data;
+  },
+  async createTransaction(accountId: string, payload: BankTransactionWritePayload): Promise<BankTransaction> {
+    const { data } = await apiClient.post<BankTransaction>(`/finance/accounts/${accountId}/transactions`, payload);
+    return data;
+  },
+  async updateTransaction(
+    txnId: string,
+    payload: Partial<BankTransactionWritePayload & { is_reconciled: boolean }>
+  ): Promise<BankTransaction> {
+    const { data } = await apiClient.patch<BankTransaction>(`/finance/transactions/${txnId}`, payload);
+    return data;
+  },
+  async deleteTransaction(txnId: string): Promise<void> {
+    await apiClient.delete(`/finance/transactions/${txnId}`);
   }
 };

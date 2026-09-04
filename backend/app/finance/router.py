@@ -25,6 +25,9 @@ from app.finance.models import (
 )
 from app.models.customer import Customer
 from app.finance.schemas import (
+    BankTransactionCreate,
+    BankTransactionRead,
+    BankTransactionUpdate,
     BudgetCreate,
     BudgetRead,
     BudgetUpdate,
@@ -44,6 +47,9 @@ from app.finance.schemas import (
     ExpenseRead,
     ExpenseRejectRequest,
     ExpenseUpdate,
+    FinanceAccountCreate,
+    FinanceAccountRead,
+    FinanceAccountUpdate,
     FinanceCategoryCreate,
     FinanceCategoryRead,
     FinanceCategoryUpdate,
@@ -76,9 +82,11 @@ from app.finance.schemas import (
     VendorUpdate,
 )
 from app.finance.services import (
+    BankTransactionService,
     BudgetService,
     CustomerDemandService,
     ExpenseService,
+    FinanceAccountService,
     FinanceCategoryService,
     FinanceReportingService,
     FinanceSettingsService,
@@ -823,6 +831,113 @@ async def delete_budget(
 ):
     service = BudgetService(session)
     await service.delete(budget_id, actor_id=current_user.id)
+    await service.commit()
+
+
+# ---- Bank & cash accounts + reconciliation (Phase 3) ----
+
+@router.get("/accounts", response_model=list[FinanceAccountRead])
+async def list_accounts(
+    include_inactive: bool = Query(default=False),
+    _: object = Depends(require_permissions(PermissionCode.FINANCE_VIEW)),
+    session: AsyncSession = Depends(get_db_session),
+):
+    return await FinanceAccountService(session).list(include_inactive=include_inactive)
+
+
+@router.post("/accounts", response_model=FinanceAccountRead, status_code=status.HTTP_201_CREATED)
+async def create_account(
+    payload: FinanceAccountCreate,
+    current_user=Depends(require_permissions(PermissionCode.FINANCE_SETTINGS_MANAGE)),
+    session: AsyncSession = Depends(get_db_session),
+):
+    service = FinanceAccountService(session)
+    row = await service.create(payload, actor_id=current_user.id)
+    await service.commit()
+    return row
+
+
+@router.get("/accounts/{account_id}", response_model=FinanceAccountRead)
+async def get_account(
+    account_id: UUID,
+    _: object = Depends(require_permissions(PermissionCode.FINANCE_VIEW)),
+    session: AsyncSession = Depends(get_db_session),
+):
+    return await FinanceAccountService(session).get(account_id)
+
+
+@router.patch("/accounts/{account_id}", response_model=FinanceAccountRead)
+async def update_account(
+    account_id: UUID,
+    payload: FinanceAccountUpdate,
+    current_user=Depends(require_permissions(PermissionCode.FINANCE_SETTINGS_MANAGE)),
+    session: AsyncSession = Depends(get_db_session),
+):
+    service = FinanceAccountService(session)
+    row = await service.update(account_id, payload, actor_id=current_user.id)
+    await service.commit()
+    return row
+
+
+@router.delete("/accounts/{account_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_account(
+    account_id: UUID,
+    current_user=Depends(require_permissions(PermissionCode.FINANCE_SETTINGS_MANAGE)),
+    session: AsyncSession = Depends(get_db_session),
+):
+    service = FinanceAccountService(session)
+    await service.delete(account_id, actor_id=current_user.id)
+    await service.commit()
+
+
+@router.get("/accounts/{account_id}/transactions", response_model=list[BankTransactionRead])
+async def list_transactions(
+    account_id: UUID,
+    reconciled: bool | None = Query(default=None),
+    _: object = Depends(require_permissions(PermissionCode.FINANCE_VIEW)),
+    session: AsyncSession = Depends(get_db_session),
+):
+    return await BankTransactionService(session).list(account_id, reconciled=reconciled)
+
+
+@router.post(
+    "/accounts/{account_id}/transactions",
+    response_model=BankTransactionRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_transaction(
+    account_id: UUID,
+    payload: BankTransactionCreate,
+    current_user=Depends(require_permissions(PermissionCode.FINANCE_RECORD_PAYMENT)),
+    session: AsyncSession = Depends(get_db_session),
+):
+    service = BankTransactionService(session)
+    row = await service.create(account_id, payload, actor_id=current_user.id)
+    await service.commit()
+    return row
+
+
+@router.patch("/transactions/{txn_id}", response_model=BankTransactionRead)
+async def update_transaction(
+    txn_id: UUID,
+    payload: BankTransactionUpdate,
+    current_user=Depends(require_permissions(PermissionCode.FINANCE_RECORD_PAYMENT)),
+    session: AsyncSession = Depends(get_db_session),
+):
+    service = BankTransactionService(session)
+    row = await service.update(txn_id, payload, actor_id=current_user.id)
+    await service.commit()
+    return row
+
+
+@router.delete("/transactions/{txn_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_transaction(
+    txn_id: UUID,
+    current_user=Depends(require_permissions(PermissionCode.FINANCE_RECORD_PAYMENT)),
+    session: AsyncSession = Depends(get_db_session),
+):
+    service = BankTransactionService(session)
+    await service.delete(txn_id, actor_id=current_user.id)
     await service.commit()
 
 

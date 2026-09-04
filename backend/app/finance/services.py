@@ -10,7 +10,7 @@ from datetime import UTC, date, datetime
 from decimal import Decimal
 from uuid import UUID
 
-from sqlalchemy import func, select
+from sqlalchemy import case, func, select
 from sqlalchemy.orm import selectinload
 
 from app.core.exceptions import AuthorizationError, NotFoundError, ValidationError
@@ -27,12 +27,14 @@ from app.database.enums import (
 from app.finance.category_presets import presets_for
 from app.finance.gst import compute_gst
 from app.finance.models import (
+    BankTransaction,
     Budget,
     CommissionLedger,
     CustomerContract,
     CustomerDemand,
     DemandReceipt,
     Expense,
+    FinanceAccount,
     FinanceCategory,
     FinanceSettings,
     Invoice,
@@ -46,6 +48,8 @@ from app.finance.models import (
     VendorPayment,
 )
 from app.finance.schemas import (
+    BankTransactionCreate,
+    BankTransactionUpdate,
     BudgetCreate,
     BudgetUpdate,
     CustomerContractCreate,
@@ -57,6 +61,8 @@ from app.finance.schemas import (
     ExpenseFilters,
     ExpenseUpdate,
     FinanceBreakdownRow,
+    FinanceAccountCreate,
+    FinanceAccountUpdate,
     FinanceCategoryCreate,
     FinanceCategoryUpdate,
     FinanceSettingsUpdate,
@@ -1309,6 +1315,205 @@ class BudgetService(ServiceBase):
 
     async def delete(self, budget_id: UUID, *, actor_id: UUID) -> None:
         row = await self._get(budget_id)
+        row.is_deleted = True
+        row.deleted_by_id = actor_id
+        row.deleted_at = datetime.now(UTC)
+        await self.session.flush()
+
+
+class FinanceAccountService(ServiceBase):
+    """Bank & cash accounts. Balances are computed from opening_balance + the
+    account's non-deleted transactions (current = all; cleared = reconciled only)."""
+
+    async def _get(self, account_id: UUID) -> FinanceAccount:
+        row = (
+            await self.session.execute(
+                select(FinanceAccount).where(
+                    FinanceAccount.id == account_id, FinanceAccount.is_deleted.is_(False)
+                )
+            )
+        ).scalar_one_or_none()
+        if row is None:
+            raise NotFoundError("Account not found.")
+        return row
+
+    async def _signed_sum(self, account_id: UUID, *, reconciled_only: bool) -> Decimal:
+        where = [
+            BankTransaction.account_id == account_id,
+            BankTransaction.is_deleted.is_(False),
+        ]
+        if reconciled_only:
+            where.append(BankTransaction.is_reconciled.is_(True))
+        # Signed CASE so 'in' adds to the balance and 'out' subtracts.
+        signed = func.coalesce(
+            func.sum(
+                case(
+                    (BankTransaction.direction == "in", BankTransaction.amount),
+                    else_=-BankTransaction.amount,
+                )
+            ),
+            0,
+        )
+        val = (await self.session.execute(select(signed).where(*where))).scalar_one()
+        return Decimal(val or 0)
+
+    async def _unreconciled_count(self, account_id: UUID) -> int:
+        val = (
+            await self.session.execute(
+                select(func.count()).where(
+                    BankTransaction.account_id == account_id,
+                    BankTransaction.is_deleted.is_(False),
+                    BankTransaction.is_reconciled.is_(False),
+                )
+            )
+        ).scalar_one()
+        return int(val or 0)
+
+    async def _to_read(self, row: FinanceAccount) -> dict:
+        opening = Decimal(row.opening_balance or 0)
+        current = opening + await self._signed_sum(row.id, reconciled_only=False)
+        cleared = opening + await self._signed_sum(row.id, reconciled_only=True)
+        return {
+            "id": row.id,
+            "name": row.name,
+            "account_type": row.account_type,
+            "opening_balance": opening,
+            "currency": row.currency,
+            "account_number": row.account_number,
+            "ifsc": row.ifsc,
+            "notes": row.notes,
+            "is_active": row.is_active,
+            "current_balance": current,
+            "cleared_balance": cleared,
+            "unreconciled_count": await self._unreconciled_count(row.id),
+        }
+
+    async def list(self, *, include_inactive: bool = False) -> list[dict]:
+        stmt = select(FinanceAccount).where(FinanceAccount.is_deleted.is_(False))
+        if not include_inactive:
+            stmt = stmt.where(FinanceAccount.is_active.is_(True))
+        stmt = stmt.order_by(FinanceAccount.name)
+        rows = (await self.session.execute(stmt)).scalars().all()
+        return [await self._to_read(row) for row in rows]
+
+    async def get(self, account_id: UUID) -> dict:
+        return await self._to_read(await self._get(account_id))
+
+    async def create(self, payload: FinanceAccountCreate, *, actor_id: UUID) -> dict:
+        row = FinanceAccount(
+            name=payload.name,
+            account_type=payload.account_type,
+            opening_balance=payload.opening_balance,
+            currency=payload.currency,
+            account_number=payload.account_number,
+            ifsc=payload.ifsc,
+            notes=payload.notes,
+            created_by_id=actor_id,
+            updated_by_id=actor_id,
+        )
+        self.session.add(row)
+        await self.session.flush()
+        return await self._to_read(row)
+
+    async def update(self, account_id: UUID, payload: FinanceAccountUpdate, *, actor_id: UUID) -> dict:
+        row = await self._get(account_id)
+        for key, value in payload.model_dump(exclude_unset=True).items():
+            setattr(row, key, value)
+        row.updated_by_id = actor_id
+        await self.session.flush()
+        return await self._to_read(row)
+
+    async def delete(self, account_id: UUID, *, actor_id: UUID) -> None:
+        row = await self._get(account_id)
+        row.is_deleted = True
+        row.deleted_by_id = actor_id
+        row.deleted_at = datetime.now(UTC)
+        await self.session.flush()
+
+
+class BankTransactionService(ServiceBase):
+    """Money movements on a finance account + reconciliation (mark matched to a
+    bank statement)."""
+
+    async def _get(self, txn_id: UUID) -> BankTransaction:
+        row = (
+            await self.session.execute(
+                select(BankTransaction).where(
+                    BankTransaction.id == txn_id, BankTransaction.is_deleted.is_(False)
+                )
+            )
+        ).scalar_one_or_none()
+        if row is None:
+            raise NotFoundError("Transaction not found.")
+        return row
+
+    @staticmethod
+    def _to_read(row: BankTransaction) -> dict:
+        return {
+            "id": row.id,
+            "account_id": row.account_id,
+            "txn_date": row.txn_date,
+            "description": row.description,
+            "direction": row.direction,
+            "amount": row.amount,
+            "reference": row.reference,
+            "category_id": row.category_id,
+            "category_name": row.category.name if row.category else None,
+            "is_reconciled": row.is_reconciled,
+            "reconciled_on": row.reconciled_on,
+            "notes": row.notes,
+        }
+
+    async def list(self, account_id: UUID, *, reconciled: bool | None = None) -> list[dict]:
+        stmt = (
+            select(BankTransaction)
+            .where(BankTransaction.account_id == account_id, BankTransaction.is_deleted.is_(False))
+            .options(selectinload(BankTransaction.category))
+        )
+        if reconciled is not None:
+            stmt = stmt.where(BankTransaction.is_reconciled.is_(reconciled))
+        stmt = stmt.order_by(BankTransaction.txn_date.desc(), BankTransaction.created_at.desc())
+        rows = (await self.session.execute(stmt)).scalars().all()
+        return [self._to_read(row) for row in rows]
+
+    async def create(self, account_id: UUID, payload: BankTransactionCreate, *, actor_id: UUID) -> dict:
+        # Validate the account exists (and isn't deleted).
+        await FinanceAccountService(self.session)._get(account_id)
+        row = BankTransaction(
+            account_id=account_id,
+            txn_date=payload.txn_date,
+            description=payload.description,
+            direction=payload.direction,
+            amount=payload.amount,
+            reference=payload.reference,
+            category_id=payload.category_id,
+            notes=payload.notes,
+            created_by_id=actor_id,
+            updated_by_id=actor_id,
+        )
+        self.session.add(row)
+        await self.session.flush()
+        await self.session.refresh(row, ["category"])
+        return self._to_read(row)
+
+    async def update(self, txn_id: UUID, payload: BankTransactionUpdate, *, actor_id: UUID) -> dict:
+        row = await self._get(txn_id)
+        data = payload.model_dump(exclude_unset=True)
+        # Keep reconciled_on in step with the is_reconciled flag.
+        if "is_reconciled" in data:
+            if data["is_reconciled"] and not row.is_reconciled:
+                row.reconciled_on = datetime.now(UTC).date()
+            elif not data["is_reconciled"]:
+                row.reconciled_on = None
+        for key, value in data.items():
+            setattr(row, key, value)
+        row.updated_by_id = actor_id
+        await self.session.flush()
+        await self.session.refresh(row, ["category"])
+        return self._to_read(row)
+
+    async def delete(self, txn_id: UUID, *, actor_id: UUID) -> None:
+        row = await self._get(txn_id)
         row.is_deleted = True
         row.deleted_by_id = actor_id
         row.deleted_at = datetime.now(UTC)

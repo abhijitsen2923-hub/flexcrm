@@ -609,3 +609,58 @@ class Budget(TenantBase, UUIDPrimaryKeyMixin, TimestampMixin, TenantAuditMixin, 
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     category = relationship("FinanceCategory")
+
+
+class FinanceAccount(TenantBase, UUIDPrimaryKeyMixin, TimestampMixin, TenantAuditMixin, TenantSoftDeleteMixin):
+    """A bank or cash account. Balances are computed from opening_balance + its
+    bank_transactions (never stored)."""
+
+    __tablename__ = "finance_accounts"
+    __table_args__ = (
+        CheckConstraint("account_type in ('bank','cash')", name="ck_finance_accounts_type"),
+        {"schema": "tenant"},
+    )
+
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
+    account_type: Mapped[str] = mapped_column(String(8), nullable=False, default="bank")  # bank|cash
+    opening_balance: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False, default=0)
+    currency: Mapped[str] = mapped_column(String(3), nullable=False, default="INR")
+    account_number: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    ifsc: Mapped[str | None] = mapped_column(String(15), nullable=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+
+    transactions = relationship(
+        "BankTransaction", back_populates="account", cascade="all, delete-orphan"
+    )
+
+
+class BankTransaction(TenantBase, UUIDPrimaryKeyMixin, TimestampMixin, TenantAuditMixin, TenantSoftDeleteMixin):
+    """A money movement on a finance account. direction 'in' credits the account,
+    'out' debits it. `is_reconciled` marks it as matched against a bank statement."""
+
+    __tablename__ = "bank_transactions"
+    __table_args__ = (
+        CheckConstraint("amount > 0", name="ck_bank_transactions_amount_positive"),
+        CheckConstraint("direction in ('in','out')", name="ck_bank_transactions_direction"),
+        Index("ix_bank_transactions_account", "account_id"),
+        {"schema": "tenant"},
+    )
+
+    account_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("finance_accounts.id", ondelete="CASCADE"), nullable=False
+    )
+    txn_date: Mapped[date] = mapped_column(Date, nullable=False)
+    description: Mapped[str] = mapped_column(String(255), nullable=False)
+    direction: Mapped[str] = mapped_column(String(3), nullable=False)  # in|out
+    amount: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False, default=0)
+    reference: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    category_id: Mapped[UUID | None] = mapped_column(
+        Uuid, ForeignKey("finance_categories.id", ondelete="SET NULL"), nullable=True
+    )
+    is_reconciled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    reconciled_on: Mapped[date | None] = mapped_column(Date, nullable=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    account = relationship("FinanceAccount", back_populates="transactions")
+    category = relationship("FinanceCategory")
