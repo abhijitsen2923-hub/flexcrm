@@ -15,6 +15,8 @@ import type {
   CustomerContractListItem,
   CustomerDemand,
   DemandReceipt,
+  PayrollEmployee,
+  PayrollRunResult,
   FinanceSettings,
   FinanceSummary,
   ManualIncome,
@@ -287,6 +289,20 @@ export const financeService = {
   },
   async recordDemandReceipt(demandId: string, payload: { amount: number; received_on: string; method?: string; txn_ref?: string; note?: string }): Promise<DemandReceipt> {
     const { data } = await apiClient.post<DemandReceipt>(`/finance/demands/${demandId}/receipts`, payload);
+    return data;
+  },
+
+  // ---- Payroll (Phase 3) ----
+  async listPayrollEmployees(): Promise<PayrollEmployee[]> {
+    const { data } = await apiClient.get<PayrollEmployee[]>("/finance/payroll/employees");
+    return data;
+  },
+  async setEmployeeSalary(userId: string, monthlySalary: number): Promise<PayrollEmployee> {
+    const { data } = await apiClient.patch<PayrollEmployee>(`/finance/payroll/employees/${userId}`, { monthly_salary: monthlySalary });
+    return data;
+  },
+  async runPayroll(month: string, employeeIds?: string[]): Promise<PayrollRunResult> {
+    const { data } = await apiClient.post<PayrollRunResult>("/finance/payroll/run", { month, employee_ids: employeeIds });
     return data;
   }
 };

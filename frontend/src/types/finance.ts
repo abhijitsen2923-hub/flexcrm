@@ -255,3 +255,19 @@ export interface CustomerContractListItem {
   balance: string;
   created_at: string;
 }
+
+// ---- Payroll (Phase 3) ----
+
+export interface PayrollEmployee {
+  user_id: string;
+  name: string;
+  role: string | null;
+  monthly_salary: string;
+}
+
+export interface PayrollRunResult {
+  month: string;
+  created: number;
+  skipped: number;
+  total_amount: string;
+}

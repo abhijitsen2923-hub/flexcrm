@@ -48,6 +48,8 @@ class EmployeeProfile(TenantBase, UUIDPrimaryKeyMixin, TimestampMixin):
     )
     target_revenue_monthly: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False, default=0)
     commission_rate: Mapped[Decimal] = mapped_column(Numeric(5, 2), nullable=False, default=0)
+    # Monthly fixed salary — the finance Payroll run turns this into a salary expense.
+    monthly_salary: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False, server_default="0", default=0)
     manager_id: Mapped[UUID | None] = mapped_column(
         Uuid,
         ForeignKey("public.users.id", ondelete="SET NULL"),

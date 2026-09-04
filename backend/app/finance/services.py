@@ -5,7 +5,8 @@ Driven from `stage_transitions.create_transition`: when a Lead reaches Sold,
 the CommissionLedger with an `accrued` entry. Payment receipt flips the
 ledger to `payable` and emits a realtime event.
 """
-from datetime import UTC, datetime
+from calendar import monthrange
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from uuid import UUID
 
@@ -70,6 +71,7 @@ from app.finance.schemas import (
     VendorPaymentCreate,
     VendorUpdate,
 )
+from app.hr.models import EmployeeProfile
 from app.models.lead import Lead
 from app.models.organization import Organization
 from app.models.stage_transition import StageTransition
@@ -1087,3 +1089,105 @@ class CustomerDemandService(ServiceBase):
             {"event": "demand.updated", "payload": {"id": str(row.id), "status": row.status}}
         )
         return receipt
+
+
+class PayrollService(ServiceBase):
+    """Employee salaries → finance expenses. Salary is set on EmployeeProfile;
+    a monthly run creates a submitted salary Expense per employee (idempotent by
+    title so re-running a month doesn't duplicate)."""
+
+    def _row(self, prof: EmployeeProfile, user: User) -> dict:
+        return {
+            "user_id": prof.user_id,
+            "name": f"{user.first_name} {user.last_name}".strip() if user else "",
+            "role": (user.role.value if user and user.role else None),
+            "monthly_salary": prof.monthly_salary,
+        }
+
+    async def list_employees(self):
+        rows = (
+            await self.session.execute(
+                select(EmployeeProfile, User)
+                .join(User, User.id == EmployeeProfile.user_id)
+                .order_by(User.first_name)
+            )
+        ).all()
+        return [self._row(prof, user) for prof, user in rows]
+
+    async def set_salary(self, user_id: UUID, amount: Decimal, *, actor_id: UUID) -> dict:
+        prof = (
+            await self.session.execute(select(EmployeeProfile).where(EmployeeProfile.user_id == user_id))
+        ).scalar_one_or_none()
+        if prof is None:
+            prof = EmployeeProfile(user_id=user_id, monthly_salary=amount)
+            self.session.add(prof)
+        else:
+            prof.monthly_salary = amount
+        await self.session.flush()
+        user = (await self.session.execute(select(User).where(User.id == user_id))).scalar_one_or_none()
+        return self._row(prof, user)
+
+    async def _salary_category_id(self, actor_id: UUID) -> UUID:
+        cat = (
+            await self.session.execute(
+                select(FinanceCategory).where(
+                    FinanceCategory.name == "Salaries & Wages",
+                    FinanceCategory.kind == FinanceCategoryKind.expense,
+                    FinanceCategory.is_deleted.is_(False),
+                )
+            )
+        ).scalar_one_or_none()
+        if cat is None:
+            cat = FinanceCategory(
+                name="Salaries & Wages", kind=FinanceCategoryKind.expense, group_label="Payroll",
+                source="preset", is_active=True, created_by_id=actor_id, updated_by_id=actor_id,
+            )
+            self.session.add(cat)
+            await self.session.flush()
+        return cat.id
+
+    async def run_payroll(self, month: str, employee_ids: list[UUID] | None, *, actor_id: UUID) -> dict:
+        year, mon = int(month[:4]), int(month[5:7])
+        last_day = date(year, mon, monthrange(year, mon)[1])
+        category_id = await self._salary_category_id(actor_id)
+
+        query = (
+            select(EmployeeProfile, User)
+            .join(User, User.id == EmployeeProfile.user_id)
+            .where(EmployeeProfile.monthly_salary > 0)
+        )
+        if employee_ids:
+            query = query.where(EmployeeProfile.user_id.in_(employee_ids))
+        rows = (await self.session.execute(query)).all()
+
+        created = 0
+        skipped = 0
+        total = Decimal("0")
+        for prof, user in rows:
+            name = f"{user.first_name} {user.last_name}".strip()
+            title = f"Salary — {name} — {month}"
+            exists = (
+                await self.session.execute(
+                    select(Expense.id).where(Expense.title == title, Expense.is_deleted.is_(False))
+                )
+            ).scalar_one_or_none()
+            if exists is not None:
+                skipped += 1
+                continue
+            number = await _next_sequence(self.session, Expense, "expense_number", "EXP")
+            amount = Decimal(prof.monthly_salary)
+            self.session.add(
+                Expense(
+                    expense_number=number, title=title, category_id=category_id, department="Payroll",
+                    expense_date=last_day, payment_mode=None, status=ExpenseStatus.submitted,
+                    submitted_by_id=actor_id, submitted_at=datetime.now(UTC),
+                    gst_applicable=False, amount_entered=amount, taxable_amount=amount,
+                    cgst_amount=Decimal("0"), sgst_amount=Decimal("0"), igst_amount=Decimal("0"),
+                    tds_amount=Decimal("0"), total_amount=amount, net_payable=amount,
+                    created_by_id=actor_id, updated_by_id=actor_id,
+                )
+            )
+            created += 1
+            total += amount
+        await self.session.flush()
+        return {"month": month, "created": created, "skipped": skipped, "total_amount": total}

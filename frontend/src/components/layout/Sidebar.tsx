@@ -25,6 +25,7 @@ import {
   Truck,
   UserRound,
   Users,
+  Users2,
   Wallet,
   X,
   type LucideIcon
@@ -66,6 +67,7 @@ const NAV: ReadonlyArray<NavItem> = [
   { to: "/finance/receivables", label: "Booking Receivables", icon: Banknote, requires: ["FINANCE_VIEW"], moduleKey: "finance" },
   { to: "/finance/vendors", label: "Vendors", icon: Truck, requires: ["FINANCE_VIEW"], moduleKey: "finance" },
   { to: "/finance/vendor-payments", label: "Vendor Payments", icon: Wallet, requires: ["FINANCE_VIEW"], moduleKey: "finance" },
+  { to: "/finance/payroll", label: "Payroll", icon: Users2, requires: ["FINANCE_SETTINGS_MANAGE"], moduleKey: "finance" },
   { to: "/finance/sales", label: "Revenue", icon: TrendingUp, requires: ["FINANCE_VIEW"], moduleKey: "finance" },
   { to: "/finance/reports", label: "Reports", icon: FileText, requires: ["FINANCE_VIEW"], moduleKey: "finance" },
   { to: "/finance/settings", label: "Finance Settings", icon: Settings2, requires: ["FINANCE_SETTINGS_MANAGE"], moduleKey: "finance" },

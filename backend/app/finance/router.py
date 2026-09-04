@@ -56,9 +56,13 @@ from app.finance.schemas import (
     MonthlyReportResponse,
     PaymentCreate,
     PaymentRead,
+    PayrollEmployeeRead,
+    PayrollRunRequest,
+    PayrollRunResult,
     RefundCreate,
     RefundRead,
     SalesOrderRead,
+    SetSalaryRequest,
     VendorBillCreate,
     VendorBillRead,
     VendorBillUpdate,
@@ -76,6 +80,7 @@ from app.finance.services import (
     FinanceSettingsService,
     FinanceSummaryService,
     ManualIncomeService,
+    PayrollService,
     PaymentService,
     RefundService,
     SalesOrderService,
@@ -726,6 +731,41 @@ async def record_demand_receipt(
     receipt = await service.record_receipt(demand_id, payload, actor_id=current_user.id)
     await service.commit()
     return receipt
+
+
+# ---- Payroll (Phase 3): employee salaries → expenses ----
+
+@router.get("/payroll/employees", response_model=list[PayrollEmployeeRead])
+async def list_payroll_employees(
+    _: object = Depends(require_permissions(PermissionCode.FINANCE_SETTINGS_MANAGE)),
+    session: AsyncSession = Depends(get_db_session),
+):
+    return await PayrollService(session).list_employees()
+
+
+@router.patch("/payroll/employees/{user_id}", response_model=PayrollEmployeeRead)
+async def set_employee_salary(
+    user_id: UUID,
+    payload: SetSalaryRequest,
+    current_user=Depends(require_permissions(PermissionCode.FINANCE_SETTINGS_MANAGE)),
+    session: AsyncSession = Depends(get_db_session),
+):
+    service = PayrollService(session)
+    row = await service.set_salary(user_id, payload.monthly_salary, actor_id=current_user.id)
+    await service.commit()
+    return row
+
+
+@router.post("/payroll/run", response_model=PayrollRunResult)
+async def run_payroll(
+    payload: PayrollRunRequest,
+    current_user=Depends(require_permissions(PermissionCode.FINANCE_EXPENSE_APPROVE)),
+    session: AsyncSession = Depends(get_db_session),
+):
+    service = PayrollService(session)
+    result = await service.run_payroll(payload.month, payload.employee_ids, actor_id=current_user.id)
+    await service.commit()
+    return result
 
 
 # ---- Generated documents (PDF, streamed) ----

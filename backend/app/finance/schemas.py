@@ -508,3 +508,28 @@ class DemandReceiptCreate(ORMModel):
     method: str | None = Field(default=None, max_length=64)
     txn_ref: str | None = Field(default=None, max_length=120)
     note: str | None = None
+
+
+# ---- Payroll (Phase 3) ----
+
+class PayrollEmployeeRead(ORMModel):
+    user_id: UUID
+    name: str
+    role: str | None = None
+    monthly_salary: Decimal
+
+
+class SetSalaryRequest(ORMModel):
+    monthly_salary: Decimal = Field(ge=0)
+
+
+class PayrollRunRequest(ORMModel):
+    month: str = Field(pattern=r"^\d{4}-\d{2}$")  # YYYY-MM
+    employee_ids: list[UUID] | None = None
+
+
+class PayrollRunResult(ORMModel):
+    month: str
+    created: int
+    skipped: int
+    total_amount: Decimal
