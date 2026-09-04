@@ -281,6 +281,75 @@ p {
   color: var(--color-sidebar-active-text);
 }
 
+/* Collapsible nav groups (Finance / HR / Real Estate…) */
+.sidebar__group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.sidebar__group-toggle {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+  padding: 0.5625rem 0.75rem;
+  border: none;
+  background: transparent;
+  border-radius: 10px;
+  color: var(--color-sidebar-text);
+  font-family: inherit;
+  font-size: 0.84375rem;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+  transition: background 150ms, color 150ms;
+}
+
+.sidebar__group-toggle:hover {
+  background: var(--color-sidebar-hover);
+  color: var(--color-sidebar-text-strong);
+}
+
+.sidebar__group-name {
+  flex: 1;
+  min-width: 0;
+}
+
+/* subtle dot when a collapsed group holds the active page */
+.sidebar__group-toggle[data-active="true"] .sidebar__group-name::after {
+  content: "";
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-left: var(--space-2);
+  border-radius: 50%;
+  background: var(--color-sidebar-active-bg);
+  vertical-align: middle;
+}
+
+.sidebar__group-chevron {
+  flex-shrink: 0;
+  color: #5d6a82;
+}
+.sidebar__group-toggle[data-open="true"] .sidebar__group-chevron {
+  transform: rotate(180deg);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .sidebar__group-chevron {
+    transition: transform 160ms ease;
+  }
+}
+
+.sidebar__group-items {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 2px 0 2px 0.75rem;
+  padding-left: 0.75rem;
+  border-left: 1px solid rgba(255, 255, 255, 0.08);
+}
+
 .sidebar__footer {
   padding: var(--space-4) var(--space-5);
   border-top: 1px solid rgba(255, 255, 255, 0.06);
