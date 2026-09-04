@@ -39,6 +39,7 @@ export type PermissionCode =
   | "TASK_VIEW" | "TASK_MANAGE"
   | "ACTIVITY_VIEW" | "ACTIVITY_MANAGE"
   | "FINANCE_VIEW" | "FINANCE_RECORD_PAYMENT" | "FINANCE_REFUND"
+  | "FINANCE_EXPENSE_SUBMIT" | "FINANCE_EXPENSE_APPROVE" | "FINANCE_VENDOR_MANAGE" | "FINANCE_SETTINGS_MANAGE"
   | "HR_VIEW" | "HR_MANAGE"
   | "USER_VIEW" | "USER_MANAGE"
   | "ORG_MANAGE"
@@ -120,6 +121,7 @@ export interface Organization {
   id: string;
   name: string;
   business_type: LeadIndustry;
+  finance_business_mode: "general" | "re_builder" | "re_broker" | "hybrid";
   plan: string;
   features: Record<string, unknown> | null;
   allowed_currencies: string[];

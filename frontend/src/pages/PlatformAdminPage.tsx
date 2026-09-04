@@ -282,6 +282,19 @@ export function PlatformAdminPage() {
     }
   };
 
+  const handleFinanceMode = async (org: Organization, mode: string) => {
+    setSaving((prev) => ({ ...prev, [org.id]: true }));
+    try {
+      const fresh = await adminService.setOrgFinanceMode(org.id, mode);
+      setOrgs((prev) => prev.map((o) => (o.id === org.id ? fresh : o)));
+      toast.success("Finance mode updated");
+    } catch (err) {
+      toast.error("Failed to update finance mode", extractErrorMessage(err));
+    } finally {
+      setSaving((prev) => ({ ...prev, [org.id]: false }));
+    }
+  };
+
   const handleRepair = async () => {
     setRepairing(true);
     try {
@@ -447,6 +460,22 @@ export function PlatformAdminPage() {
                   disabled={busy || locked}
                   onToggle={(key, val) => void handleToggle(org, key, val)}
                 />
+                {org.modules.finance && (
+                  <div className="field" style={{ marginTop: "0.25rem", marginBottom: "0.75rem" }}>
+                    <label className="field__label">Finance business mode (income/expense categories)</label>
+                    <select
+                      className="select"
+                      value={org.finance_business_mode}
+                      disabled={busy || locked}
+                      onChange={(e) => void handleFinanceMode(org, e.target.value)}
+                    >
+                      <option value="general">General Business</option>
+                      <option value="re_builder">Real Estate — Builder / Developer</option>
+                      <option value="re_broker">Real Estate — Broker</option>
+                      <option value="hybrid">Hybrid</option>
+                    </select>
+                  </div>
+                )}
                 {org.business_type === "real_estate" && (
                   <ModuleGroup
                     title="Real Estate"

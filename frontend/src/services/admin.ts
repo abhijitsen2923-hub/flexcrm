@@ -21,6 +21,14 @@ export const adminService = {
     return data;
   },
 
+  async setOrgFinanceMode(orgId: string, financeBusinessMode: string): Promise<Organization> {
+    const { data } = await apiClient.patch<Organization>(
+      `/admin/organizations/${orgId}/finance-mode`,
+      { finance_business_mode: financeBusinessMode },
+    );
+    return data;
+  },
+
   async setOrgActive(orgId: string, isActive: boolean): Promise<Organization> {
     const { data } = await apiClient.patch<Organization>(
       `/admin/organizations/${orgId}/status`,

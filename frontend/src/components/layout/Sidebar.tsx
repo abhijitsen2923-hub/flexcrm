@@ -1,14 +1,18 @@
 import {
   Activity,
   Award,
+  Banknote,
   BarChart3,
   Briefcase,
   Building2,
   CalendarDays,
   ClipboardCheck,
   ClipboardList,
+  Coins,
   FileCheck2,
+  FileText,
   Handshake,
+  PieChart,
   KeyRound,
   Layers,
   LayoutDashboard,
@@ -16,8 +20,11 @@ import {
   Receipt,
   Settings2,
   Sparkles,
+  TrendingUp,
+  Truck,
   UserRound,
   Users,
+  Wallet,
   X,
   type LucideIcon
 } from "lucide-react";
@@ -32,6 +39,8 @@ import { usePermissions } from "../../hooks/usePermissions";
 
 interface NavItem {
   to: string;
+  // Exact-match active state (else a parent path highlights on its sub-routes).
+  end?: boolean;
   label: string;
   icon: LucideIcon;
   requires: PermissionCode[];
@@ -49,7 +58,15 @@ const NAV: ReadonlyArray<NavItem> = [
   { to: "/deals", label: "Deals", icon: Briefcase, requires: ["DEAL_VIEW"], moduleKey: "deals" },
   { to: "/tasks", label: "Tasks", icon: ClipboardList, requires: ["TASK_VIEW"], moduleKey: "tasks" },
   { to: "/activities", label: "Activities", icon: Activity, requires: ["ACTIVITY_VIEW"], moduleKey: "activities" },
-  { to: "/finance", label: "Finance", icon: Receipt, requires: ["FINANCE_VIEW"], moduleKey: "finance" },
+  { to: "/finance/dashboard", label: "Finance Dashboard", icon: PieChart, requires: ["FINANCE_VIEW"], moduleKey: "finance" },
+  { to: "/finance", end: true, label: "Expenses", icon: Receipt, requires: ["FINANCE_VIEW"], moduleKey: "finance" },
+  { to: "/finance/income", label: "Income", icon: Coins, requires: ["FINANCE_VIEW"], moduleKey: "finance" },
+  { to: "/finance/receivables", label: "Customer Receivables", icon: Banknote, requires: ["FINANCE_VIEW"], moduleKey: "finance" },
+  { to: "/finance/vendors", label: "Vendors", icon: Truck, requires: ["FINANCE_VIEW"], moduleKey: "finance" },
+  { to: "/finance/vendor-payments", label: "Vendor Payments", icon: Wallet, requires: ["FINANCE_VIEW"], moduleKey: "finance" },
+  { to: "/finance/sales", label: "Revenue", icon: TrendingUp, requires: ["FINANCE_VIEW"], moduleKey: "finance" },
+  { to: "/finance/reports", label: "Reports", icon: FileText, requires: ["FINANCE_VIEW"], moduleKey: "finance" },
+  { to: "/finance/settings", label: "Finance Settings", icon: Settings2, requires: ["FINANCE_SETTINGS_MANAGE"], moduleKey: "finance" },
   { to: "/hr", label: "HR", icon: Award, requires: ["HR_VIEW"], moduleKey: "hr" },
   // Real-estate modules
   { to: "/projects", label: "Projects", icon: Building2, requires: ["LEAD_VIEW"], moduleKey: "projects" },
@@ -99,7 +116,7 @@ export function Sidebar({ open, onClose }: SidebarProps) {
           <NavLink
             key={item.to}
             to={item.to}
-            end={item.to === "/"}
+            end={item.end ?? item.to === "/"}
             className={({ isActive }) =>
               ["sidebar__link", isActive ? "is-active" : null].filter(Boolean).join(" ")
             }

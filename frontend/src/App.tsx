@@ -34,6 +34,14 @@ const DealsPage = lazy(() => import("./pages/DealsPage"));
 const TasksPage = lazy(() => import("./pages/TasksPage"));
 const ActivitiesPage = lazy(() => import("./pages/ActivitiesPage"));
 const FinancePage = lazy(() => import("./pages/FinancePage"));
+const ExpensesPage = lazy(() => import("./pages/finance/ExpensesPage"));
+const VendorsPage = lazy(() => import("./pages/finance/VendorsPage"));
+const VendorPaymentsPage = lazy(() => import("./pages/finance/VendorPaymentsPage"));
+const FinanceSettingsPage = lazy(() => import("./pages/finance/FinanceSettingsPage"));
+const IncomePage = lazy(() => import("./pages/finance/IncomePage"));
+const FinanceDashboardPage = lazy(() => import("./pages/finance/FinanceDashboardPage"));
+const CustomerReceivablesPage = lazy(() => import("./pages/finance/CustomerReceivablesPage"));
+const ReportsPage = lazy(() => import("./pages/finance/ReportsPage"));
 const HRPage = lazy(() => import("./pages/HRPage"));
 // Real-estate modules
 const InventoryPage = lazy(() => import("./pages/inventory/InventoryPage"));
@@ -114,7 +122,15 @@ export function App() {
                         {FEATURES.tasks && <Route path="tasks" element={<TasksPage />} />}
                         {FEATURES.activities && <Route path="activities" element={<ActivitiesPage />} />}
                         <Route path="analytics" element={<AnalyticsPage />} />
-                        {FEATURES.finance && <Route path="finance" element={<FinancePage />} />}
+                        {FEATURES.finance && <Route path="finance" element={<ExpensesPage />} />}
+                        {FEATURES.finance && <Route path="finance/vendors" element={<VendorsPage />} />}
+                        {FEATURES.finance && <Route path="finance/vendor-payments" element={<VendorPaymentsPage />} />}
+                        {FEATURES.finance && <Route path="finance/sales" element={<FinancePage />} />}
+                        {FEATURES.finance && <Route path="finance/settings" element={<FinanceSettingsPage />} />}
+                        {FEATURES.finance && <Route path="finance/dashboard" element={<FinanceDashboardPage />} />}
+                        {FEATURES.finance && <Route path="finance/income" element={<IncomePage />} />}
+                        {FEATURES.finance && <Route path="finance/receivables" element={<CustomerReceivablesPage />} />}
+                        {FEATURES.finance && <Route path="finance/reports" element={<ReportsPage />} />}
                         {FEATURES.hr && <Route path="hr" element={<HRPage />} />}
                         {/* Real-estate modules */}
                         {FEATURES.projects && <Route path="projects" element={<ProjectsPage />} />}
