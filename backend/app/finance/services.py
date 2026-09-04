@@ -13,7 +13,7 @@ from uuid import UUID
 from sqlalchemy import func, select
 from sqlalchemy.orm import selectinload
 
-from app.core.exceptions import NotFoundError, ValidationError
+from app.core.exceptions import AuthorizationError, NotFoundError, ValidationError
 from app.core.tenancy import current_org
 from app.database.enums import (
     CommissionDirection,
@@ -27,6 +27,7 @@ from app.database.enums import (
 from app.finance.category_presets import presets_for
 from app.finance.gst import compute_gst
 from app.finance.models import (
+    Budget,
     CommissionLedger,
     CustomerContract,
     CustomerDemand,
@@ -45,6 +46,8 @@ from app.finance.models import (
     VendorPayment,
 )
 from app.finance.schemas import (
+    BudgetCreate,
+    BudgetUpdate,
     CustomerContractCreate,
     CustomerContractUpdate,
     CustomerDemandCreate,
@@ -480,6 +483,7 @@ class FinanceSettingsService(ServiceBase):
             "gstin": row.gstin,
             "home_state_code": row.home_state_code,
             "default_place_of_supply_state": row.default_place_of_supply_state,
+            "expense_approval_threshold": row.expense_approval_threshold,
             "finance_business_mode": org.finance_business_mode,
         }
 
@@ -682,10 +686,30 @@ class ExpenseService(ServiceBase):
         await self._broadcast("expense.updated", row)
         return row
 
-    async def approve(self, expense_id: UUID, *, actor_id: UUID) -> Expense:
+    async def approve(
+        self,
+        expense_id: UUID,
+        *,
+        actor_id: UUID,
+        approval_threshold: Decimal | None = None,
+        actor_is_high_approver: bool = True,
+    ) -> Expense:
         row = await self._get(expense_id)
         if row.status != ExpenseStatus.submitted:
             raise ValidationError("Only a submitted expense can be approved.")
+        # High-value gate: expenses at/above the configured threshold need an
+        # approver who also holds FINANCE_SETTINGS_MANAGE (owner/accounts), not
+        # just FINANCE_EXPENSE_APPROVE. threshold 0/None disables the gate.
+        if (
+            approval_threshold is not None
+            and approval_threshold > 0
+            and Decimal(row.total_amount or 0) >= approval_threshold
+            and not actor_is_high_approver
+        ):
+            raise AuthorizationError(
+                f"This expense is at or above the approval threshold "
+                f"({approval_threshold:.2f}) and needs a senior approver."
+            )
         row.status = ExpenseStatus.approved
         row.approved_by_id = actor_id
         row.approved_at = datetime.now(UTC)
@@ -1191,3 +1215,101 @@ class PayrollService(ServiceBase):
             total += amount
         await self.session.flush()
         return {"month": month, "created": created, "skipped": skipped, "total_amount": total}
+
+
+class BudgetService(ServiceBase):
+    """Monthly spending budgets. `actual` (spend so far) is computed at read time
+    from non-rejected expenses in the period month (+ category, if the budget is
+    scoped to one) — budgets are never posted to, so there's nothing to keep in sync."""
+
+    async def _get(self, budget_id: UUID) -> Budget:
+        row = (
+            await self.session.execute(
+                select(Budget).where(Budget.id == budget_id, Budget.is_deleted.is_(False))
+            )
+        ).scalar_one_or_none()
+        if row is None:
+            raise NotFoundError("Budget not found.")
+        return row
+
+    async def _actual(self, period_key: str, category_id: UUID | None) -> Decimal:
+        year, mon = int(period_key[:4]), int(period_key[5:7])
+        first = date(year, mon, 1)
+        last = date(year, mon, monthrange(year, mon)[1])
+        where = [
+            Expense.is_deleted.is_(False),
+            Expense.status != ExpenseStatus.rejected,
+            Expense.expense_date >= first,
+            Expense.expense_date <= last,
+        ]
+        if category_id is not None:
+            where.append(Expense.category_id == category_id)
+        val = (
+            await self.session.execute(
+                select(func.coalesce(func.sum(Expense.total_amount), 0)).where(*where)
+            )
+        ).scalar_one()
+        return Decimal(val or 0)
+
+    async def _to_read(self, row: Budget) -> dict:
+        actual = await self._actual(row.period_key, row.category_id)
+        amount = Decimal(row.amount or 0)
+        variance = amount - actual
+        used_pct = float(actual / amount * 100) if amount > 0 else 0.0
+        return {
+            "id": row.id,
+            "name": row.name,
+            "period_key": row.period_key,
+            "category_id": row.category_id,
+            "category_name": row.category.name if row.category else None,
+            "department": row.department,
+            "amount": amount,
+            "actual": actual,
+            "variance": variance,
+            "used_pct": round(used_pct, 1),
+            "notes": row.notes,
+        }
+
+    async def list(self, *, period_key: str | None = None) -> list[dict]:
+        stmt = (
+            select(Budget)
+            .where(Budget.is_deleted.is_(False))
+            .options(selectinload(Budget.category))
+        )
+        if period_key:
+            stmt = stmt.where(Budget.period_key == period_key)
+        stmt = stmt.order_by(Budget.period_key.desc(), Budget.name)
+        rows = (await self.session.execute(stmt)).scalars().all()
+        return [await self._to_read(row) for row in rows]
+
+    async def create(self, payload: BudgetCreate, *, actor_id: UUID) -> dict:
+        row = Budget(
+            name=payload.name,
+            period_key=payload.period_key,
+            category_id=payload.category_id,
+            department=payload.department,
+            amount=payload.amount,
+            notes=payload.notes,
+            created_by_id=actor_id,
+            updated_by_id=actor_id,
+        )
+        self.session.add(row)
+        await self.session.flush()
+        await self.session.refresh(row, ["category"])
+        return await self._to_read(row)
+
+    async def update(self, budget_id: UUID, payload: BudgetUpdate, *, actor_id: UUID) -> dict:
+        row = await self._get(budget_id)
+        for key, value in payload.model_dump(exclude_unset=True).items():
+            setattr(row, key, value)
+        row.updated_by_id = actor_id
+        await self.session.flush()
+        await self.session.refresh(row, ["category"])
+        return await self._to_read(row)
+
+    async def delete(self, budget_id: UUID, *, actor_id: UUID) -> None:
+        row = await self._get(budget_id)
+        row.is_deleted = True
+        row.deleted_by_id = actor_id
+        row.deleted_at = datetime.now(UTC)
+        await self.session.flush()

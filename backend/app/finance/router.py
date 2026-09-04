@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Respon
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import require_permissions
+from app.api.deps import load_effective_permissions, require_permissions
 from app.core import storage
 from app.core.pdf import html_to_pdf
 from app.core.permissions import PermissionCode
@@ -25,6 +25,9 @@ from app.finance.models import (
 )
 from app.models.customer import Customer
 from app.finance.schemas import (
+    BudgetCreate,
+    BudgetRead,
+    BudgetUpdate,
     CommissionLedgerRead,
     CustomerContractCreate,
     CustomerContractListItem,
@@ -73,6 +76,7 @@ from app.finance.schemas import (
     VendorUpdate,
 )
 from app.finance.services import (
+    BudgetService,
     CustomerDemandService,
     ExpenseService,
     FinanceCategoryService,
@@ -380,8 +384,15 @@ async def approve_expense(
     current_user=Depends(require_permissions(PermissionCode.FINANCE_EXPENSE_APPROVE)),
     session: AsyncSession = Depends(get_db_session),
 ):
+    settings = await FinanceSettingsService(session).get_or_create()
+    perms = await load_effective_permissions(session, current_user)
     service = ExpenseService(session)
-    row = await service.approve(expense_id, actor_id=current_user.id)
+    row = await service.approve(
+        expense_id,
+        actor_id=current_user.id,
+        approval_threshold=settings.expense_approval_threshold,
+        actor_is_high_approver=PermissionCode.FINANCE_SETTINGS_MANAGE in perms,
+    )
     await service.commit()
     return row
 
@@ -766,6 +777,53 @@ async def run_payroll(
     result = await service.run_payroll(payload.month, payload.employee_ids, actor_id=current_user.id)
     await service.commit()
     return result
+
+
+# ---- Budgets (Phase 3) ----
+
+@router.get("/budgets", response_model=list[BudgetRead])
+async def list_budgets(
+    period_key: str | None = Query(default=None, pattern=r"^\d{4}-\d{2}$"),
+    _: object = Depends(require_permissions(PermissionCode.FINANCE_VIEW)),
+    session: AsyncSession = Depends(get_db_session),
+):
+    return await BudgetService(session).list(period_key=period_key)
+
+
+@router.post("/budgets", response_model=BudgetRead, status_code=status.HTTP_201_CREATED)
+async def create_budget(
+    payload: BudgetCreate,
+    current_user=Depends(require_permissions(PermissionCode.FINANCE_SETTINGS_MANAGE)),
+    session: AsyncSession = Depends(get_db_session),
+):
+    service = BudgetService(session)
+    row = await service.create(payload, actor_id=current_user.id)
+    await service.commit()
+    return row
+
+
+@router.patch("/budgets/{budget_id}", response_model=BudgetRead)
+async def update_budget(
+    budget_id: UUID,
+    payload: BudgetUpdate,
+    current_user=Depends(require_permissions(PermissionCode.FINANCE_SETTINGS_MANAGE)),
+    session: AsyncSession = Depends(get_db_session),
+):
+    service = BudgetService(session)
+    row = await service.update(budget_id, payload, actor_id=current_user.id)
+    await service.commit()
+    return row
+
+
+@router.delete("/budgets/{budget_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_budget(
+    budget_id: UUID,
+    current_user=Depends(require_permissions(PermissionCode.FINANCE_SETTINGS_MANAGE)),
+    session: AsyncSession = Depends(get_db_session),
+):
+    service = BudgetService(session)
+    await service.delete(budget_id, actor_id=current_user.id)
+    await service.commit()
 
 
 # ---- Generated documents (PDF, streamed) ----

@@ -145,6 +145,7 @@ class FinanceSettingsRead(ORMModel):
     gstin: str | None = None
     home_state_code: str | None = None
     default_place_of_supply_state: str | None = None
+    expense_approval_threshold: Decimal = Decimal("0")
     finance_business_mode: FinanceBusinessMode
 
 
@@ -153,6 +154,7 @@ class FinanceSettingsUpdate(ORMModel):
     gstin: str | None = Field(default=None, max_length=15)
     home_state_code: str | None = Field(default=None, max_length=2)
     default_place_of_supply_state: str | None = Field(default=None, max_length=2)
+    expense_approval_threshold: Decimal | None = Field(default=None, ge=0)
 
 
 # ---- Categories ----
@@ -533,3 +535,37 @@ class PayrollRunResult(ORMModel):
     created: int
     skipped: int
     total_amount: Decimal
+
+
+# ---- Budgets (Phase 3) ----
+
+class BudgetCreate(ORMModel):
+    name: str = Field(min_length=1, max_length=120)
+    period_key: str = Field(pattern=r"^\d{4}-\d{2}$")  # YYYY-MM
+    category_id: UUID | None = None
+    department: str | None = Field(default=None, max_length=80)
+    amount: Decimal = Field(ge=0)
+    notes: str | None = None
+
+
+class BudgetUpdate(ORMModel):
+    name: str | None = Field(default=None, min_length=1, max_length=120)
+    period_key: str | None = Field(default=None, pattern=r"^\d{4}-\d{2}$")
+    category_id: UUID | None = None
+    department: str | None = Field(default=None, max_length=80)
+    amount: Decimal | None = Field(default=None, ge=0)
+    notes: str | None = None
+
+
+class BudgetRead(ORMModel):
+    id: UUID
+    name: str
+    period_key: str
+    category_id: UUID | None = None
+    category_name: str | None = None
+    department: str | None = None
+    amount: Decimal
+    actual: Decimal  # computed: spend so far this period (+ category)
+    variance: Decimal  # amount − actual
+    used_pct: float  # 0..100+ (0 when amount is 0)
+    notes: str | None = None

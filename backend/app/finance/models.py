@@ -250,6 +250,11 @@ class FinanceSettings(TenantBase, UUIDPrimaryKeyMixin, TimestampMixin, TenantAud
     gstin: Mapped[str | None] = mapped_column(String(15), nullable=True)
     home_state_code: Mapped[str | None] = mapped_column(String(2), nullable=True)
     default_place_of_supply_state: Mapped[str | None] = mapped_column(String(2), nullable=True)
+    # Expenses whose total ≥ this (when > 0) need a higher approver (a holder of
+    # FINANCE_SETTINGS_MANAGE), not just FINANCE_EXPENSE_APPROVE. 0 = no extra gate.
+    expense_approval_threshold: Mapped[Decimal] = mapped_column(
+        Numeric(14, 2), nullable=False, server_default="0", default=0
+    )
 
 
 class FinanceCategory(TenantBase, UUIDPrimaryKeyMixin, TimestampMixin, TenantAuditMixin, TenantSoftDeleteMixin):
@@ -581,3 +586,26 @@ class DemandReceipt(TenantBase, UUIDPrimaryKeyMixin, TimestampMixin):
     )
 
     demand = relationship("CustomerDemand", back_populates="receipts")
+
+
+class Budget(TenantBase, UUIDPrimaryKeyMixin, TimestampMixin, TenantAuditMixin, TenantSoftDeleteMixin):
+    """A monthly spending budget. Optionally scoped to a category and/or department.
+    `actual` (spend so far) is computed at read time from non-rejected expenses, not stored."""
+
+    __tablename__ = "budgets"
+    __table_args__ = (
+        CheckConstraint("amount >= 0", name="ck_budgets_amount_non_negative"),
+        Index("ix_budgets_period", "period_key"),
+        {"schema": "tenant"},
+    )
+
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
+    period_key: Mapped[str] = mapped_column(String(7), nullable=False)  # YYYY-MM
+    category_id: Mapped[UUID | None] = mapped_column(
+        Uuid, ForeignKey("finance_categories.id", ondelete="SET NULL"), nullable=True
+    )
+    department: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    amount: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False, default=0)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    category = relationship("FinanceCategory")

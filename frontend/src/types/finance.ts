@@ -12,6 +12,7 @@ export interface FinanceSettings {
   gstin: string | null;
   home_state_code: string | null;
   default_place_of_supply_state: string | null;
+  expense_approval_threshold: string;
   finance_business_mode: FinanceBusinessMode;
 }
 
@@ -270,4 +271,27 @@ export interface PayrollRunResult {
   created: number;
   skipped: number;
   total_amount: string;
+}
+
+export interface Budget {
+  id: string;
+  name: string;
+  period_key: string; // YYYY-MM
+  category_id: string | null;
+  category_name: string | null;
+  department: string | null;
+  amount: string;
+  actual: string;
+  variance: string;
+  used_pct: number;
+  notes: string | null;
+}
+
+export interface BudgetWritePayload {
+  name: string;
+  period_key: string;
+  category_id?: string | null;
+  department?: string | null;
+  amount: number;
+  notes?: string | null;
 }

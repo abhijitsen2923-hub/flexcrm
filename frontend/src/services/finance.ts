@@ -17,6 +17,8 @@ import type {
   DemandReceipt,
   PayrollEmployee,
   PayrollRunResult,
+  Budget,
+  BudgetWritePayload,
   FinanceSettings,
   FinanceSummary,
   ManualIncome,
@@ -304,5 +306,24 @@ export const financeService = {
   async runPayroll(month: string, employeeIds?: string[]): Promise<PayrollRunResult> {
     const { data } = await apiClient.post<PayrollRunResult>("/finance/payroll/run", { month, employee_ids: employeeIds });
     return data;
+  },
+
+  // ---- Budgets (Phase 3) ----
+  async listBudgets(periodKey?: string): Promise<Budget[]> {
+    const { data } = await apiClient.get<Budget[]>("/finance/budgets", {
+      params: periodKey ? { period_key: periodKey } : undefined
+    });
+    return data;
+  },
+  async createBudget(payload: BudgetWritePayload): Promise<Budget> {
+    const { data } = await apiClient.post<Budget>("/finance/budgets", payload);
+    return data;
+  },
+  async updateBudget(id: string, payload: Partial<BudgetWritePayload>): Promise<Budget> {
+    const { data } = await apiClient.patch<Budget>(`/finance/budgets/${id}`, payload);
+    return data;
+  },
+  async deleteBudget(id: string): Promise<void> {
+    await apiClient.delete(`/finance/budgets/${id}`);
   }
 };

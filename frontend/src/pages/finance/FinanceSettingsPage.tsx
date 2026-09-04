@@ -21,14 +21,24 @@ export default function FinanceSettingsPage() {
   const [settings, setSettings] = useState<FinanceSettings | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [form, setForm] = useState({ gst_registered: false, gstin: "", home_state_code: "" });
+  const [form, setForm] = useState({
+    gst_registered: false,
+    gstin: "",
+    home_state_code: "",
+    expense_approval_threshold: ""
+  });
 
   useEffect(() => {
     void (async () => {
       try {
         const s = await financeService.getSettings();
         setSettings(s);
-        setForm({ gst_registered: s.gst_registered, gstin: s.gstin ?? "", home_state_code: s.home_state_code ?? "" });
+        setForm({
+          gst_registered: s.gst_registered,
+          gstin: s.gstin ?? "",
+          home_state_code: s.home_state_code ?? "",
+          expense_approval_threshold: String(Number(s.expense_approval_threshold ?? 0))
+        });
       } catch (e) {
         toast.error("Failed to load settings", extractErrorMessage(e));
       } finally {
@@ -43,7 +53,8 @@ export default function FinanceSettingsPage() {
       const s = await financeService.updateSettings({
         gst_registered: form.gst_registered,
         gstin: form.gstin || null,
-        home_state_code: form.home_state_code || null
+        home_state_code: form.home_state_code || null,
+        expense_approval_threshold: form.expense_approval_threshold || "0"
       });
       setSettings(s);
       toast.success("Settings saved");
@@ -99,13 +110,30 @@ export default function FinanceSettingsPage() {
             onChange={(e) => setForm({ ...form, home_state_code: e.target.value })}
             hint="Used to default intra-state vs inter-state GST on bills and expenses."
           />
-          {canManage && (
-            <div>
-              <Button loading={saving} onClick={() => void save()}>Save settings</Button>
-            </div>
-          )}
         </div>
       </Card>
+
+      <Card title="Expense approvals">
+        <div className="form" style={{ maxWidth: 480 }}>
+          <TextField
+            id="s-threshold"
+            label="High-value approval threshold (₹)"
+            type="number"
+            min="0"
+            step="0.01"
+            value={form.expense_approval_threshold}
+            disabled={!canManage}
+            onChange={(e) => setForm({ ...form, expense_approval_threshold: e.target.value })}
+            hint="Expenses at or above this amount need a senior approver (a Finance Settings manager). Set 0 to disable."
+          />
+        </div>
+      </Card>
+
+      {canManage && (
+        <div style={{ marginTop: "1rem" }}>
+          <Button loading={saving} onClick={() => void save()}>Save settings</Button>
+        </div>
+      )}
     </>
   );
 }
