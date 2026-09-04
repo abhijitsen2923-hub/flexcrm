@@ -186,6 +186,14 @@ export default function CustomerDemandsPage() {
     }
   }
 
+  async function downloadLetter(d: CustomerDemand) {
+    try {
+      await financeService.downloadPdf(`/finance/demands/${d.id}/letter.pdf`, `demand-${d.demand_number}.pdf`);
+    } catch (e) {
+      toast.error("Could not generate letter", extractErrorMessage(e));
+    }
+  }
+
   const columns: DataTableColumn<CustomerContractListItem>[] = [
     {
       key: "contract",
@@ -225,15 +233,19 @@ export default function CustomerDemandsPage() {
       key: "actions",
       header: "",
       align: "right",
-      render: (d) =>
-        canManage && d.status !== "paid" && d.status !== "cancelled" ? (
-          <span className="row" style={{ gap: "0.4rem", justifyContent: "flex-end" }}>
-            <Button size="sm" onClick={() => openReceive(d)}>Receive</Button>
-            {Number(d.amount_received) === 0 && (
-              <Button size="sm" variant="ghost" onClick={() => void cancelDemand(d)}>Cancel</Button>
-            )}
-          </span>
-        ) : null
+      render: (d) => (
+        <span className="row" style={{ gap: "0.4rem", justifyContent: "flex-end" }}>
+          <Button size="sm" variant="ghost" onClick={() => void downloadLetter(d)}>Letter</Button>
+          {canManage && d.status !== "paid" && d.status !== "cancelled" && (
+            <>
+              <Button size="sm" onClick={() => openReceive(d)}>Receive</Button>
+              {Number(d.amount_received) === 0 && (
+                <Button size="sm" variant="ghost" onClick={() => void cancelDemand(d)}>Cancel</Button>
+              )}
+            </>
+          )}
+        </span>
+      )
     }
   ];
 

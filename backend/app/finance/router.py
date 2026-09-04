@@ -1,21 +1,29 @@
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Response, UploadFile, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import require_permissions
 from app.core import storage
+from app.core.pdf import html_to_pdf
 from app.core.permissions import PermissionCode
 from app.core.tenancy import current_org
 from app.database.enums import ExpenseStatus, FinanceCategoryKind, VendorBillStatus
 from app.database.session import get_db_session
+from app.finance import documents
 from app.finance.models import (
     CommissionLedger,
+    CustomerContract,
+    CustomerDemand,
+    DemandReceipt,
     Expense,
+    FinanceCategory,
     FinanceDocument,
     Invoice,
+    Vendor,
 )
+from app.models.customer import Customer
 from app.finance.schemas import (
     CommissionLedgerRead,
     CustomerContractCreate,
@@ -718,3 +726,95 @@ async def record_demand_receipt(
     receipt = await service.record_receipt(demand_id, payload, actor_id=current_user.id)
     await service.commit()
     return receipt
+
+
+# ---- Generated documents (PDF, streamed) ----
+
+def _pdf_response(html: str, filename: str) -> Response:
+    return Response(
+        content=html_to_pdf(html),
+        media_type="application/pdf",
+        headers={"Content-Disposition": f"inline; filename={filename}"},
+    )
+
+
+async def _org_name(session: AsyncSession) -> str:
+    org = (
+        await session.execute(select(Organization).where(Organization.id == current_org(session)))
+    ).scalar_one_or_none()
+    return org.name if org else "Company"
+
+
+async def _customer_name(session: AsyncSession, customer_id) -> str:
+    customer = (
+        await session.execute(select(Customer).where(Customer.id == customer_id))
+    ).scalar_one_or_none()
+    if customer is None:
+        return "Customer"
+    return customer.company_name or customer.contact_name
+
+
+@router.get("/demands/{demand_id}/letter.pdf")
+async def demand_letter_pdf(
+    demand_id: UUID,
+    _: object = Depends(require_permissions(PermissionCode.FINANCE_VIEW)),
+    session: AsyncSession = Depends(get_db_session),
+):
+    service = CustomerDemandService(session)
+    demand = await service.get_demand(demand_id)
+    contract = await service.get_contract(demand.contract_id)
+    html = documents.render_demand_letter(
+        demand=demand,
+        contract=contract,
+        customer_name=await _customer_name(session, contract.customer_id),
+        org_name=await _org_name(session),
+    )
+    return _pdf_response(html, f"demand-{demand.demand_number}.pdf")
+
+
+@router.get("/receipts/{receipt_id}/receipt.pdf")
+async def demand_receipt_pdf(
+    receipt_id: UUID,
+    _: object = Depends(require_permissions(PermissionCode.FINANCE_VIEW)),
+    session: AsyncSession = Depends(get_db_session),
+):
+    receipt = (
+        await session.execute(select(DemandReceipt).where(DemandReceipt.id == receipt_id))
+    ).scalar_one_or_none()
+    if receipt is None:
+        raise HTTPException(status_code=404, detail="Receipt not found.")
+    service = CustomerDemandService(session)
+    demand = await service.get_demand(receipt.demand_id)
+    contract = await service.get_contract(demand.contract_id)
+    html = documents.render_demand_receipt(
+        receipt=receipt,
+        demand=demand,
+        contract=contract,
+        customer_name=await _customer_name(session, contract.customer_id),
+        org_name=await _org_name(session),
+    )
+    return _pdf_response(html, f"receipt-{receipt.receipt_number}.pdf")
+
+
+@router.get("/expenses/{expense_id}/voucher.pdf")
+async def expense_voucher_pdf(
+    expense_id: UUID,
+    _: object = Depends(require_permissions(PermissionCode.FINANCE_VIEW)),
+    session: AsyncSession = Depends(get_db_session),
+):
+    expense = await ExpenseService(session).get(expense_id)
+    category = (
+        await session.execute(select(FinanceCategory).where(FinanceCategory.id == expense.category_id))
+    ).scalar_one_or_none()
+    vendor = None
+    if expense.vendor_id:
+        vendor = (
+            await session.execute(select(Vendor).where(Vendor.id == expense.vendor_id))
+        ).scalar_one_or_none()
+    html = documents.render_expense_voucher(
+        expense=expense,
+        category_name=category.name if category else "",
+        vendor_name=vendor.name if vendor else None,
+        org_name=await _org_name(session),
+    )
+    return _pdf_response(html, f"expense-{expense.expense_number}.pdf")

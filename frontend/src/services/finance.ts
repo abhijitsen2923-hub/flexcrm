@@ -220,6 +220,19 @@ export const financeService = {
     return data.url;
   },
 
+  // Fetch a generated PDF (auth header via apiClient) as a blob and save it.
+  async downloadPdf(path: string, filename: string): Promise<void> {
+    const res = await apiClient.get(path, { responseType: "blob" });
+    const url = window.URL.createObjectURL(res.data as Blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.URL.revokeObjectURL(url);
+  },
+
   // ---- Manual income (Phase 2) ----
   async listIncome(params: { category_id?: string; date_from?: string; date_to?: string } = {}): Promise<ManualIncome[]> {
     const { data } = await apiClient.get<ManualIncome[]>(`/finance/income${qs(params)}`);

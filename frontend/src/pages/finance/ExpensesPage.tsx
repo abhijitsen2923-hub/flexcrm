@@ -246,6 +246,15 @@ export default function ExpensesPage() {
     }
   }
 
+  async function downloadVoucher() {
+    if (!editing) return;
+    try {
+      await financeService.downloadPdf(`/finance/expenses/${editing.id}/voucher.pdf`, `expense-${editing.expense_number}.pdf`);
+    } catch (e) {
+      toast.error("Could not generate voucher", extractErrorMessage(e));
+    }
+  }
+
   const kpis = useMemo(() => {
     const monthTotal = expenses
       .filter((x) => inCurrentMonth(x.expense_date))
@@ -379,6 +388,12 @@ export default function ExpensesPage() {
               <input type="checkbox" checked={form.submit} onChange={(e) => setForm({ ...form, submit: e.target.checked })} />
               <span>Submit for approval immediately</span>
             </label>
+          )}
+
+          {editing && (
+            <div>
+              <Button size="sm" variant="secondary" onClick={() => void downloadVoucher()}>Download voucher (PDF)</Button>
+            </div>
           )}
 
           {editing && (
