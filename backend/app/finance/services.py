@@ -27,6 +27,9 @@ from app.finance.category_presets import presets_for
 from app.finance.gst import compute_gst
 from app.finance.models import (
     CommissionLedger,
+    CustomerContract,
+    CustomerDemand,
+    DemandReceipt,
     Expense,
     FinanceCategory,
     FinanceSettings,
@@ -41,6 +44,11 @@ from app.finance.models import (
     VendorPayment,
 )
 from app.finance.schemas import (
+    CustomerContractCreate,
+    CustomerContractUpdate,
+    CustomerDemandCreate,
+    CustomerDemandUpdate,
+    DemandReceiptCreate,
     ExpenseCreate,
     ExpenseFilters,
     ExpenseUpdate,
@@ -963,3 +971,119 @@ class FinanceSummaryService(ServiceBase):
             expense_by_category=[FinanceBreakdownRow(label=n, value=Decimal(v)) for n, v in exp_by_cat],
             income_by_category=[FinanceBreakdownRow(label=n, value=Decimal(v)) for n, v in inc_by_cat],
         )
+
+
+class CustomerDemandService(ServiceBase):
+    """Per-customer demand ledger: a contract total → ad-hoc demands → receipts.
+    Balance = contract_value − total received. Statuses are plain strings."""
+
+    async def list_contracts(self, *, customer_id: UUID | None = None):
+        stmt = (
+            select(CustomerContract)
+            .where(CustomerContract.is_deleted.is_(False))
+            .options(selectinload(CustomerContract.demands).selectinload(CustomerDemand.receipts))
+        )
+        if customer_id is not None:
+            stmt = stmt.where(CustomerContract.customer_id == customer_id)
+        stmt = stmt.order_by(CustomerContract.created_at.desc())
+        return list((await self.session.execute(stmt)).scalars().all())
+
+    async def get_contract(self, contract_id: UUID) -> CustomerContract:
+        row = (
+            await self.session.execute(
+                select(CustomerContract)
+                .where(CustomerContract.id == contract_id, CustomerContract.is_deleted.is_(False))
+                .options(selectinload(CustomerContract.demands).selectinload(CustomerDemand.receipts))
+            )
+        ).scalar_one_or_none()
+        if row is None:
+            raise NotFoundError("Contract not found.")
+        return row
+
+    async def create_contract(self, payload: CustomerContractCreate, *, actor_id: UUID) -> CustomerContract:
+        row = CustomerContract(
+            customer_id=payload.customer_id, title=payload.title, contract_value=payload.contract_value,
+            currency=(payload.currency or "INR").upper(), notes=payload.notes, status="active",
+            created_by_id=actor_id, updated_by_id=actor_id,
+        )
+        self.session.add(row)
+        await self.session.flush()
+        return await self.get_contract(row.id)
+
+    async def update_contract(self, contract_id: UUID, payload: CustomerContractUpdate, *, actor_id: UUID) -> CustomerContract:
+        row = await self.get_contract(contract_id)
+        for key, value in payload.model_dump(exclude_unset=True).items():
+            setattr(row, key, value)
+        row.updated_by_id = actor_id
+        await self.session.flush()
+        return await self.get_contract(contract_id)
+
+    async def _get_demand(self, demand_id: UUID) -> CustomerDemand:
+        row = (
+            await self.session.execute(
+                select(CustomerDemand)
+                .where(CustomerDemand.id == demand_id, CustomerDemand.is_deleted.is_(False))
+                .options(selectinload(CustomerDemand.receipts))
+            )
+        ).scalar_one_or_none()
+        if row is None:
+            raise NotFoundError("Demand not found.")
+        return row
+
+    async def get_demand(self, demand_id: UUID) -> CustomerDemand:
+        return await self._get_demand(demand_id)
+
+    async def raise_demand(self, contract_id: UUID, payload: CustomerDemandCreate, *, actor_id: UUID) -> CustomerDemand:
+        contract = await self.get_contract(contract_id)
+        number = await _next_sequence(self.session, CustomerDemand, "demand_number", "DMD")
+        row = CustomerDemand(
+            demand_number=number, contract_id=contract.id, description=payload.description,
+            amount=payload.amount, due_date=payload.due_date, status="open", amount_received=Decimal("0"),
+            created_by_id=actor_id, updated_by_id=actor_id,
+        )
+        self.session.add(row)
+        await self.session.flush()
+        await realtime_manager.broadcast(
+            {"event": "demand.created", "payload": {"id": str(row.id), "contract_id": str(contract.id)}}
+        )
+        return await self._get_demand(row.id)
+
+    async def update_demand(self, demand_id: UUID, payload: CustomerDemandUpdate, *, actor_id: UUID) -> CustomerDemand:
+        row = await self._get_demand(demand_id)
+        if row.status not in ("open", "partially_paid"):
+            raise ValidationError("Only an open demand can be edited.")
+        for key, value in payload.model_dump(exclude_unset=True).items():
+            setattr(row, key, value)
+        row.updated_by_id = actor_id
+        await self.session.flush()
+        return await self._get_demand(demand_id)
+
+    async def cancel_demand(self, demand_id: UUID, *, actor_id: UUID) -> CustomerDemand:
+        row = await self._get_demand(demand_id)
+        if Decimal(row.amount_received or 0) > 0:
+            raise ValidationError("Cannot cancel a demand that has received payments.")
+        row.status = "cancelled"
+        row.updated_by_id = actor_id
+        await self.session.flush()
+        return await self._get_demand(demand_id)
+
+    async def record_receipt(self, demand_id: UUID, payload: DemandReceiptCreate, *, actor_id: UUID) -> DemandReceipt:
+        row = await self._get_demand(demand_id)
+        if row.status == "cancelled":
+            raise ValidationError("Cannot record a receipt on a cancelled demand.")
+        number = await _next_sequence(self.session, DemandReceipt, "receipt_number", "RCPT")
+        receipt = DemandReceipt(
+            receipt_number=number, demand_id=row.id, amount=payload.amount, received_on=payload.received_on,
+            method=payload.method, txn_ref=payload.txn_ref, note=payload.note, recorded_by_id=actor_id,
+        )
+        self.session.add(receipt)
+        await self.session.flush()
+        total = sum((Decimal(r.amount) for r in row.receipts + [receipt]), Decimal("0"))
+        row.amount_received = total
+        row.status = "paid" if total >= Decimal(row.amount) else "partially_paid"
+        row.updated_by_id = actor_id
+        await self.session.flush()
+        await realtime_manager.broadcast(
+            {"event": "demand.updated", "payload": {"id": str(row.id), "status": row.status}}
+        )
+        return receipt

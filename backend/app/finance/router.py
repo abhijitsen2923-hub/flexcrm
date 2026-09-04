@@ -18,6 +18,15 @@ from app.finance.models import (
 )
 from app.finance.schemas import (
     CommissionLedgerRead,
+    CustomerContractCreate,
+    CustomerContractListItem,
+    CustomerContractRead,
+    CustomerContractUpdate,
+    CustomerDemandCreate,
+    CustomerDemandRead,
+    CustomerDemandUpdate,
+    DemandReceiptCreate,
+    DemandReceiptRead,
     ExpenseCreate,
     ExpenseFilters,
     ExpenseMarkPaidRequest,
@@ -52,6 +61,7 @@ from app.finance.schemas import (
     VendorUpdate,
 )
 from app.finance.services import (
+    CustomerDemandService,
     ExpenseService,
     FinanceCategoryService,
     FinanceReportingService,
@@ -612,3 +622,99 @@ async def finance_summary(
     session: AsyncSession = Depends(get_db_session),
 ):
     return await FinanceSummaryService(session).summary()
+
+
+# ---- Per-customer demand ledger (Phase 3a) ----
+
+@router.get("/contracts", response_model=list[CustomerContractListItem])
+async def list_contracts(
+    customer_id: UUID | None = None,
+    _: object = Depends(require_permissions(PermissionCode.FINANCE_VIEW)),
+    session: AsyncSession = Depends(get_db_session),
+):
+    return await CustomerDemandService(session).list_contracts(customer_id=customer_id)
+
+
+@router.post("/contracts", response_model=CustomerContractRead, status_code=status.HTTP_201_CREATED)
+async def create_contract(
+    payload: CustomerContractCreate,
+    current_user=Depends(require_permissions(PermissionCode.FINANCE_RECORD_PAYMENT)),
+    session: AsyncSession = Depends(get_db_session),
+):
+    service = CustomerDemandService(session)
+    row = await service.create_contract(payload, actor_id=current_user.id)
+    await service.commit()
+    return await service.get_contract(row.id)
+
+
+@router.get("/contracts/{contract_id}", response_model=CustomerContractRead)
+async def get_contract(
+    contract_id: UUID,
+    _: object = Depends(require_permissions(PermissionCode.FINANCE_VIEW)),
+    session: AsyncSession = Depends(get_db_session),
+):
+    return await CustomerDemandService(session).get_contract(contract_id)
+
+
+@router.patch("/contracts/{contract_id}", response_model=CustomerContractRead)
+async def update_contract(
+    contract_id: UUID,
+    payload: CustomerContractUpdate,
+    current_user=Depends(require_permissions(PermissionCode.FINANCE_RECORD_PAYMENT)),
+    session: AsyncSession = Depends(get_db_session),
+):
+    service = CustomerDemandService(session)
+    await service.update_contract(contract_id, payload, actor_id=current_user.id)
+    await service.commit()
+    return await service.get_contract(contract_id)
+
+
+@router.post("/contracts/{contract_id}/demands", response_model=CustomerDemandRead, status_code=status.HTTP_201_CREATED)
+async def raise_demand(
+    contract_id: UUID,
+    payload: CustomerDemandCreate,
+    current_user=Depends(require_permissions(PermissionCode.FINANCE_RECORD_PAYMENT)),
+    session: AsyncSession = Depends(get_db_session),
+):
+    service = CustomerDemandService(session)
+    row = await service.raise_demand(contract_id, payload, actor_id=current_user.id)
+    await service.commit()
+    return await service.get_demand(row.id)
+
+
+@router.patch("/demands/{demand_id}", response_model=CustomerDemandRead)
+async def update_demand(
+    demand_id: UUID,
+    payload: CustomerDemandUpdate,
+    current_user=Depends(require_permissions(PermissionCode.FINANCE_RECORD_PAYMENT)),
+    session: AsyncSession = Depends(get_db_session),
+):
+    service = CustomerDemandService(session)
+    row = await service.update_demand(demand_id, payload, actor_id=current_user.id)
+    await service.commit()
+    return await service.get_demand(row.id)
+
+
+@router.post("/demands/{demand_id}/cancel", response_model=CustomerDemandRead)
+async def cancel_demand(
+    demand_id: UUID,
+    current_user=Depends(require_permissions(PermissionCode.FINANCE_RECORD_PAYMENT)),
+    session: AsyncSession = Depends(get_db_session),
+):
+    service = CustomerDemandService(session)
+    row = await service.cancel_demand(demand_id, actor_id=current_user.id)
+    await service.commit()
+    return await service.get_demand(row.id)
+
+
+@router.post("/demands/{demand_id}/receipts", response_model=DemandReceiptRead, status_code=status.HTTP_201_CREATED)
+async def record_demand_receipt(
+    demand_id: UUID,
+    payload: DemandReceiptCreate,
+    current_user=Depends(require_permissions(PermissionCode.FINANCE_RECORD_PAYMENT)),
+    session: AsyncSession = Depends(get_db_session),
+):
+    service = CustomerDemandService(session)
+    receipt = await service.record_receipt(demand_id, payload, actor_id=current_user.id)
+    await service.commit()
+    return receipt

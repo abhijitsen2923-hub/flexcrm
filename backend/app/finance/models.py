@@ -482,3 +482,102 @@ class ManualIncome(
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     category = relationship("FinanceCategory")
+
+
+class CustomerContract(TenantBase, UUIDPrimaryKeyMixin, TimestampMixin, TenantAuditMixin, TenantSoftDeleteMixin):
+    """A customer's total contract value (e.g. ₹50L) against which ad-hoc demands
+    are raised. Balance = contract_value − total received. Statuses are plain
+    strings (active|closed) — no PG enum needed."""
+
+    __tablename__ = "customer_contracts"
+    __table_args__ = (
+        CheckConstraint("contract_value >= 0", name="ck_customer_contracts_value_non_negative"),
+        Index("ix_customer_contracts_customer", "customer_id"),
+        {"schema": "tenant"},
+    )
+
+    customer_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("customers.id", ondelete="RESTRICT"), nullable=False
+    )
+    title: Mapped[str] = mapped_column(String(255), nullable=False)
+    contract_value: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False, default=0)
+    currency: Mapped[str] = mapped_column(String(3), nullable=False, default="INR")
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="active")  # active | closed
+
+    customer = relationship("Customer")
+    demands = relationship("CustomerDemand", back_populates="contract", cascade="all, delete-orphan")
+
+    @property
+    def total_demanded(self) -> Decimal:
+        return sum(
+            (Decimal(d.amount or 0) for d in self.demands if not d.is_deleted and d.status != "cancelled"),
+            Decimal("0"),
+        )
+
+    @property
+    def total_received(self) -> Decimal:
+        return sum((Decimal(d.amount_received or 0) for d in self.demands if not d.is_deleted), Decimal("0"))
+
+    @property
+    def balance(self) -> Decimal:
+        return Decimal(self.contract_value or 0) - self.total_received
+
+
+class CustomerDemand(TenantBase, UUIDPrimaryKeyMixin, TimestampMixin, TenantAuditMixin, TenantSoftDeleteMixin):
+    """One ad-hoc demand raised against a contract (any amount, any number of times).
+    outstanding = amount − amount_received."""
+
+    __tablename__ = "customer_demands"
+    __table_args__ = (
+        CheckConstraint("amount >= 0", name="ck_customer_demands_amount_non_negative"),
+        UniqueConstraint("demand_number", name="uq_customer_demands_demand_number"),
+        Index("ix_customer_demands_contract", "contract_id"),
+        Index("ix_customer_demands_status", "status"),
+        {"schema": "tenant"},
+    )
+
+    demand_number: Mapped[str] = mapped_column(String(32), nullable=False)
+    contract_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("customer_contracts.id", ondelete="RESTRICT"), nullable=False
+    )
+    description: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    amount: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False, default=0)
+    due_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="open")  # open|partially_paid|paid|cancelled
+    amount_received: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False, default=0)
+
+    contract = relationship("CustomerContract", back_populates="demands")
+    receipts = relationship("DemandReceipt", back_populates="demand", cascade="all, delete-orphan")
+
+    @property
+    def outstanding(self) -> Decimal:
+        return Decimal(self.amount or 0) - Decimal(self.amount_received or 0)
+
+
+class DemandReceipt(TenantBase, UUIDPrimaryKeyMixin, TimestampMixin):
+    """A payment received against a customer demand (reduces its outstanding + the
+    contract balance)."""
+
+    __tablename__ = "demand_receipts"
+    __table_args__ = (
+        CheckConstraint("amount > 0", name="ck_demand_receipts_amount_positive"),
+        UniqueConstraint("receipt_number", name="uq_demand_receipts_receipt_number"),
+        Index("ix_demand_receipts_demand", "demand_id"),
+        {"schema": "tenant"},
+    )
+
+    receipt_number: Mapped[str] = mapped_column(String(32), nullable=False)
+    demand_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("customer_demands.id", ondelete="CASCADE"), nullable=False
+    )
+    amount: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False, default=0)
+    received_on: Mapped[date] = mapped_column(Date, nullable=False)
+    method: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    txn_ref: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    recorded_by_id: Mapped[UUID | None] = mapped_column(
+        Uuid, ForeignKey("public.users.id", ondelete="SET NULL"), nullable=True
+    )
+
+    demand = relationship("CustomerDemand", back_populates="receipts")

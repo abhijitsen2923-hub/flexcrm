@@ -417,3 +417,94 @@ class FinanceSummaryResponse(ORMModel):
     # Charts
     expense_by_category: list[FinanceBreakdownRow] = []
     income_by_category: list[FinanceBreakdownRow] = []
+
+
+# ---- Per-customer demand ledger (Phase 3a) ----
+
+class CustomerContractCreate(ORMModel):
+    customer_id: UUID
+    title: str = Field(min_length=1, max_length=255)
+    contract_value: Decimal = Field(ge=0)
+    currency: str = Field(default="INR", max_length=3)
+    notes: str | None = None
+
+
+class CustomerContractUpdate(ORMModel):
+    title: str | None = Field(default=None, min_length=1, max_length=255)
+    contract_value: Decimal | None = Field(default=None, ge=0)
+    notes: str | None = None
+    status: str | None = Field(default=None, max_length=16)
+
+
+class DemandReceiptRead(ORMModel):
+    id: UUID
+    receipt_number: str
+    demand_id: UUID
+    amount: Decimal
+    received_on: date
+    method: str | None = None
+    txn_ref: str | None = None
+    note: str | None = None
+    created_at: datetime
+
+
+class CustomerDemandRead(ORMModel):
+    id: UUID
+    demand_number: str
+    contract_id: UUID
+    description: str | None = None
+    amount: Decimal
+    due_date: date | None = None
+    status: str
+    amount_received: Decimal
+    outstanding: Decimal
+    created_at: datetime
+    receipts: list[DemandReceiptRead] = []
+
+
+class CustomerContractRead(ORMModel):
+    id: UUID
+    customer_id: UUID
+    title: str
+    contract_value: Decimal
+    currency: str
+    notes: str | None = None
+    status: str
+    created_at: datetime
+    total_demanded: Decimal
+    total_received: Decimal
+    balance: Decimal
+    demands: list[CustomerDemandRead] = []
+
+
+class CustomerContractListItem(ORMModel):
+    id: UUID
+    customer_id: UUID
+    title: str
+    contract_value: Decimal
+    currency: str
+    status: str
+    total_demanded: Decimal
+    total_received: Decimal
+    balance: Decimal
+    created_at: datetime
+
+
+class CustomerDemandCreate(ORMModel):
+    description: str | None = Field(default=None, max_length=255)
+    amount: Decimal = Field(gt=0)
+    due_date: date | None = None
+
+
+class CustomerDemandUpdate(ORMModel):
+    description: str | None = Field(default=None, max_length=255)
+    amount: Decimal | None = Field(default=None, gt=0)
+    due_date: date | None = None
+
+
+class DemandReceiptCreate(ORMModel):
+    amount: Decimal = Field(gt=0)
+    received_on: date
+    method: str | None = Field(default=None, max_length=64)
+    txn_ref: str | None = Field(default=None, max_length=120)
+    note: str | None = None

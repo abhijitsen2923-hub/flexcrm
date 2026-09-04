@@ -11,6 +11,10 @@ import type {
   FinanceCategory,
   FinanceCategoryKind,
   FinanceDocument,
+  CustomerContract,
+  CustomerContractListItem,
+  CustomerDemand,
+  DemandReceipt,
   FinanceSettings,
   FinanceSummary,
   ManualIncome,
@@ -236,6 +240,40 @@ export const financeService = {
   // ---- Dashboard summary (Phase 2) ----
   async getSummary(): Promise<FinanceSummary> {
     const { data } = await apiClient.get<FinanceSummary>("/finance/summary");
+    return data;
+  },
+
+  // ---- Per-customer demand ledger (Phase 3a) ----
+  async listContracts(customerId?: string): Promise<CustomerContractListItem[]> {
+    const { data } = await apiClient.get<CustomerContractListItem[]>(`/finance/contracts${qs({ customer_id: customerId })}`);
+    return data;
+  },
+  async getContract(id: string): Promise<CustomerContract> {
+    const { data } = await apiClient.get<CustomerContract>(`/finance/contracts/${id}`);
+    return data;
+  },
+  async createContract(payload: { customer_id: string; title: string; contract_value: number; currency?: string; notes?: string | null }): Promise<CustomerContract> {
+    const { data } = await apiClient.post<CustomerContract>("/finance/contracts", payload);
+    return data;
+  },
+  async updateContract(id: string, payload: { title?: string; contract_value?: number; notes?: string | null; status?: string }): Promise<CustomerContract> {
+    const { data } = await apiClient.patch<CustomerContract>(`/finance/contracts/${id}`, payload);
+    return data;
+  },
+  async raiseDemand(contractId: string, payload: { description?: string | null; amount: number; due_date?: string | null }): Promise<CustomerDemand> {
+    const { data } = await apiClient.post<CustomerDemand>(`/finance/contracts/${contractId}/demands`, payload);
+    return data;
+  },
+  async updateDemand(id: string, payload: { description?: string | null; amount?: number; due_date?: string | null }): Promise<CustomerDemand> {
+    const { data } = await apiClient.patch<CustomerDemand>(`/finance/demands/${id}`, payload);
+    return data;
+  },
+  async cancelDemand(id: string): Promise<CustomerDemand> {
+    const { data } = await apiClient.post<CustomerDemand>(`/finance/demands/${id}/cancel`);
+    return data;
+  },
+  async recordDemandReceipt(demandId: string, payload: { amount: number; received_on: string; method?: string; txn_ref?: string; note?: string }): Promise<DemandReceipt> {
+    const { data } = await apiClient.post<DemandReceipt>(`/finance/demands/${demandId}/receipts`, payload);
     return data;
   }
 };

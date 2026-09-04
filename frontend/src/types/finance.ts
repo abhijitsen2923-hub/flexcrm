@@ -199,3 +199,59 @@ export interface FinanceSummary {
   expense_by_category: FinanceBreakdownRow[];
   income_by_category: FinanceBreakdownRow[];
 }
+
+// ---- Per-customer demand ledger (Phase 3a) ----
+
+export interface DemandReceipt {
+  id: string;
+  receipt_number: string;
+  demand_id: string;
+  amount: string;
+  received_on: string;
+  method: string | null;
+  txn_ref: string | null;
+  note: string | null;
+  created_at: string;
+}
+
+export interface CustomerDemand {
+  id: string;
+  demand_number: string;
+  contract_id: string;
+  description: string | null;
+  amount: string;
+  due_date: string | null;
+  status: string;
+  amount_received: string;
+  outstanding: string;
+  created_at: string;
+  receipts: DemandReceipt[];
+}
+
+export interface CustomerContract {
+  id: string;
+  customer_id: string;
+  title: string;
+  contract_value: string;
+  currency: string;
+  notes: string | null;
+  status: string;
+  created_at: string;
+  total_demanded: string;
+  total_received: string;
+  balance: string;
+  demands: CustomerDemand[];
+}
+
+export interface CustomerContractListItem {
+  id: string;
+  customer_id: string;
+  title: string;
+  contract_value: string;
+  currency: string;
+  status: string;
+  total_demanded: string;
+  total_received: string;
+  balance: string;
+  created_at: string;
+}
