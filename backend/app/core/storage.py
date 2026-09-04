@@ -113,3 +113,8 @@ def invoice_key(org_id: UUID, booking_id: UUID, invoice_id: UUID) -> str:
 
 def media_key(org_id: UUID, project_id: UUID, media_id: UUID, filename: str) -> str:
     return f"org/{org_id}/projects/{project_id}/media/{media_id}_{_safe_name(filename)}"
+
+
+def finance_doc_key(org_id: UUID, owner_type: str, owner_id: UUID, doc_id: UUID, filename: str) -> str:
+    # Finance attachment (a bill/receipt/proof on an expense or vendor bill).
+    return f"org/{org_id}/finance/{_safe_name(owner_type)}/{owner_id}/{doc_id}_{_safe_name(filename)}"

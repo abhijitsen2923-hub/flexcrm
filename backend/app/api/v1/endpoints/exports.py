@@ -21,7 +21,7 @@ from app.core.permissions import PermissionCode
 from app.core.tenancy import current_org
 from app.database.enums import LeadIndustry
 from app.database.session import get_db_session
-from app.finance.models import SalesOrder
+from app.finance.models import Expense, FinanceCategory, ManualIncome, SalesOrder, Vendor, VendorBill
 from app.models.customer import Customer
 from app.models.lead import Lead
 from app.models.organization import Organization
@@ -215,3 +215,78 @@ async def export_bookings(
             b.created_at.isoformat(),
         ])
     return _csv_response(f"bookings-{datetime.utcnow().date()}.csv", rows, header)
+
+
+# --- Finance exports (Phase 2) ---
+
+def _m(value) -> str:
+    return "" if value is None else str(value)
+
+
+def _dt(value) -> str:
+    return value.isoformat() if value is not None else ""
+
+
+@router.get("/finance-expenses.csv")
+async def export_finance_expenses(
+    _: object = Depends(require_permissions(PermissionCode.EXPORT_DATA, PermissionCode.FINANCE_VIEW)),
+    session: AsyncSession = Depends(get_db_session),
+):
+    cats = {c.id: c.name for c in (await session.execute(select(FinanceCategory))).scalars().all()}
+    vends = {v.id: v.name for v in (await session.execute(select(Vendor))).scalars().all()}
+    items = (
+        await session.execute(
+            select(Expense).where(Expense.is_deleted.is_(False)).order_by(Expense.expense_date.desc())
+        )
+    ).scalars().all()
+    header = ["Expense #", "Date", "Title", "Category", "Vendor", "Status",
+              "Amount", "Taxable", "CGST", "SGST", "IGST", "TDS", "Total", "Net payable"]
+    rows = [[
+        e.expense_number, _dt(e.expense_date), e.title, cats.get(e.category_id, ""),
+        vends.get(e.vendor_id, "") if e.vendor_id else "", e.status.value,
+        _m(e.amount_entered), _m(e.taxable_amount), _m(e.cgst_amount), _m(e.sgst_amount),
+        _m(e.igst_amount), _m(e.tds_amount), _m(e.total_amount), _m(e.net_payable),
+    ] for e in items]
+    return _csv_response(f"finance-expenses-{datetime.utcnow().date()}.csv", rows, header)
+
+
+@router.get("/finance-income.csv")
+async def export_finance_income(
+    _: object = Depends(require_permissions(PermissionCode.EXPORT_DATA, PermissionCode.FINANCE_VIEW)),
+    session: AsyncSession = Depends(get_db_session),
+):
+    cats = {c.id: c.name for c in (await session.execute(select(FinanceCategory))).scalars().all()}
+    items = (
+        await session.execute(
+            select(ManualIncome).where(ManualIncome.is_deleted.is_(False)).order_by(ManualIncome.income_date.desc())
+        )
+    ).scalars().all()
+    header = ["Income #", "Date", "Title", "Category", "Source",
+              "Amount", "Taxable", "CGST", "SGST", "IGST", "TDS", "Total"]
+    rows = [[
+        i.income_number, _dt(i.income_date), i.title, cats.get(i.category_id, ""), i.source or "",
+        _m(i.amount_entered), _m(i.taxable_amount), _m(i.cgst_amount), _m(i.sgst_amount),
+        _m(i.igst_amount), _m(i.tds_amount), _m(i.total_amount),
+    ] for i in items]
+    return _csv_response(f"finance-income-{datetime.utcnow().date()}.csv", rows, header)
+
+
+@router.get("/vendor-bills.csv")
+async def export_vendor_bills(
+    _: object = Depends(require_permissions(PermissionCode.EXPORT_DATA, PermissionCode.FINANCE_VIEW)),
+    session: AsyncSession = Depends(get_db_session),
+):
+    vends = {v.id: v.name for v in (await session.execute(select(Vendor))).scalars().all()}
+    items = (
+        await session.execute(
+            select(VendorBill).where(VendorBill.is_deleted.is_(False)).order_by(VendorBill.created_at.desc())
+        )
+    ).scalars().all()
+    header = ["Bill #", "Vendor", "Vendor invoice #", "Bill date", "Due date", "Status",
+              "Taxable", "Total", "Amount paid", "Outstanding"]
+    rows = [[
+        b.bill_number, vends.get(b.vendor_id, ""), b.vendor_invoice_no or "", _dt(b.bill_date), _dt(b.due_date),
+        b.status.value, _m(b.taxable_amount), _m(b.total_amount), _m(b.amount_paid),
+        _m((b.net_payable or 0) - (b.amount_paid or 0)),
+    ] for b in items]
+    return _csv_response(f"vendor-bills-{datetime.utcnow().date()}.csv", rows, header)

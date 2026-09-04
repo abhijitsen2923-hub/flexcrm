@@ -89,6 +89,42 @@ class CommissionDirection(StrEnum):
     reversed = "reversed"
 
 
+# --- Finance vertical (Phase 1: expenses / vendors) ---
+
+class GstTreatment(StrEnum):
+    """Intra-state (CGST+SGST split) vs inter-state (IGST) on a finance document."""
+    intra_state = "intra_state"
+    inter_state = "inter_state"
+
+
+class FinanceBusinessMode(StrEnum):
+    """Selects which income/expense category presets an org sees. Set once at signup."""
+    general = "general"
+    re_builder = "re_builder"
+    re_broker = "re_broker"
+    hybrid = "hybrid"
+
+
+class FinanceCategoryKind(StrEnum):
+    expense = "expense"
+    income = "income"
+
+
+class ExpenseStatus(StrEnum):
+    draft = "draft"
+    submitted = "submitted"
+    approved = "approved"
+    rejected = "rejected"
+    paid = "paid"
+
+
+class VendorBillStatus(StrEnum):
+    open = "open"
+    partially_paid = "partially_paid"
+    paid = "paid"
+    cancelled = "cancelled"
+
+
 class RenewalStatus(StrEnum):
     upcoming = "upcoming"
     renewed = "renewed"

@@ -52,6 +52,10 @@ class PermissionCode(StrEnum):
     FINANCE_VIEW = "FINANCE_VIEW"
     FINANCE_RECORD_PAYMENT = "FINANCE_RECORD_PAYMENT"
     FINANCE_REFUND = "FINANCE_REFUND"
+    FINANCE_EXPENSE_SUBMIT = "FINANCE_EXPENSE_SUBMIT"
+    FINANCE_EXPENSE_APPROVE = "FINANCE_EXPENSE_APPROVE"
+    FINANCE_VENDOR_MANAGE = "FINANCE_VENDOR_MANAGE"
+    FINANCE_SETTINGS_MANAGE = "FINANCE_SETTINGS_MANAGE"
 
     HR_VIEW = "HR_VIEW"
     HR_MANAGE = "HR_MANAGE"
@@ -289,7 +293,7 @@ ROLE_PERMISSION_DEFAULTS: dict[UserRole, tuple[PermissionCode, ...]] = {
         PermissionCode.CUSTOMER_VIEW, PermissionCode.CUSTOMER_MANAGE,
         PermissionCode.TASK_VIEW, PermissionCode.TASK_MANAGE,
         PermissionCode.ACTIVITY_VIEW, PermissionCode.ACTIVITY_MANAGE,
-        PermissionCode.FINANCE_VIEW,
+        PermissionCode.FINANCE_VIEW, PermissionCode.FINANCE_EXPENSE_SUBMIT,
     ),
     UserRole.telecaller: (
         PermissionCode.DASHBOARD_VIEW,
@@ -302,6 +306,8 @@ ROLE_PERMISSION_DEFAULTS: dict[UserRole, tuple[PermissionCode, ...]] = {
         PermissionCode.DASHBOARD_VIEW,
         PermissionCode.CUSTOMER_VIEW,
         PermissionCode.FINANCE_VIEW, PermissionCode.FINANCE_RECORD_PAYMENT, PermissionCode.FINANCE_REFUND,
+        PermissionCode.FINANCE_EXPENSE_SUBMIT, PermissionCode.FINANCE_EXPENSE_APPROVE,
+        PermissionCode.FINANCE_VENDOR_MANAGE, PermissionCode.FINANCE_SETTINGS_MANAGE,
         PermissionCode.REPORTS_VIEW,
         PermissionCode.EXPORT_DATA,
     ),
@@ -311,6 +317,7 @@ ROLE_PERMISSION_DEFAULTS: dict[UserRole, tuple[PermissionCode, ...]] = {
         PermissionCode.CUSTOMER_VIEW, PermissionCode.CUSTOMER_MANAGE,
         PermissionCode.TASK_VIEW, PermissionCode.TASK_MANAGE,
         PermissionCode.ACTIVITY_VIEW, PermissionCode.ACTIVITY_MANAGE,
+        PermissionCode.FINANCE_VIEW, PermissionCode.FINANCE_EXPENSE_SUBMIT,
     ),
     # Receptionist / front-desk — entry only: create & view leads. No user mgmt,
     # no reassignment (needs USER_VIEW), no finance, no customer/task tooling.
@@ -349,6 +356,12 @@ PERMISSION_ALIASES: dict[PermissionCode, tuple[PermissionCode, ...]] = {
     PermissionCode.ACTIVITY_MANAGE: (PermissionCode.ACTIVITY_VIEW,),
     PermissionCode.FINANCE_RECORD_PAYMENT: (PermissionCode.FINANCE_VIEW,),
     PermissionCode.FINANCE_REFUND: (PermissionCode.FINANCE_VIEW, PermissionCode.FINANCE_RECORD_PAYMENT),
+    PermissionCode.FINANCE_EXPENSE_SUBMIT: (PermissionCode.FINANCE_VIEW,),
+    PermissionCode.FINANCE_EXPENSE_APPROVE: (
+        PermissionCode.FINANCE_VIEW, PermissionCode.FINANCE_EXPENSE_SUBMIT,
+    ),
+    PermissionCode.FINANCE_VENDOR_MANAGE: (PermissionCode.FINANCE_VIEW,),
+    PermissionCode.FINANCE_SETTINGS_MANAGE: (PermissionCode.FINANCE_VIEW,),
     PermissionCode.HR_MANAGE: (PermissionCode.HR_VIEW,),
     PermissionCode.USER_MANAGE: (PermissionCode.USER_VIEW,),
     PermissionCode.REPORTS_VIEW: (PermissionCode.DASHBOARD_VIEW,),

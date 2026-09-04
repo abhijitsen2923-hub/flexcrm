@@ -20,6 +20,7 @@ def _to_read(org: Organization) -> OrganizationRead:
         id=org.id,
         name=org.name,
         business_type=org.business_type,
+        finance_business_mode=org.finance_business_mode,
         plan=org.plan,
         features=org.features,
         allowed_currencies=allowed_currencies_for_org(org),

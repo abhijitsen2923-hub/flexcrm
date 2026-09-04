@@ -20,6 +20,7 @@ from app.models.user import User
 from app.schemas.organization import (
     MODULE_KEYS,
     OrganizationRead,
+    SetFinanceModeRequest,
     SetOrgStatusRequest,
     UpdateModulesRequest,
     get_modules,
@@ -59,6 +60,7 @@ def _to_read(org: Organization) -> OrganizationRead:
         id=org.id,
         name=org.name,
         business_type=org.business_type,
+        finance_business_mode=org.finance_business_mode,
         plan=org.plan,
         features=org.features,
         allowed_currencies=allowed_currencies_for_org(org),
@@ -147,6 +149,23 @@ async def update_org_modules(
                 features[f"module.{key}"] = enabled
         org.features = features
 
+        await session.commit()
+        await session.refresh(org)
+    return _to_read(org)
+
+
+@router.patch("/organizations/{org_id}/finance-mode", response_model=OrganizationRead)
+async def set_org_finance_mode(
+    org_id: UUID,
+    payload: SetFinanceModeRequest,
+    _=Depends(require_platform_admin()),
+    session: AsyncSession = Depends(get_db_session),
+):
+    """Set an org's finance business mode (drives income/expense category presets).
+    Normally chosen at signup; settable here for existing orgs (default 'general')."""
+    with bypass(session):
+        org = await _load_org(session, org_id)
+        org.finance_business_mode = payload.finance_business_mode
         await session.commit()
         await session.refresh(org)
     return _to_read(org)

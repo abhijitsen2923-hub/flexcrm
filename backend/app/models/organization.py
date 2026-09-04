@@ -25,7 +25,7 @@ from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, JSON, String, Text, 
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database.base import Base
-from app.database.enums import LeadIndustry
+from app.database.enums import FinanceBusinessMode, LeadIndustry
 from app.models.base import UUIDPrimaryKeyMixin
 
 
@@ -38,6 +38,13 @@ class Organization(Base, UUIDPrimaryKeyMixin):
         nullable=False,
     )
     plan: Mapped[str] = mapped_column(String(32), nullable=False, default="free")
+    # Finance category-preset selector, chosen at signup. Immutable for tenants;
+    # platform-admin settable. Drives which income/expense categories the org sees.
+    finance_business_mode: Mapped[FinanceBusinessMode] = mapped_column(
+        Enum(FinanceBusinessMode, name="finance_business_mode_enum"),
+        nullable=False,
+        server_default=text("'general'"),
+    )
     features: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     schema_name: Mapped[str] = mapped_column(Text, nullable=False, unique=True, index=True)
 

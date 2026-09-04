@@ -13,26 +13,57 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import selectinload
 
 from app.core.exceptions import NotFoundError, ValidationError
+from app.core.tenancy import current_org
 from app.database.enums import (
     CommissionDirection,
+    ExpenseStatus,
+    FinanceBusinessMode,
+    FinanceCategoryKind,
     InvoiceStatus,
     PaymentStatus,
+    VendorBillStatus,
 )
+from app.finance.category_presets import presets_for
+from app.finance.gst import compute_gst
 from app.finance.models import (
     CommissionLedger,
+    Expense,
+    FinanceCategory,
+    FinanceSettings,
     Invoice,
+    ManualIncome,
     Payment,
     Refund,
     SalesOrder,
     SalesOrderAssist,
+    Vendor,
+    VendorBill,
+    VendorPayment,
 )
 from app.finance.schemas import (
+    ExpenseCreate,
+    ExpenseFilters,
+    ExpenseUpdate,
+    FinanceBreakdownRow,
+    FinanceCategoryCreate,
+    FinanceCategoryUpdate,
+    FinanceSettingsUpdate,
+    FinanceSummaryResponse,
+    ManualIncomeCreate,
+    ManualIncomeFilters,
+    ManualIncomeUpdate,
     MonthlyReportResponse,
     MonthlyRevenueRow,
     PaymentCreate,
     RefundCreate,
+    VendorBillCreate,
+    VendorBillUpdate,
+    VendorCreate,
+    VendorPaymentCreate,
+    VendorUpdate,
 )
 from app.models.lead import Lead
+from app.models.organization import Organization
 from app.models.stage_transition import StageTransition
 from app.models.user import User
 from app.services.base import ServiceBase
@@ -382,3 +413,553 @@ class FinanceReportingService(ServiceBase):
                 )
             )
         return MonthlyReportResponse(month=month, rows=output)
+
+
+# =====================================================================
+# Finance vertical — Phase 1 services: settings, categories, vendors,
+# expenses, vendor bills/payments.
+# =====================================================================
+
+
+def _apply_gst_fields(obj, data) -> None:
+    """Compute + stamp the GST/amount snapshot onto an expense/vendor_bill from a
+    GST input schema (any object exposing the _GstInput fields)."""
+    breakdown = compute_gst(
+        amount_entered=data.amount_entered,
+        gst_applicable=data.gst_applicable,
+        gst_rate=data.gst_rate,
+        gst_treatment=data.gst_treatment,
+        gst_inclusive=data.gst_inclusive,
+        tds_amount=data.tds_amount,
+    )
+    obj.amount_entered = data.amount_entered
+    obj.gst_applicable = data.gst_applicable
+    obj.gst_treatment = data.gst_treatment
+    obj.gst_inclusive = data.gst_inclusive
+    obj.gst_rate = data.gst_rate
+    obj.taxable_amount = breakdown.taxable_amount
+    obj.cgst_amount = breakdown.cgst_amount
+    obj.sgst_amount = breakdown.sgst_amount
+    obj.igst_amount = breakdown.igst_amount
+    obj.tds_amount = breakdown.tds_amount
+    obj.total_amount = breakdown.total_amount
+    obj.net_payable = breakdown.net_payable
+
+
+class FinanceSettingsService(ServiceBase):
+    async def _org(self) -> Organization:
+        return (
+            await self.session.execute(
+                select(Organization).where(Organization.id == current_org(self.session))
+            )
+        ).scalar_one()
+
+    async def get_or_create(self, *, actor_id: UUID | None = None) -> FinanceSettings:
+        row = (await self.session.execute(select(FinanceSettings))).scalars().first()
+        if row is None:
+            row = FinanceSettings(created_by_id=actor_id, updated_by_id=actor_id)
+            self.session.add(row)
+            await self.session.flush()
+        return row
+
+    async def read(self) -> dict:
+        row = await self.get_or_create()
+        org = await self._org()
+        return {
+            "gst_registered": row.gst_registered,
+            "gstin": row.gstin,
+            "home_state_code": row.home_state_code,
+            "default_place_of_supply_state": row.default_place_of_supply_state,
+            "finance_business_mode": org.finance_business_mode,
+        }
+
+    async def update(self, payload: FinanceSettingsUpdate, *, actor_id: UUID) -> dict:
+        row = await self.get_or_create(actor_id=actor_id)
+        for key, value in payload.model_dump(exclude_unset=True).items():
+            setattr(row, key, value)
+        row.updated_by_id = actor_id
+        await self.session.flush()
+        return await self.read()
+
+
+class FinanceCategoryService(ServiceBase):
+    async def ensure_seeded(self, mode: FinanceBusinessMode) -> None:
+        """Idempotent per-org seed of the mode's presets (unique on name+kind)."""
+        existing = (
+            await self.session.execute(select(FinanceCategory.name, FinanceCategory.kind))
+        ).all()
+        have = {(name, kind) for name, kind in existing}
+        added = False
+        for kind in (FinanceCategoryKind.expense, FinanceCategoryKind.income):
+            for i, (name, group) in enumerate(presets_for(mode, kind)):
+                if (name, kind) in have:
+                    continue
+                self.session.add(
+                    FinanceCategory(
+                        name=name, kind=kind, group_label=group,
+                        source="preset", is_active=True, sort_order=i,
+                    )
+                )
+                added = True
+        if added:
+            await self.session.flush()
+
+    async def list(self, *, kind: FinanceCategoryKind | None = None, include_inactive: bool = False):
+        stmt = select(FinanceCategory).where(FinanceCategory.is_deleted.is_(False))
+        if kind is not None:
+            stmt = stmt.where(FinanceCategory.kind == kind)
+        if not include_inactive:
+            stmt = stmt.where(FinanceCategory.is_active.is_(True))
+        # NULL sort_order sorts last (Postgres default for ASC), then by name.
+        stmt = stmt.order_by(FinanceCategory.sort_order, FinanceCategory.name)
+        return list((await self.session.execute(stmt)).scalars().all())
+
+    async def create(self, payload: FinanceCategoryCreate, *, actor_id: UUID) -> FinanceCategory:
+        row = FinanceCategory(
+            name=payload.name, kind=payload.kind, group_label=payload.group_label,
+            source="custom", is_active=True, sort_order=payload.sort_order,
+            created_by_id=actor_id, updated_by_id=actor_id,
+        )
+        self.session.add(row)
+        await self.session.flush()
+        return row
+
+    async def update(self, category_id: UUID, payload: FinanceCategoryUpdate, *, actor_id: UUID) -> FinanceCategory:
+        row = (
+            await self.session.execute(
+                select(FinanceCategory).where(
+                    FinanceCategory.id == category_id, FinanceCategory.is_deleted.is_(False)
+                )
+            )
+        ).scalar_one_or_none()
+        if row is None:
+            raise NotFoundError("Category not found.")
+        for key, value in payload.model_dump(exclude_unset=True).items():
+            setattr(row, key, value)
+        row.updated_by_id = actor_id
+        await self.session.flush()
+        return row
+
+
+class VendorService(ServiceBase):
+    async def list(self, *, is_active: bool | None = None, q: str | None = None):
+        stmt = select(Vendor).where(Vendor.is_deleted.is_(False))
+        if is_active is not None:
+            stmt = stmt.where(Vendor.is_active.is_(is_active))
+        if q:
+            stmt = stmt.where(Vendor.name.ilike(f"%{q}%"))
+        stmt = stmt.order_by(Vendor.name)
+        return list((await self.session.execute(stmt)).scalars().all())
+
+    async def get(self, vendor_id: UUID) -> Vendor:
+        row = (
+            await self.session.execute(
+                select(Vendor).where(Vendor.id == vendor_id, Vendor.is_deleted.is_(False))
+            )
+        ).scalar_one_or_none()
+        if row is None:
+            raise NotFoundError("Vendor not found.")
+        return row
+
+    async def create(self, payload: VendorCreate, *, actor_id: UUID) -> Vendor:
+        row = Vendor(**payload.model_dump(), created_by_id=actor_id, updated_by_id=actor_id)
+        self.session.add(row)
+        await self.session.flush()
+        return row
+
+    async def update(self, vendor_id: UUID, payload: VendorUpdate, *, actor_id: UUID) -> Vendor:
+        row = await self.get(vendor_id)
+        for key, value in payload.model_dump(exclude_unset=True).items():
+            setattr(row, key, value)
+        row.updated_by_id = actor_id
+        await self.session.flush()
+        return row
+
+    async def deactivate(self, vendor_id: UUID, *, actor_id: UUID) -> None:
+        row = await self.get(vendor_id)
+        row.is_active = False
+        row.is_deleted = True
+        row.deleted_by_id = actor_id
+        row.deleted_at = datetime.now(UTC)
+        await self.session.flush()
+
+
+class ExpenseService(ServiceBase):
+    async def _get(self, expense_id: UUID) -> Expense:
+        row = (
+            await self.session.execute(
+                select(Expense).where(Expense.id == expense_id, Expense.is_deleted.is_(False))
+            )
+        ).scalar_one_or_none()
+        if row is None:
+            raise NotFoundError("Expense not found.")
+        return row
+
+    async def get(self, expense_id: UUID) -> Expense:
+        return await self._get(expense_id)
+
+    async def list(self, filters: ExpenseFilters):
+        stmt = select(Expense).where(Expense.is_deleted.is_(False))
+        if filters.status is not None:
+            stmt = stmt.where(Expense.status == filters.status)
+        if filters.category_id is not None:
+            stmt = stmt.where(Expense.category_id == filters.category_id)
+        if filters.vendor_id is not None:
+            stmt = stmt.where(Expense.vendor_id == filters.vendor_id)
+        if filters.date_from is not None:
+            stmt = stmt.where(Expense.expense_date >= filters.date_from)
+        if filters.date_to is not None:
+            stmt = stmt.where(Expense.expense_date <= filters.date_to)
+        stmt = stmt.order_by(Expense.expense_date.desc(), Expense.created_at.desc())
+        return list((await self.session.execute(stmt)).scalars().all())
+
+    async def create(self, payload: ExpenseCreate, *, actor_id: UUID) -> Expense:
+        number = await _next_sequence(self.session, Expense, "expense_number", "EXP")
+        row = Expense(
+            expense_number=number, title=payload.title, notes=payload.notes,
+            category_id=payload.category_id, vendor_id=payload.vendor_id, bill_id=payload.bill_id,
+            project_id=payload.project_id, department=payload.department,
+            expense_date=payload.expense_date, payment_mode=payload.payment_mode,
+            status=ExpenseStatus.draft, created_by_id=actor_id, updated_by_id=actor_id,
+        )
+        _apply_gst_fields(row, payload)
+        self.session.add(row)
+        await self.session.flush()
+        if payload.submit:
+            self._do_submit(row, actor_id)
+            await self.session.flush()
+        await self._broadcast("expense.created", row)
+        return row
+
+    async def update(self, expense_id: UUID, payload: ExpenseUpdate, *, actor_id: UUID) -> Expense:
+        row = await self._get(expense_id)
+        if row.status not in (ExpenseStatus.draft, ExpenseStatus.rejected):
+            raise ValidationError("Only a draft or rejected expense can be edited.")
+        self._ensure_owner(row, actor_id)
+        row.title = payload.title
+        row.notes = payload.notes
+        row.category_id = payload.category_id
+        row.vendor_id = payload.vendor_id
+        row.bill_id = payload.bill_id
+        row.project_id = payload.project_id
+        row.department = payload.department
+        row.expense_date = payload.expense_date
+        row.payment_mode = payload.payment_mode
+        _apply_gst_fields(row, payload)
+        row.updated_by_id = actor_id
+        await self.session.flush()
+        await self._broadcast("expense.updated", row)
+        return row
+
+    def _do_submit(self, row: Expense, actor_id: UUID) -> None:
+        row.status = ExpenseStatus.submitted
+        row.submitted_by_id = actor_id
+        row.submitted_at = datetime.now(UTC)
+        row.rejected_reason = None
+        row.updated_by_id = actor_id
+
+    @staticmethod
+    def _ensure_owner(row: Expense, actor_id: UUID) -> None:
+        if row.created_by_id is not None and row.created_by_id != actor_id:
+            raise ValidationError("Only the person who created this expense can edit or delete it.")
+
+    async def submit(self, expense_id: UUID, *, actor_id: UUID) -> Expense:
+        row = await self._get(expense_id)
+        if row.status not in (ExpenseStatus.draft, ExpenseStatus.rejected):
+            raise ValidationError("Only a draft or rejected expense can be submitted.")
+        self._do_submit(row, actor_id)
+        await self.session.flush()
+        await self._broadcast("expense.updated", row)
+        return row
+
+    async def approve(self, expense_id: UUID, *, actor_id: UUID) -> Expense:
+        row = await self._get(expense_id)
+        if row.status != ExpenseStatus.submitted:
+            raise ValidationError("Only a submitted expense can be approved.")
+        row.status = ExpenseStatus.approved
+        row.approved_by_id = actor_id
+        row.approved_at = datetime.now(UTC)
+        row.updated_by_id = actor_id
+        await self.session.flush()
+        await self._broadcast("expense.updated", row)
+        return row
+
+    async def reject(self, expense_id: UUID, reason: str, *, actor_id: UUID) -> Expense:
+        row = await self._get(expense_id)
+        if row.status != ExpenseStatus.submitted:
+            raise ValidationError("Only a submitted expense can be rejected.")
+        row.status = ExpenseStatus.rejected
+        row.rejected_reason = reason
+        row.updated_by_id = actor_id
+        await self.session.flush()
+        await self._broadcast("expense.updated", row)
+        return row
+
+    async def mark_paid(self, expense_id: UUID, *, paid_at, payment_mode, actor_id: UUID) -> Expense:
+        row = await self._get(expense_id)
+        if row.status != ExpenseStatus.approved:
+            raise ValidationError("Only an approved expense can be marked paid.")
+        row.status = ExpenseStatus.paid
+        row.paid_at = paid_at or datetime.now(UTC).date()
+        if payment_mode:
+            row.payment_mode = payment_mode
+        row.updated_by_id = actor_id
+        await self.session.flush()
+        await self._broadcast("expense.updated", row)
+        return row
+
+    async def delete(self, expense_id: UUID, *, actor_id: UUID) -> None:
+        row = await self._get(expense_id)
+        if row.status not in (ExpenseStatus.draft, ExpenseStatus.rejected):
+            raise ValidationError("Only a draft or rejected expense can be deleted.")
+        self._ensure_owner(row, actor_id)
+        row.is_deleted = True
+        row.deleted_by_id = actor_id
+        row.deleted_at = datetime.now(UTC)
+        await self.session.flush()
+
+    async def _broadcast(self, event: str, row: Expense) -> None:
+        await realtime_manager.broadcast(
+            {"event": event, "payload": {"id": str(row.id), "status": row.status.value}}
+        )
+
+
+class VendorBillService(ServiceBase):
+    async def _get(self, bill_id: UUID) -> VendorBill:
+        row = (
+            await self.session.execute(
+                select(VendorBill)
+                .where(VendorBill.id == bill_id, VendorBill.is_deleted.is_(False))
+                .options(selectinload(VendorBill.payments))
+            )
+        ).scalar_one_or_none()
+        if row is None:
+            raise NotFoundError("Vendor bill not found.")
+        return row
+
+    async def get(self, bill_id: UUID) -> VendorBill:
+        return await self._get(bill_id)
+
+    async def list(self, *, vendor_id: UUID | None = None, status: VendorBillStatus | None = None):
+        stmt = (
+            select(VendorBill)
+            .where(VendorBill.is_deleted.is_(False))
+            .options(selectinload(VendorBill.payments))
+        )
+        if vendor_id is not None:
+            stmt = stmt.where(VendorBill.vendor_id == vendor_id)
+        if status is not None:
+            stmt = stmt.where(VendorBill.status == status)
+        stmt = stmt.order_by(VendorBill.created_at.desc())
+        return list((await self.session.execute(stmt)).scalars().all())
+
+    async def create(self, payload: VendorBillCreate, *, actor_id: UUID) -> VendorBill:
+        number = await _next_sequence(self.session, VendorBill, "bill_number", "BILL")
+        row = VendorBill(
+            bill_number=number, vendor_id=payload.vendor_id, vendor_invoice_no=payload.vendor_invoice_no,
+            category_id=payload.category_id, project_id=payload.project_id,
+            bill_date=payload.bill_date, due_date=payload.due_date, description=payload.description,
+            status=VendorBillStatus.open, amount_paid=Decimal("0"),
+            created_by_id=actor_id, updated_by_id=actor_id,
+        )
+        _apply_gst_fields(row, payload)
+        self.session.add(row)
+        await self.session.flush()
+        await realtime_manager.broadcast({"event": "vendor_bill.created", "payload": {"id": str(row.id)}})
+        return row
+
+    async def update(self, bill_id: UUID, payload: VendorBillUpdate, *, actor_id: UUID) -> VendorBill:
+        row = await self._get(bill_id)
+        if row.status != VendorBillStatus.open:
+            raise ValidationError("Only an open bill can be edited.")
+        row.vendor_id = payload.vendor_id
+        row.vendor_invoice_no = payload.vendor_invoice_no
+        row.category_id = payload.category_id
+        row.project_id = payload.project_id
+        row.bill_date = payload.bill_date
+        row.due_date = payload.due_date
+        row.description = payload.description
+        _apply_gst_fields(row, payload)
+        row.updated_by_id = actor_id
+        await self.session.flush()
+        return row
+
+    async def cancel(self, bill_id: UUID, *, actor_id: UUID) -> VendorBill:
+        row = await self._get(bill_id)
+        if row.status == VendorBillStatus.paid:
+            raise ValidationError("A fully-paid bill cannot be cancelled.")
+        row.status = VendorBillStatus.cancelled
+        row.updated_by_id = actor_id
+        await self.session.flush()
+        await realtime_manager.broadcast({"event": "vendor_bill.updated", "payload": {"id": str(row.id)}})
+        return row
+
+    async def record_payment(self, bill_id: UUID, payload: VendorPaymentCreate, *, actor_id: UUID) -> VendorPayment:
+        row = await self._get(bill_id)
+        if row.status == VendorBillStatus.cancelled:
+            raise ValidationError("Cannot record a payment on a cancelled bill.")
+        number = await _next_sequence(self.session, VendorPayment, "payment_number", "VPAY")
+        payment = VendorPayment(
+            payment_number=number, bill_id=row.id, vendor_id=row.vendor_id,
+            amount=payload.amount, paid_on=payload.paid_on, method=payload.method,
+            txn_ref=payload.txn_ref, note=payload.note, recorded_by_id=actor_id,
+        )
+        self.session.add(payment)
+        await self.session.flush()
+
+        total_paid = sum((Decimal(p.amount) for p in row.payments + [payment]), Decimal("0"))
+        row.amount_paid = total_paid
+        if total_paid >= Decimal(row.net_payable):
+            row.status = VendorBillStatus.paid
+            row.paid_on = payload.paid_on
+        elif total_paid > 0:
+            row.status = VendorBillStatus.partially_paid
+        row.updated_by_id = actor_id
+        await self.session.flush()
+        await realtime_manager.broadcast(
+            {"event": "vendor_bill.updated", "payload": {"id": str(row.id), "status": row.status.value}}
+        )
+        return payment
+
+
+class ManualIncomeService(ServiceBase):
+    async def _get(self, income_id: UUID) -> ManualIncome:
+        row = (
+            await self.session.execute(
+                select(ManualIncome).where(ManualIncome.id == income_id, ManualIncome.is_deleted.is_(False))
+            )
+        ).scalar_one_or_none()
+        if row is None:
+            raise NotFoundError("Income entry not found.")
+        return row
+
+    async def get(self, income_id: UUID) -> ManualIncome:
+        return await self._get(income_id)
+
+    async def list(self, filters: ManualIncomeFilters):
+        stmt = select(ManualIncome).where(ManualIncome.is_deleted.is_(False))
+        if filters.category_id is not None:
+            stmt = stmt.where(ManualIncome.category_id == filters.category_id)
+        if filters.date_from is not None:
+            stmt = stmt.where(ManualIncome.income_date >= filters.date_from)
+        if filters.date_to is not None:
+            stmt = stmt.where(ManualIncome.income_date <= filters.date_to)
+        stmt = stmt.order_by(ManualIncome.income_date.desc(), ManualIncome.created_at.desc())
+        return list((await self.session.execute(stmt)).scalars().all())
+
+    async def create(self, payload: ManualIncomeCreate, *, actor_id: UUID) -> ManualIncome:
+        number = await _next_sequence(self.session, ManualIncome, "income_number", "INC")
+        row = ManualIncome(
+            income_number=number, title=payload.title, category_id=payload.category_id,
+            source=payload.source, project_id=payload.project_id, income_date=payload.income_date,
+            payment_mode=payload.payment_mode, notes=payload.notes,
+            created_by_id=actor_id, updated_by_id=actor_id,
+        )
+        _apply_gst_fields(row, payload)
+        self.session.add(row)
+        await self.session.flush()
+        await realtime_manager.broadcast({"event": "income.created", "payload": {"id": str(row.id)}})
+        return row
+
+    async def update(self, income_id: UUID, payload: ManualIncomeUpdate, *, actor_id: UUID) -> ManualIncome:
+        row = await self._get(income_id)
+        row.title = payload.title
+        row.category_id = payload.category_id
+        row.source = payload.source
+        row.project_id = payload.project_id
+        row.income_date = payload.income_date
+        row.payment_mode = payload.payment_mode
+        row.notes = payload.notes
+        _apply_gst_fields(row, payload)
+        row.updated_by_id = actor_id
+        await self.session.flush()
+        return row
+
+    async def delete(self, income_id: UUID, *, actor_id: UUID) -> None:
+        row = await self._get(income_id)
+        row.is_deleted = True
+        row.deleted_by_id = actor_id
+        row.deleted_at = datetime.now(UTC)
+        await self.session.flush()
+
+
+class FinanceSummaryService(ServiceBase):
+    """Unified income-vs-expense / payables / GST snapshot for the finance dashboard.
+    Income unions manual income + sales-order revenue (no duplication)."""
+
+    async def _sum(self, column, *where) -> Decimal:
+        value = (
+            await self.session.execute(select(func.coalesce(func.sum(column), 0)).where(*where))
+        ).scalar_one()
+        return Decimal(value or 0)
+
+    async def summary(self) -> FinanceSummaryResponse:
+        mi_live = (ManualIncome.is_deleted.is_(False),)
+        exp_live = (Expense.is_deleted.is_(False), Expense.status != ExpenseStatus.rejected)
+        vb_live = (VendorBill.is_deleted.is_(False), VendorBill.status != VendorBillStatus.cancelled)
+
+        manual_income_total = await self._sum(ManualIncome.total_amount, *mi_live)
+        output_gst = await self._sum(
+            ManualIncome.cgst_amount + ManualIncome.sgst_amount + ManualIncome.igst_amount, *mi_live
+        )
+        sales_revenue_total = await self._sum(SalesOrder.deal_value, SalesOrder.is_deleted.is_(False))
+
+        expenses_total = await self._sum(Expense.total_amount, *exp_live)
+        expenses_paid = await self._sum(Expense.total_amount, Expense.is_deleted.is_(False), Expense.status == ExpenseStatus.paid)
+        expenses_gst = await self._sum(Expense.cgst_amount + Expense.sgst_amount + Expense.igst_amount, *exp_live)
+        pending = (
+            await self.session.execute(
+                select(func.count()).select_from(Expense).where(
+                    Expense.is_deleted.is_(False), Expense.status == ExpenseStatus.submitted
+                )
+            )
+        ).scalar_one()
+
+        bills_total = await self._sum(VendorBill.total_amount, *vb_live)
+        bills_gst = await self._sum(VendorBill.cgst_amount + VendorBill.sgst_amount + VendorBill.igst_amount, *vb_live)
+        payable_outstanding = await self._sum(
+            VendorBill.net_payable - VendorBill.amount_paid,
+            VendorBill.is_deleted.is_(False),
+            VendorBill.status.in_([VendorBillStatus.open, VendorBillStatus.partially_paid]),
+        )
+        vendor_payments_paid = await self._sum(VendorPayment.amount)
+
+        exp_by_cat = (
+            await self.session.execute(
+                select(FinanceCategory.name, func.coalesce(func.sum(Expense.total_amount), 0))
+                .join(FinanceCategory, FinanceCategory.id == Expense.category_id)
+                .where(*exp_live)
+                .group_by(FinanceCategory.name)
+                .order_by(func.sum(Expense.total_amount).desc())
+            )
+        ).all()
+        inc_by_cat = (
+            await self.session.execute(
+                select(FinanceCategory.name, func.coalesce(func.sum(ManualIncome.total_amount), 0))
+                .join(FinanceCategory, FinanceCategory.id == ManualIncome.category_id)
+                .where(*mi_live)
+                .group_by(FinanceCategory.name)
+                .order_by(func.sum(ManualIncome.total_amount).desc())
+            )
+        ).all()
+
+        income_total = manual_income_total + sales_revenue_total
+        expense_total = expenses_total + bills_total
+        expense_paid = expenses_paid + vendor_payments_paid
+        input_gst = expenses_gst + bills_gst
+
+        return FinanceSummaryResponse(
+            income_total=income_total,
+            manual_income_total=manual_income_total,
+            sales_revenue_total=sales_revenue_total,
+            expense_total=expense_total,
+            expense_paid=expense_paid,
+            expense_pending_approval=int(pending),
+            vendor_payable_outstanding=payable_outstanding,
+            output_gst=output_gst,
+            input_gst=input_gst,
+            net_gst=output_gst - input_gst,
+            net_position=income_total - expense_paid,
+            expense_by_category=[FinanceBreakdownRow(label=n, value=Decimal(v)) for n, v in exp_by_cat],
+            income_by_category=[FinanceBreakdownRow(label=n, value=Decimal(v)) for n, v in inc_by_cat],
+        )

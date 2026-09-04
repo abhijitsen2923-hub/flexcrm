@@ -3,7 +3,7 @@ from uuid import UUID
 
 from pydantic import Field
 
-from app.database.enums import LeadIndustry
+from app.database.enums import FinanceBusinessMode, LeadIndustry
 from app.schemas.common import ORMModel
 
 
@@ -33,6 +33,8 @@ class OrganizationRead(ORMModel):
     id: UUID
     name: str
     business_type: LeadIndustry
+    # Finance category-preset mode chosen at signup (drives income/expense categories).
+    finance_business_mode: FinanceBusinessMode = FinanceBusinessMode.general
     plan: str
     features: dict | None = None
     # Computed at response time — ISO 4217 codes the org may use.
@@ -60,3 +62,8 @@ class UpdateModulesRequest(ORMModel):
 class SetOrgStatusRequest(ORMModel):
     """Payload for PATCH /admin/organizations/{id}/status (disable/enable)."""
     is_active: bool
+
+
+class SetFinanceModeRequest(ORMModel):
+    """Payload for PATCH /admin/organizations/{id}/finance-mode."""
+    finance_business_mode: FinanceBusinessMode
