@@ -57,7 +57,7 @@ export default function LoginPage() {
   // On Sign in, show the full branded loader (same as the session-restore /
   // splash) through the auth call + navigation, instead of only a button spinner.
   if (submitting) {
-    return <BrandLoader status={slow ? "Waking the server, one moment…" : "Signing you in…"} />;
+    return <BrandLoader status={slow ? "Waking the server, one moment…" : "Getting things ready…"} />;
   }
 
   return (

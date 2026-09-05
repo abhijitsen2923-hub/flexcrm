@@ -37,5 +37,5 @@ export function SessionRestoreScreen({ failed, onRetry }: SessionRestoreScreenPr
     );
   }
 
-  return <BrandLoader status={slow ? "Waking the server, one moment…" : "Restoring your session…"} />;
+  return <BrandLoader status={slow ? "Waking the server, one moment…" : "Getting things ready…"} />;
 }
