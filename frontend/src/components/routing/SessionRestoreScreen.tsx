@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 
+import { BrandLoader } from "../ui/BrandLoader";
 import { BrandMark } from "../ui/BrandMark";
 import { Button } from "../ui/Button";
 
@@ -22,28 +23,19 @@ export function SessionRestoreScreen({ failed, onRetry }: SessionRestoreScreenPr
     return () => window.clearTimeout(timer);
   }, [failed]);
 
-  return (
-    <div className="brand-loader">
-      <BrandMark size="lg" />
-      {failed ? (
-        <>
-          <p className="brand-loader__status brand-loader__status--wide">
-            We couldn&rsquo;t reach the server. Your session is still saved — please try again.
-          </p>
-          <Button variant="primary" onClick={onRetry}>
-            Try again
-          </Button>
-        </>
-      ) : (
-        <>
-          <div className="brand-loader__track" role="progressbar" aria-label="Loading">
-            <div className="brand-loader__fill" />
-          </div>
-          <p className="brand-loader__status">
-            {slow ? "Waking the server, one moment…" : "Restoring your session…"}
-          </p>
-        </>
-      )}
-    </div>
-  );
+  if (failed) {
+    return (
+      <div className="brand-loader">
+        <BrandMark size="lg" />
+        <p className="brand-loader__status brand-loader__status--wide">
+          We couldn&rsquo;t reach the server. Your session is still saved — please try again.
+        </p>
+        <Button variant="primary" onClick={onRetry}>
+          Try again
+        </Button>
+      </div>
+    );
+  }
+
+  return <BrandLoader status={slow ? "Waking the server, one moment…" : "Restoring your session…"} />;
 }
