@@ -841,11 +841,15 @@ p {
 /* ============================================================ Auth screen */
 
 .auth-screen {
+  /* dvh (not vh) so mobile browser chrome doesn't crop it; scroll on short
+     viewports; safe-area padding for notched phones. */
   min-height: 100vh;
+  min-height: 100dvh;
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: var(--space-6);
+  padding: max(var(--space-6), env(safe-area-inset-top)) max(var(--space-5), env(safe-area-inset-right))
+    max(var(--space-6), env(safe-area-inset-bottom)) max(var(--space-5), env(safe-area-inset-left));
   background: linear-gradient(135deg, #1e3a8a 0%, #2563eb 50%, #0ea5e9 100%);
 }
 
@@ -855,7 +859,7 @@ p {
   background: var(--color-surface);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-lg);
-  padding: var(--space-8);
+  padding: clamp(1.5rem, 5vw, var(--space-8));
   display: flex;
   flex-direction: column;
   gap: var(--space-5);
@@ -882,6 +886,130 @@ p {
   text-align: center;
   font-size: 0.875rem;
   color: var(--color-text-muted);
+}
+
+/* Touch-friendly targets on the login card (scoped so dense app forms are unchanged). */
+.auth-card .input,
+.auth-card .select {
+  min-height: 46px;
+}
+.auth-card .input-password__toggle {
+  width: 2.75rem;
+  height: 2.75rem;
+}
+
+/* ============================================================ Brand mark */
+/* Shared FlexCRM lockup — amber gradient "F" chip + wordmark. Used on login,
+   the loading screen, and (optionally) elsewhere so the mark is consistent. */
+.brand-mark {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+}
+.brand-mark__chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, #f7b23b, var(--color-primary));
+  color: var(--color-on-primary);
+  font-weight: 800;
+  line-height: 1;
+  box-shadow: 0 4px 12px rgba(245, 158, 11, 0.35);
+}
+.brand-mark__word {
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  color: var(--color-text);
+}
+.brand-mark__word span {
+  color: var(--color-primary);
+}
+.brand-mark--on-dark .brand-mark__word {
+  color: #ffffff;
+}
+.brand-mark--sm .brand-mark__chip {
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
+  font-size: 0.95rem;
+}
+.brand-mark--sm .brand-mark__word {
+  font-size: 1rem;
+}
+.brand-mark--md .brand-mark__chip {
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  font-size: 1.05rem;
+}
+.brand-mark--md .brand-mark__word {
+  font-size: 1.15rem;
+}
+.brand-mark--lg {
+  flex-direction: column;
+  gap: 0.85rem;
+}
+.brand-mark--lg .brand-mark__chip {
+  width: 60px;
+  height: 60px;
+  border-radius: 16px;
+  font-size: 1.9rem;
+}
+.brand-mark--lg .brand-mark__word {
+  font-size: 1.35rem;
+}
+
+/* ============================================================ Branded loader */
+/* Full-screen post-login / session-restore wait — brand lockup + progress. */
+.brand-loader {
+  min-height: 100vh;
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1.4rem;
+  padding: max(var(--space-6), env(safe-area-inset-top)) var(--space-5)
+    max(var(--space-6), env(safe-area-inset-bottom));
+  background: var(--color-bg);
+  text-align: center;
+}
+.brand-loader .brand-mark--lg .brand-mark__chip {
+  animation: brand-breathe 2.4s ease-in-out infinite;
+}
+.brand-loader__track {
+  width: min(240px, 62vw);
+  height: 6px;
+  border-radius: var(--radius-pill);
+  background: rgba(138, 147, 162, 0.22);
+  overflow: hidden;
+}
+.brand-loader__fill {
+  height: 100%;
+  width: 40%;
+  border-radius: var(--radius-pill);
+  background: linear-gradient(90deg, #f7b23b, var(--color-primary));
+  animation: brand-loader-slide 1.3s ease-in-out infinite;
+}
+.brand-loader__status {
+  margin: 0;
+  font-size: 0.9rem;
+  color: var(--color-text-muted);
+}
+.brand-loader__status--wide {
+  max-width: 24rem;
+}
+@keyframes brand-breathe {
+  0%, 100% { transform: translateY(0) scale(1); }
+  50% { transform: translateY(-3px) scale(1.03); }
+}
+@keyframes brand-loader-slide {
+  0% { transform: translateX(-120%); }
+  100% { transform: translateX(320%); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .brand-loader .brand-mark--lg .brand-mark__chip { animation: none; }
+  .brand-loader__fill { animation: none; width: 100%; opacity: 0.45; }
 }
 
 /* ============================================================ Toast */

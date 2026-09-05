@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 
+import { BrandMark } from "../ui/BrandMark";
 import { Button } from "../ui/Button";
-import { Spinner } from "../ui/Spinner";
 
 
 interface SessionRestoreScreenProps {
@@ -22,25 +22,28 @@ export function SessionRestoreScreen({ failed, onRetry }: SessionRestoreScreenPr
     return () => window.clearTimeout(timer);
   }, [failed]);
 
-  if (failed) {
-    return (
-      <div
-        className="loading-block"
-        style={{ flexDirection: "column", gap: "0.85rem", textAlign: "center", padding: "var(--space-6)" }}
-      >
-        <div className="text-sm muted" style={{ maxWidth: "22rem" }}>
-          We couldn&rsquo;t reach the server. Your session is still saved — please try again.
-        </div>
-        <Button variant="primary" onClick={onRetry}>
-          Try again
-        </Button>
-      </div>
-    );
-  }
-
   return (
-    <div className="loading-block">
-      <Spinner label={slow ? "Waking up the server, one moment…" : "Restoring your session…"} />
+    <div className="brand-loader">
+      <BrandMark size="lg" />
+      {failed ? (
+        <>
+          <p className="brand-loader__status brand-loader__status--wide">
+            We couldn&rsquo;t reach the server. Your session is still saved — please try again.
+          </p>
+          <Button variant="primary" onClick={onRetry}>
+            Try again
+          </Button>
+        </>
+      ) : (
+        <>
+          <div className="brand-loader__track" role="progressbar" aria-label="Loading">
+            <div className="brand-loader__fill" />
+          </div>
+          <p className="brand-loader__status">
+            {slow ? "Waking the server, one moment…" : "Restoring your session…"}
+          </p>
+        </>
+      )}
     </div>
   );
 }

@@ -1,8 +1,7 @@
-import { Sparkles } from "lucide-react";
 import { useState, type FormEvent } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 
-import { Button, TextField } from "../../components";
+import { BrandMark, Button, TextField } from "../../components";
 import { useAuth } from "../../hooks/useAuth";
 import { extractErrorMessage } from "../../utils/errors";
 
@@ -40,10 +39,7 @@ export default function LoginPage() {
   return (
     <div className="auth-screen">
       <div className="auth-card">
-        <div className="auth-card__brand">
-          <Sparkles size={22} color="var(--color-primary)" />
-          FlexCRM
-        </div>
+        <BrandMark size="md" />
         <div>
           <div className="auth-card__title">Welcome back</div>
           <div className="auth-card__subtitle">Sign in to continue.</div>
@@ -71,7 +67,7 @@ export default function LoginPage() {
           />
           {error && <div className="error-banner">{error}</div>}
           <Button type="submit" loading={submitting} disabled={submitting}>
-            Sign in
+            {submitting ? "Signing in…" : "Sign in"}
           </Button>
         </form>
 

@@ -4,6 +4,7 @@ export { Sidebar } from "./layout/Sidebar";
 export { Topbar } from "./layout/Topbar";
 export { ProtectedRoute } from "./routing/ProtectedRoute";
 export { Badge } from "./ui/Badge";
+export { BrandMark } from "./ui/BrandMark";
 export { Button } from "./ui/Button";
 export { Card } from "./ui/Card";
 export { ConfirmDialog } from "./ui/ConfirmDialog";
