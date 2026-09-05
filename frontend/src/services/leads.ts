@@ -84,6 +84,10 @@ export interface StageTransitionPayload {
   mentions?: string[];
   // Salesperson (assigned owner) set during the move — used on "Booked / Token".
   assigned_to_id?: string | null;
+  // Channel partner (broker) credited for the sale — independent of the salesperson.
+  partner_id?: string | null;
+  // "Others / owner's reference": suppress ALL incentives (internal + broker) at Sold.
+  incentive_exempt?: boolean;
   // "Booked / Token": the property unit + token; the backend creates/updates the
   // lead's Booking with this and promotes the lead to a Customer.
   booking?: {
@@ -91,6 +95,8 @@ export interface StageTransitionPayload {
     token_amount: number;
     token_mode: string;
     token_received_on: string;
+    // Cheque no. / UPI-UTR / other payment detail → Booking.token_reference.
+    token_reference?: string | null;
   } | null;
 }
 

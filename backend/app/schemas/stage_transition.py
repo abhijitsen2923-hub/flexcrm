@@ -27,6 +27,8 @@ class BookedTokenCapture(ORMModel):
     token_amount: Decimal = Field(gt=0)
     token_mode: PaymentMode
     token_received_on: date
+    # Free-text payment detail (cheque no. / UPI-UTR ref / etc.) → Booking.token_reference.
+    token_reference: str | None = Field(default=None, max_length=120)
 
 
 class StageTransitionCreate(ORMModel):
@@ -42,6 +44,14 @@ class StageTransitionCreate(ORMModel):
     # Salesperson (assigned owner) set on the lead during the move, carried onto
     # the promoted Customer's owner. Used on the 'Booked / Token' move.
     assigned_to_id: UUID | None = None
+    # Channel partner (broker) who is credited for the sale, set on the lead.
+    # Independent of assigned_to_id — a deal can have both an internal salesperson
+    # and a referring CP (each earns their own incentive at Sold).
+    partner_id: UUID | None = None
+    # "Others / owner's reference": when true, NOBODY earns an incentive on this
+    # deal — internal commission AND channel-partner brokerage are both suppressed
+    # at Sold. Persisted on the lead so the Sold accrual honours it.
+    incentive_exempt: bool | None = None
     # Real-estate 'Booked / Token' capture — property unit + token. When present,
     # create_transition creates/updates the lead's Booking with the token.
     booking: BookedTokenCapture | None = None

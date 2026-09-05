@@ -1352,7 +1352,7 @@ export default function LeadsPage() {
                   { value: "2_years", label: "Within 2 years" }
                 ]}
               />
-              {canAttributePartner && partnerOptions.length > 0 && (
+              {canAttributePartner && (
                 <SelectField
                   id="lead-partner"
                   label="Referred by (channel partner)"
@@ -1362,6 +1362,11 @@ export default function LeadsPage() {
                     { value: "", label: "— None —" },
                     ...partnerOptions.map((p) => ({ value: p.id, label: `${p.company_name} · ${p.contact_name}` }))
                   ]}
+                  hint={
+                    partnerOptions.length === 0
+                      ? "No channel partners yet — add them in the Channel Partners section."
+                      : undefined
+                  }
                 />
               )}
             </>
@@ -1442,6 +1447,7 @@ export default function LeadsPage() {
         lead={transitionLeadState}
         targetStage={transitionTarget}
         assignableUsers={assignableUsers}
+        assignablePartners={partnerOptions}
         onClose={() => setTransitionOpen(false)}
         onSubmit={async (payload) => {
           if (!transitionLeadState) return;

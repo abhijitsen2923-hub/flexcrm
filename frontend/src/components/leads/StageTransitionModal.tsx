@@ -4,9 +4,15 @@ import { Badge, Button, Modal, SelectField, TextField, TextareaField } from "../
 import { usePipelines } from "../../context/PipelineContext";
 import { useInventory } from "../../hooks/useInventory";
 import { bookingsService } from "../../services/bookings";
+import type { PartnerOption } from "../../services/channelPartners";
 import type { Lead, PipelineStage, User } from "../../types";
 import type { Booking, PaymentMode } from "../../types/realestate";
 import { extractErrorMessage } from "../../utils/errors";
+
+
+// Sentinel salesperson value for an owner's-reference sale — nobody earns an
+// incentive (neither an internal salesperson nor a channel partner).
+const OWNER_REFERENCE = "__owner_reference__";
 
 
 const MIN_COMMENT_LENGTH = 10;
@@ -38,6 +44,8 @@ interface StageTransitionModalProps {
   targetStage: PipelineStage | null;
   // Team members assignable as the salesperson on the "Booked / Token" move.
   assignableUsers?: User[];
+  // Channel partners creditable for the sale on the "Booked / Token" move.
+  assignablePartners?: PartnerOption[];
   onClose: () => void;
   onSubmit: (payload: {
     to_stage_code: string;
@@ -47,11 +55,14 @@ interface StageTransitionModalProps {
     mentions: string[];
     site_visits?: { project_id: string; scheduled_at: string }[];
     assigned_to_id?: string | null;
+    partner_id?: string | null;
+    incentive_exempt?: boolean;
     booking?: {
       unit_id: string;
       token_amount: number;
       token_mode: PaymentMode;
       token_received_on: string;
+      token_reference?: string | null;
     } | null;
   }) => Promise<void>;
 }
@@ -62,6 +73,7 @@ export function StageTransitionModal({
   lead,
   targetStage,
   assignableUsers = [],
+  assignablePartners = [],
   onClose,
   onSubmit
 }: StageTransitionModalProps) {
@@ -80,7 +92,9 @@ export function StageTransitionModal({
   const [tokenAmount, setTokenAmount] = useState("");
   const [tokenMode, setTokenMode] = useState<PaymentMode>("neft");
   const [tokenDate, setTokenDate] = useState("");
+  const [tokenReference, setTokenReference] = useState("");
   const [salespersonId, setSalespersonId] = useState("");
+  const [partnerId, setPartnerId] = useState("");
   const [existingBooking, setExistingBooking] = useState<Booking | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -96,11 +110,13 @@ export function StageTransitionModal({
       setTokenAmount("");
       setTokenMode("neft");
       setTokenDate(todayDate());
+      setTokenReference("");
       setSalespersonId(lead?.assigned_to_id ?? "");
+      setPartnerId(lead?.partner_id ?? "");
       setExistingBooking(null);
       setError(null);
     }
-  }, [open, lead?.id, targetStage?.code, lead?.assigned_to_id]);
+  }, [open, lead?.id, targetStage?.code, lead?.assigned_to_id, lead?.partner_id]);
 
   // On a "Booked / Token" move, look up the lead's existing (non-cancelled)
   // booking so we record the token on it rather than showing a unit picker.
@@ -163,7 +179,12 @@ export function StageTransitionModal({
                 scheduled_at: new Date(siteDateTime).toISOString()
               }))
             : [],
-        assigned_to_id: isBookedStage ? (salespersonId || null) : undefined,
+        // "Others / owner's reference" → no salesperson + suppress all incentives.
+        assigned_to_id: isBookedStage
+          ? (salespersonId === OWNER_REFERENCE ? null : salespersonId || null)
+          : undefined,
+        partner_id: isBookedStage ? (partnerId || null) : undefined,
+        incentive_exempt: isBookedStage ? salespersonId === OWNER_REFERENCE : undefined,
         booking:
           isBookedStage && Number(tokenAmount) > 0
             ? {
@@ -171,7 +192,8 @@ export function StageTransitionModal({
                 unit_id: existingBooking ? existingBooking.unitId : unitId,
                 token_amount: Number(tokenAmount),
                 token_mode: tokenMode,
-                token_received_on: tokenDate
+                token_received_on: tokenDate,
+                token_reference: tokenReference.trim() || null
               }
             : undefined
       });
@@ -327,9 +349,14 @@ export function StageTransitionModal({
                   onChange={(event) => setSalespersonId(event.target.value)}
                   options={[
                     { value: "", label: "Select salesperson…" },
-                    ...assignableUsers.map((u) => ({ value: u.id, label: `${u.first_name} ${u.last_name}` }))
+                    ...assignableUsers.map((u) => ({ value: u.id, label: `${u.first_name} ${u.last_name}` })),
+                    { value: OWNER_REFERENCE, label: "Others (owner's reference — no incentive)" }
                   ]}
-                  hint="Sets the lead's owner and the new customer's owner."
+                  hint={
+                    salespersonId === OWNER_REFERENCE
+                      ? "Owner's reference — nobody earns an incentive on this sale."
+                      : "Sets the lead's owner and the new customer's owner."
+                  }
                 />
               ) : (
                 <TextField
@@ -343,6 +370,21 @@ export function StageTransitionModal({
                   hint="Attributed to the lead's owner (you) for this booking."
                 />
               )}
+              <SelectField
+                id="bk-partner"
+                label="Channel partner (optional)"
+                value={partnerId}
+                onChange={(event) => setPartnerId(event.target.value)}
+                options={[
+                  { value: "", label: "— None (internal sale) —" },
+                  ...assignablePartners.map((p) => ({ value: p.id, label: `${p.company_name} · ${p.contact_name}` }))
+                ]}
+                hint={
+                  assignablePartners.length === 0
+                    ? "No channel partners yet — add them in the Channel Partners section."
+                    : "If a broker / channel partner brought this deal, credit them here."
+                }
+              />
               <TextField
                 id="bk-token"
                 label="Token amount (₹)"
@@ -366,6 +408,13 @@ export function StageTransitionModal({
                 value={tokenDate}
                 onChange={(event) => setTokenDate(event.target.value)}
                 required
+              />
+              <TextField
+                id="bk-reference"
+                label="Payment reference / cheque no. (optional)"
+                value={tokenReference}
+                onChange={(event) => setTokenReference(event.target.value)}
+                hint="e.g. cheque number, UPI/UTR reference, or other payment detail."
               />
             </div>
           </>

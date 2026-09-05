@@ -215,6 +215,14 @@ class StageTransitionService(ServiceBase):
                 lead.assigned_to_id = payload.assigned_to_id
             elif lead.assigned_to_id is None:
                 lead.assigned_to_id = actor_id
+            # Channel-partner attribution + incentive exemption travel with the
+            # booked move, independent of the salesperson. A CP pick sets partner_id
+            # (only when provided, so it never silently clears one set on the lead
+            # form); incentive_exempt marks an "Others / owner's reference" sale so
+            # NOBODY accrues at Sold. FK is same-schema, so no cross-tenant guard.
+            if payload.partner_id is not None:
+                lead.partner_id = payload.partner_id
+            lead.incentive_exempt = bool(payload.incentive_exempt)
             booking, held_unit_event = await self._apply_booked_token(lead, payload.booking)
             customer = await self.promotion_service.promote_from_lead(lead, actor_id=actor_id)
             if booking.customer_id is None:
@@ -243,9 +251,10 @@ class StageTransitionService(ServiceBase):
                 order = await sales_service.create_from_lead(lead, actor_id=actor_id)
             # Channel-partner brokerage: accrue the referring partner's payout on
             # the Sold deal. Idempotent (one payout per lead) so a re-sold
-            # transition with an existing order won't double-accrue. Local import
-            # to avoid a circular import at module load.
-            if order is not None:
+            # transition with an existing order won't double-accrue. Skipped for an
+            # incentive-exempt (owner's-reference) sale. Local import to avoid a
+            # circular import at module load.
+            if order is not None and not lead.incentive_exempt:
                 from app.services.channel_partners import ChannelPartnerService
 
                 await ChannelPartnerService(self.session).accrue_brokerage(lead, sales_order=order)
@@ -400,6 +409,7 @@ class StageTransitionService(ServiceBase):
         booking.token_amount = capture.token_amount
         booking.token_received_on = capture.token_received_on
         booking.token_mode = capture.token_mode
+        booking.token_reference = capture.token_reference
         # held_unit → the caller broadcasts unit.status_changed after commit so
         # inventory boards / unit pickers drop the now-held unit without a refresh.
         return booking, held_unit

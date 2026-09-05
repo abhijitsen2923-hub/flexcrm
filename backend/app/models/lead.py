@@ -122,6 +122,11 @@ class Lead(TenantBase, UUIDPrimaryKeyMixin, TimestampMixin, TenantAuditMixin, Te
         nullable=True,
         index=True,
     )
+    # "Others / owner's reference" sale: when true, NO incentive accrues on Sold —
+    # neither internal commission (to assigned_to_id) nor channel-partner brokerage.
+    incentive_exempt: Mapped[bool] = mapped_column(
+        nullable=False, server_default=text("false"), default=False
+    )
     batch_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
     property_type: Mapped[str | None] = mapped_column(String(64), nullable=True)
     budget_min: Mapped[float | None] = mapped_column(Numeric(14, 2), nullable=True)
