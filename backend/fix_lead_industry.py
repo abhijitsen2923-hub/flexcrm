@@ -61,35 +61,51 @@ def main() -> None:
 
     print(f"Mode: {'APPLY (will commit)' if APPLY else 'DRY RUN (no changes)'}\n")
 
+    # Only tenant schemas that actually have a `leads` table. The internal
+    # "FlexCRM Platform" org (business_type=education) owns a schema but no tenant
+    # tables, and a partially-provisioned org might too — without this JOIN the
+    # first such schema raises UndefinedTable and aborts the whole run.
     cur.execute(
-        "SELECT schema_name, business_type FROM organizations "
-        "WHERE schema_name IS NOT NULL AND business_type IS NOT NULL ORDER BY schema_name"
+        "SELECT o.schema_name, o.business_type "
+        "FROM organizations o "
+        "JOIN information_schema.tables t "
+        "  ON t.table_schema = o.schema_name AND t.table_name = 'leads' "
+        "WHERE o.schema_name IS NOT NULL AND o.business_type IS NOT NULL "
+        "ORDER BY o.schema_name"
     )
     orgs = cur.fetchall()
 
     total_leads_fixed = 0
     for schema_name, business_type in orgs:
-        count_q = sql.SQL(
-            "SELECT count(*) FROM {}.leads WHERE industry <> %s::lead_industry_enum"
-        ).format(sql.Identifier(schema_name))
-        cur.execute(count_q, (business_type,))
-        n = cur.fetchone()[0]
-        if n == 0:
-            continue
-        print(f"[{schema_name}] org={business_type}: {n} lead(s) with a mismatched industry")
-        if APPLY:
-            update_q = sql.SQL(
-                "UPDATE {}.leads l "
-                "SET industry = %s::lead_industry_enum, "
-                "    stage_code = CASE WHEN EXISTS ("
-                "        SELECT 1 FROM public.pipeline_stages ps "
-                "        WHERE ps.industry = %s::lead_industry_enum AND ps.code = l.stage_code"
-                "    ) THEN l.stage_code ELSE %s END "
-                "WHERE l.industry <> %s::lead_industry_enum"
+        # Isolate each schema in a savepoint so one bad tenant can't abort the rest.
+        cur.execute("SAVEPOINT org_sp")
+        try:
+            count_q = sql.SQL(
+                "SELECT count(*) FROM {}.leads WHERE industry <> %s::lead_industry_enum"
             ).format(sql.Identifier(schema_name))
-            cur.execute(update_q, (business_type, business_type, INITIAL_STAGE, business_type))
-            print(f"    -> corrected {cur.rowcount} lead(s) to {business_type}")
-            total_leads_fixed += cur.rowcount
+            cur.execute(count_q, (business_type,))
+            n = cur.fetchone()[0]
+            if n == 0:
+                cur.execute("RELEASE SAVEPOINT org_sp")
+                continue
+            print(f"[{schema_name}] org={business_type}: {n} lead(s) with a mismatched industry")
+            if APPLY:
+                update_q = sql.SQL(
+                    "UPDATE {}.leads l "
+                    "SET industry = %s::lead_industry_enum, "
+                    "    stage_code = CASE WHEN EXISTS ("
+                    "        SELECT 1 FROM public.pipeline_stages ps "
+                    "        WHERE ps.industry = %s::lead_industry_enum AND ps.code = l.stage_code"
+                    "    ) THEN l.stage_code ELSE %s END "
+                    "WHERE l.industry <> %s::lead_industry_enum"
+                ).format(sql.Identifier(schema_name))
+                cur.execute(update_q, (business_type, business_type, INITIAL_STAGE, business_type))
+                print(f"    -> corrected {cur.rowcount} lead(s) to {business_type}")
+                total_leads_fixed += cur.rowcount
+            cur.execute("RELEASE SAVEPOINT org_sp")
+        except Exception as exc:  # noqa: BLE001 — skip a bad schema, keep the run going
+            cur.execute("ROLLBACK TO SAVEPOINT org_sp")
+            print(f"    !! skipped {schema_name}: {exc}")
 
     # Heal the deprecated per-user business_type so it matches each user's org.
     cur.execute(
