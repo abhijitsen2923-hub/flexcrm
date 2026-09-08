@@ -1012,6 +1012,41 @@ p {
   .brand-loader__fill { animation: none; width: 100%; opacity: 0.45; }
 }
 
+/* ============================================================ In-app browser banner */
+.iab-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  padding: 0.6rem 0.9rem;
+  background: var(--color-warning-soft);
+  color: var(--color-warning);
+  border-bottom: 1px solid #f2d69a;
+  font-size: 0.82rem;
+  line-height: 1.4;
+}
+.iab-banner__text {
+  flex: 1;
+}
+.iab-banner__text strong {
+  font-weight: 700;
+}
+.iab-banner__close {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  border: none;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+}
+.iab-banner__close:hover {
+  background: rgba(178, 107, 0, 0.12);
+}
+
 /* ============================================================ Toast */
 
 .toast-stack {

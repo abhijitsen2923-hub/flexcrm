@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Outlet, useLocation } from "react-router-dom";
 
+import { InAppBrowserBanner } from "./InAppBrowserBanner";
 import { MobileBottomNav } from "./MobileBottomNav";
 import { Sidebar } from "./Sidebar";
 import { Topbar } from "./Topbar";
@@ -40,6 +41,7 @@ export function AppLayout() {
       <Sidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
       <div className="app-main">
         <Topbar onMenuClick={() => setSidebarOpen(true)} />
+        <InAppBrowserBanner />
         <main className="app-content">
           <Outlet />
         </main>

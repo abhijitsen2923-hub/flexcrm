@@ -3,6 +3,7 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 
 import { BrandLoader, BrandMark, Button, TextField } from "../../components";
 import { useAuth } from "../../hooks/useAuth";
+import { SESSION_EXPIRED_FLAG } from "../../services/http";
 import { extractErrorMessage } from "../../utils/errors";
 
 
@@ -22,6 +23,20 @@ export default function LoginPage() {
   const [submitting, setSubmitting] = useState(false);
   const [slow, setSlow] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [sessionEnded, setSessionEnded] = useState(false);
+
+  // Surfaced when the http layer bounced us here after a session ended — a calmer
+  // message than a raw auth error.
+  useEffect(() => {
+    try {
+      if (window.sessionStorage.getItem(SESSION_EXPIRED_FLAG) === "1") {
+        setSessionEnded(true);
+        window.sessionStorage.removeItem(SESSION_EXPIRED_FLAG);
+      }
+    } catch {
+      /* ignore */
+    }
+  }, []);
 
   // After a few seconds of a slow (likely cold) backend, reassure rather than
   // spin silently — mirrors the session-restore screen.
@@ -66,7 +81,9 @@ export default function LoginPage() {
         <BrandMark size="md" />
         <div>
           <div className="auth-card__title">Welcome back</div>
-          <div className="auth-card__subtitle">Sign in to continue.</div>
+          <div className="auth-card__subtitle">
+            {sessionEnded ? "Your session ended — please sign in again." : "Sign in to continue."}
+          </div>
         </div>
 
         <form className="form" onSubmit={handleSubmit}>

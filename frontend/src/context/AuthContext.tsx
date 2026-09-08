@@ -10,6 +10,7 @@ import {
 
 import { clearResourceCache } from "../hooks/resourceCache";
 import { authService } from "../services/auth";
+import { proactiveRefresh, SESSION_EXPIRED_EVENT } from "../services/http";
 import { authStorage } from "../services/storage";
 import type { LoginPayload, RegisterPayload, StoredSession, User } from "../types";
 
@@ -116,6 +117,37 @@ export function AuthProvider({ children }: PropsWithChildren) {
   useEffect(() => {
     void refreshProfile();
   }, [refreshProfile]);
+
+  // The http layer fires SESSION_EXPIRED_EVENT when a request can't be recovered
+  // (no/expired refresh token). Clear auth state so ProtectedRoute routes to a
+  // clean re-login (carrying `from`) instead of a broken, logged-in-looking app.
+  useEffect(() => {
+    const onExpired = () => {
+      authStorage.clear();
+      clearResourceCache();
+      setUser(null);
+      setSession(null);
+      setRestoreFailed(false);
+    };
+    window.addEventListener(SESSION_EXPIRED_EVENT, onExpired);
+    return () => window.removeEventListener(SESSION_EXPIRED_EVENT, onExpired);
+  }, []);
+
+  // Keep the short-lived access token fresh: when the tab regains focus/visibility
+  // after idling, refresh it if it's near expiry so the next action doesn't 401.
+  useEffect(() => {
+    const refreshIfNeeded = () => {
+      if (document.visibilityState === "visible") {
+        void proactiveRefresh();
+      }
+    };
+    window.addEventListener("focus", refreshIfNeeded);
+    document.addEventListener("visibilitychange", refreshIfNeeded);
+    return () => {
+      window.removeEventListener("focus", refreshIfNeeded);
+      document.removeEventListener("visibilitychange", refreshIfNeeded);
+    };
+  }, []);
 
   const value = useMemo<AuthContextValue>(
     () => ({

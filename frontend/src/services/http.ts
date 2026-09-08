@@ -106,6 +106,45 @@ async function refreshSession(currentSession: StoredSession): Promise<StoredSess
   }
 }
 
+// Broadcast an unrecoverable auth failure so AuthContext can clear state and
+// route the user to a clean "session ended, sign in again" screen — instead of
+// leaving a logged-in-looking app whose writes fail with "Missing bearer token".
+export const SESSION_EXPIRED_EVENT = "flexcrm:session-expired";
+export const SESSION_EXPIRED_FLAG = "flexcrm.session-expired";
+
+function notifySessionExpired(): void {
+  if (typeof window === "undefined") {
+    return;
+  }
+  try {
+    window.sessionStorage.setItem(SESSION_EXPIRED_FLAG, "1");
+  } catch {
+    /* ignore */
+  }
+  window.dispatchEvent(new Event(SESSION_EXPIRED_EVENT));
+}
+
+/**
+ * Proactively refresh the 15-minute access token when it's expired or close to
+ * it (e.g. the tab regained focus after idling), so the user's next action
+ * doesn't eat a 401 round-trip. Reuses the shared refresh promise so it never
+ * races the response-interceptor refresh. No-op without a usable session.
+ */
+export async function proactiveRefresh(): Promise<void> {
+  const session = authStorage.get();
+  if (!session?.refreshToken || !session.accessToken) {
+    return;
+  }
+  const expiresAt = Date.parse(session.accessTokenExpiresAt ?? "");
+  if (Number.isNaN(expiresAt) || expiresAt - Date.now() > 90_000) {
+    return; // still comfortably valid
+  }
+  refreshPromise ??= refreshSession(session).finally(() => {
+    refreshPromise = null;
+  });
+  await refreshPromise;
+}
+
 apiClient.interceptors.request.use((config) => {
   const session = authStorage.get();
   if (session?.accessToken) {
@@ -147,7 +186,10 @@ apiClient.interceptors.response.use(
 
     const session = authStorage.get();
     if (!session?.refreshToken) {
+      // No way to recover (session gone / no refresh token) — clear and send the
+      // app to a clean re-login rather than surfacing a raw auth error.
       authStorage.clear();
+      notifySessionExpired();
       return Promise.reject(error);
     }
 
@@ -158,6 +200,8 @@ apiClient.interceptors.response.use(
 
     const refreshedSession = await refreshPromise;
     if (!refreshedSession?.accessToken) {
+      // Refresh failed (refresh token expired/invalid) — treat as session ended.
+      notifySessionExpired();
       return Promise.reject(error);
     }
 
