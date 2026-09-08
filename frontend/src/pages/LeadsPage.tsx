@@ -1,4 +1,4 @@
-import { Download, LayoutGrid, List as ListIcon, Plus, RefreshCw, Upload } from "lucide-react";
+import { Download, LayoutGrid, List as ListIcon, Plus, RefreshCw, SlidersHorizontal, Upload } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type DragEvent, type FormEvent } from "react";
 
 import {
@@ -16,10 +16,12 @@ import {
 } from "../components";
 import { BulkStageModal } from "../components/leads/BulkStageModal";
 import { LeadDrawer } from "../components/leads/LeadDrawer";
+import { LeadRowList } from "../components/leads/LeadRowList";
 import { StageTransitionModal } from "../components/leads/StageTransitionModal";
 import { usePipelines } from "../context/PipelineContext";
 import { useAuth } from "../hooks/useAuth";
 import { useLeads } from "../hooks/useLeads";
+import { useMediaQuery } from "../hooks/useMediaQuery";
 import { usePermissions } from "../hooks/usePermissions";
 import { useRealtimeRefresh } from "../realtime";
 import { exportsService } from "../services/exports";
@@ -138,6 +140,10 @@ export default function LeadsPage() {
   const defaultIndustry: LeadIndustry | "" = user?.business_type ?? "";
 
   const [view, setView] = useState<ViewMode>("list");
+  // Phone gets a dedicated compact list + a bottom-sheet for the heavy filters,
+  // instead of the desktop table/kanban and the wide filter bar.
+  const isPhone = useMediaQuery("(max-width: 639px)");
+  const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
   const [industryFilter, setIndustryFilter] = useState<LeadIndustry | "">(defaultIndustry);
@@ -327,6 +333,18 @@ export default function LeadsPage() {
       label: industryFilter ? stage.name : `${titleCase(stage.industry)} · ${stage.name}`
     }));
   }, [industryFilter, byIndustry, allStages]);
+
+  // Count of active filters in the phone bottom-sheet (drives the "Filters" badge).
+  // Search lives in its own box, so it's excluded.
+  const activeFilterCount =
+    stageFilter.length +
+    (sourceFilter ? 1 : 0) +
+    (campaignFilter ? 1 : 0) +
+    (ownerFilter ? 1 : 0) +
+    (nextActionOn ? 1 : 0) +
+    (stageChangedFrom ? 1 : 0) +
+    (stageChangedTo ? 1 : 0) +
+    (!user?.business_type && industryFilter ? 1 : 0);
 
   // --- Create lead modal -------------------------------------------------
   const [formOpen, setFormOpen] = useState(false);
@@ -814,26 +832,28 @@ export default function LeadsPage() {
           <p>Industry-aware pipeline with mandatory comments on every stage move.</p>
         </div>
         <div className="page-header__actions">
-          <div className="view-toggle" role="tablist">
-            <button
-              className={view === "list" ? "is-active" : ""}
-              onClick={() => setView("list")}
-              type="button"
-              role="tab"
-              aria-selected={view === "list"}
-            >
-              <ListIcon size={14} style={{ verticalAlign: "middle", marginRight: 4 }} /> List
-            </button>
-            <button
-              className={view === "kanban" ? "is-active" : ""}
-              onClick={() => setView("kanban")}
-              type="button"
-              role="tab"
-              aria-selected={view === "kanban"}
-            >
-              <LayoutGrid size={14} style={{ verticalAlign: "middle", marginRight: 4 }} /> Kanban
-            </button>
-          </div>
+          {!isPhone && (
+            <div className="view-toggle" role="tablist">
+              <button
+                className={view === "list" ? "is-active" : ""}
+                onClick={() => setView("list")}
+                type="button"
+                role="tab"
+                aria-selected={view === "list"}
+              >
+                <ListIcon size={14} style={{ verticalAlign: "middle", marginRight: 4 }} /> List
+              </button>
+              <button
+                className={view === "kanban" ? "is-active" : ""}
+                onClick={() => setView("kanban")}
+                type="button"
+                role="tab"
+                aria-selected={view === "kanban"}
+              >
+                <LayoutGrid size={14} style={{ verticalAlign: "middle", marginRight: 4 }} /> Kanban
+              </button>
+            </div>
+          )}
           <Button variant="secondary" size="sm" icon={<RefreshCw size={14} />} onClick={() => void refresh()} loading={loading}>
             Refresh
           </Button>
@@ -885,7 +905,7 @@ export default function LeadsPage() {
               />
             </>
           )}
-          {canManage && (
+          {canManage && !isPhone && (
             <Button icon={<Plus size={14} />} onClick={openCreate}>
               New lead
             </Button>
@@ -894,6 +914,209 @@ export default function LeadsPage() {
       </div>
 
       <div className="card" style={{ padding: 0 }}>
+        {isPhone ? (
+          <>
+            {/* Phone: slim search + a Filters button that opens the bottom-sheet. */}
+            <div className="leads-mobile-bar">
+              <input
+                className="input leads-mobile-bar__search"
+                type="search"
+                value={searchInput}
+                onChange={(event) => setSearchInput(event.target.value)}
+                placeholder="Search leads"
+                aria-label="Search leads"
+              />
+              <button
+                type="button"
+                className="leads-mobile-bar__filter"
+                onClick={() => setMobileFiltersOpen(true)}
+                aria-label="Open filters"
+              >
+                <SlidersHorizontal size={16} />
+                {activeFilterCount > 0 && (
+                  <span className="leads-mobile-bar__count">{activeFilterCount}</span>
+                )}
+              </button>
+            </div>
+
+            {/* Quick stage filter chips (horizontal scroll). */}
+            <div className="leads-chips" role="group" aria-label="Quick stage filter">
+              <button
+                type="button"
+                className={`leads-chip${stageFilter.length === 0 ? " is-active" : ""}`}
+                onClick={() => { setStageFilter([]); setPage(1); }}
+              >
+                All
+              </button>
+              {stageOptionsForFilter.map((option) => (
+                <button
+                  key={option.value}
+                  type="button"
+                  className={`leads-chip${stageFilter.includes(option.value) ? " is-active" : ""}`}
+                  onClick={() => toggleStage(option.value)}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
+
+            <div className="leads-mobile-list">
+              <LeadRowList
+                leads={leads}
+                loading={loading}
+                getStage={getStage}
+                byIndustry={byIndustry}
+                canManage={canManage}
+                userRole={user?.role}
+                onOpenLead={(lead) => setDrawerLead(lead)}
+                onChangeStage={(lead, target) => openTransition(lead, target)}
+              />
+            </div>
+
+            <Pagination
+              page={pagination.page}
+              pageSize={pagination.page_size}
+              total={pagination.total}
+              totalPages={pagination.total_pages}
+              onPageChange={setPage}
+              pageSizeOptions={[20, 50, 100, 200]}
+              onPageSizeChange={(size) => { setPageSize(size); setPage(1); }}
+              showJumpToLast
+            />
+
+            {/* Advanced filters — a bottom sheet reusing the desktop controls. */}
+            <Modal
+              open={mobileFiltersOpen}
+              onClose={() => setMobileFiltersOpen(false)}
+              title="Filters"
+              footer={
+                <div className="row" style={{ gap: "0.5rem", justifyContent: "space-between", width: "100%" }}>
+                  <Button
+                    variant="ghost"
+                    onClick={() => {
+                      setStageFilter([]);
+                      setSourceFilter("");
+                      setCampaignFilter("");
+                      setOwnerFilter("");
+                      setNextActionOn("");
+                      setStageChangedFrom("");
+                      setStageChangedTo("");
+                      if (!user?.business_type) setIndustryFilter("");
+                      setPage(1);
+                    }}
+                  >
+                    Clear all
+                  </Button>
+                  <Button onClick={() => setMobileFiltersOpen(false)}>
+                    Show {pagination?.total ?? 0} leads
+                  </Button>
+                </div>
+              }
+            >
+              <div className="mobile-filters">
+                {!user?.business_type && (
+                  <label className="mobile-filters__field">
+                    <span className="mobile-filters__label">Industry</span>
+                    <select
+                      className="select"
+                      value={industryFilter}
+                      onChange={(event) => {
+                        setIndustryFilter((event.target.value || "") as LeadIndustry | "");
+                        setStageFilter([]);
+                        setSelectedIds(new Set());
+                        setBulkStageCode("");
+                        setPage(1);
+                      }}
+                      aria-label="Filter by industry"
+                    >
+                      <option value="">All industries</option>
+                      {leadIndustryOptions.map((option) => (
+                        <option key={option.value} value={option.value}>{option.label}</option>
+                      ))}
+                    </select>
+                  </label>
+                )}
+                <label className="mobile-filters__field">
+                  <span className="mobile-filters__label">Source</span>
+                  <select
+                    className="select"
+                    value={sourceFilter}
+                    onChange={(event) => { setSourceFilter(event.target.value); setPage(1); }}
+                    aria-label="Filter by source"
+                  >
+                    <option value="">All sources</option>
+                    {leadSourceOptions.map((option) => (
+                      <option key={option.value} value={option.value}>{option.label}</option>
+                    ))}
+                  </select>
+                </label>
+                <label className="mobile-filters__field">
+                  <span className="mobile-filters__label">Campaign</span>
+                  <select
+                    className="select"
+                    value={campaignFilter}
+                    onChange={(event) => { setCampaignFilter(event.target.value); setPage(1); }}
+                    aria-label="Filter by campaign"
+                  >
+                    <option value="">All campaigns</option>
+                    {campaignFilterOptions.map((option) => (
+                      <option key={option.value} value={option.value}>{option.label}</option>
+                    ))}
+                  </select>
+                </label>
+                {canAssign && (
+                  <label className="mobile-filters__field">
+                    <span className="mobile-filters__label">Owner</span>
+                    <select
+                      className="select"
+                      value={ownerFilter}
+                      onChange={(event) => { setOwnerFilter(event.target.value); setPage(1); }}
+                      aria-label="Filter by owner"
+                    >
+                      <option value="">All owners</option>
+                      <option value="__unassigned__">Unassigned</option>
+                      {assignableUsers.map((u) => (
+                        <option key={u.id} value={u.id}>{u.first_name} {u.last_name}</option>
+                      ))}
+                    </select>
+                  </label>
+                )}
+                <label className="mobile-filters__field">
+                  <span className="mobile-filters__label">Next action due on</span>
+                  <input
+                    className="input"
+                    type="date"
+                    value={nextActionOn}
+                    onChange={(event) => { setNextActionOn(event.target.value); setPage(1); }}
+                    aria-label="Filter by next action due date"
+                  />
+                </label>
+                <div className="mobile-filters__field">
+                  <span className="mobile-filters__label">Stage changed</span>
+                  <div className="row" style={{ gap: "0.5rem" }}>
+                    <input
+                      className="input"
+                      type="date"
+                      value={stageChangedFrom}
+                      onChange={(event) => { setStageChangedFrom(event.target.value); setPage(1); }}
+                      aria-label="Stage changed from date"
+                      style={{ flex: 1 }}
+                    />
+                    <input
+                      className="input"
+                      type="date"
+                      value={stageChangedTo}
+                      onChange={(event) => { setStageChangedTo(event.target.value); setPage(1); }}
+                      aria-label="Stage changed to date"
+                      style={{ flex: 1 }}
+                    />
+                  </div>
+                </div>
+              </div>
+            </Modal>
+          </>
+        ) : (
+        <>
         <div className="row" style={{ gap: "0.75rem", padding: "1rem 1.25rem", borderBottom: "1px solid var(--color-border)", flexWrap: "wrap" }}>
           <input
             className="input"
@@ -1162,7 +1385,15 @@ export default function LeadsPage() {
             onStageDrop={(lead, target) => openTransition(lead, target)}
           />
         )}
+        </>
+        )}
       </div>
+
+      {canManage && isPhone && (
+        <button type="button" className="leads-fab" onClick={openCreate} aria-label="New lead">
+          <Plus size={22} />
+        </button>
+      )}
 
       <Modal
         open={formOpen}
