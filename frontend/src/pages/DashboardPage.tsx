@@ -1,5 +1,6 @@
-import { RefreshCw } from "lucide-react";
+import { Phone, RefreshCw } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import {
   Bar,
   BarChart,
@@ -28,11 +29,15 @@ import {
 import { mergeModules } from "../config/features";
 import { CHART_AXIS, CHART_GRID, CHART_PALETTE, CHART_PRIMARY } from "../config/chartTheme";
 import { useOrg } from "../context/OrgContext";
+import { usePipelines } from "../context/PipelineContext";
 import { useDashboard } from "../hooks/useDashboard";
 import { usePermissions } from "../hooks/usePermissions";
 import { useRealtimeRefresh } from "../realtime";
 import { channelPartnersService } from "../services/channelPartners";
+import { leadsService } from "../services/leads";
+import type { Lead, LeadIndustry, PipelineStage } from "../types";
 import type { ChannelPartnerListItem } from "../types/partner";
+import { telHref } from "../utils/contactLinks";
 import { formatCurrency, formatInr, formatNumber, formatRelative } from "../utils/format";
 
 
@@ -48,6 +53,34 @@ export default function DashboardPage() {
   const dashboard = useDashboard();
   const toast = useToast();
   const { has } = usePermissions();
+  const { getStage } = usePipelines();
+
+  // "Today's follow-ups": leads whose next action is due today or is overdue,
+  // scoped to what the user can see (the leads endpoint enforces that). Soonest
+  // first. Reuses the existing list endpoint — no new backend.
+  const [followUps, setFollowUps] = useState<Lead[] | null>(null);
+  const loadFollowUps = useCallback(() => {
+    const now = new Date();
+    const endOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+    void leadsService
+      .list({
+        next_action_from: new Date(0).toISOString(),
+        next_action_to: endOfToday.toISOString(),
+        page_size: 6,
+      })
+      .then((res) => {
+        const sorted = [...res.items].sort((a, b) => {
+          const da = a.next_action_date ? Date.parse(a.next_action_date) : Infinity;
+          const db = b.next_action_date ? Date.parse(b.next_action_date) : Infinity;
+          return da - db;
+        });
+        setFollowUps(sorted);
+      })
+      .catch(() => setFollowUps([]));
+  }, []);
+  useEffect(() => {
+    loadFollowUps();
+  }, [loadFollowUps]);
 
   // Segregated dashboard (FR-5): the Channel-Partner overview renders only for
   // users who can view partners in a real-estate org. Direct-lead users (no
@@ -77,10 +110,11 @@ export default function DashboardPage() {
     : null;
 
   const refresh = useCallback(() => {
+    loadFollowUps();
     void dashboard.refresh().catch(() => {
       toast.error("Failed to refresh dashboard.");
     });
-  }, [dashboard, toast]);
+  }, [dashboard, toast, loadFollowUps]);
 
   useEffect(() => {
     if (dashboard.error) {
@@ -100,6 +134,7 @@ export default function DashboardPage() {
       event.event.startsWith("unit."),
     () => {
       void dashboard.refresh();
+      loadFollowUps();
     },
   );
 
@@ -184,6 +219,10 @@ export default function DashboardPage() {
         {FEATURES.activities && (
           <KpiCard label="Recent activity (7d)" value={formatNumber(summary.recent_activity_count)} />
         )}
+      </div>
+
+      <div className="chart-grid" style={{ marginTop: "1.5rem" }}>
+        <FollowUpsCard items={followUps} getStage={getStage} />
       </div>
 
       {FEATURES.inventory && (
@@ -362,6 +401,78 @@ export default function DashboardPage() {
         </div>
       )}
     </>
+  );
+}
+
+
+type DueState = "overdue" | "today";
+
+/** Overdue vs due-today, from a next-action ISO datetime (local day compare). */
+function dueState(dateStr: string | null | undefined): DueState {
+  if (!dateStr) return "today";
+  const d = new Date(dateStr);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const day = new Date(d);
+  day.setHours(0, 0, 0, 0);
+  return day.getTime() < today.getTime() ? "overdue" : "today";
+}
+
+
+/**
+ * "Today's follow-ups" — the leads whose next call/action is due today or is
+ * already overdue, each with a one-tap call button. Surfaced near the top so a
+ * rep sees who to chase first thing.
+ */
+function FollowUpsCard({
+  items,
+  getStage,
+}: {
+  items: Lead[] | null;
+  getStage: (industry: LeadIndustry, code: string) => PipelineStage | null | undefined;
+}) {
+  return (
+    <Card title="Today's follow-ups" subtitle="Calls & actions due today or overdue">
+      {items === null ? (
+        <div className="muted text-sm">Loading…</div>
+      ) : items.length === 0 ? (
+        <EmptyState title="You're all caught up" description="No follow-ups due today." />
+      ) : (
+        <>
+          <ul className="followups">
+            {items.map((lead) => {
+              const state = dueState(lead.next_action_date);
+              const stage = getStage(lead.industry, lead.stage_code);
+              const phone = lead.contact_phone || lead.contact_phone_alt || "";
+              const tel = telHref(phone);
+              const name = lead.contact_name || lead.title;
+              return (
+                <li key={lead.id} className="followup">
+                  <div className="followup__text">
+                    <div className="followup__name">{name}</div>
+                    <div className="followup__sub">
+                      {stage ? stage.name : lead.stage_code}
+                      {phone ? ` · ${phone}` : ""}
+                    </div>
+                  </div>
+                  <span className={`followup__pill followup__pill--${state}`}>
+                    {state === "overdue" ? "Overdue" : "Today"}
+                  </span>
+                  {tel && (
+                    <a className="followup__call" href={tel} aria-label={`Call ${name}`} title={`Call ${phone}`}>
+                      <Phone size={15} aria-hidden="true" />
+                    </a>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+          <div style={{ marginTop: "0.75rem" }}>
+            <Link className="link text-sm" to="/leads">View all in Leads →</Link>
+          </div>
+        </>
+      )}
+    </Card>
   );
 }
 

@@ -1,6 +1,7 @@
-import { ChevronDown } from "lucide-react";
+import { ChevronDown, Phone } from "lucide-react";
 
 import type { Lead, PipelineStage } from "../../types";
+import { telHref } from "../../utils/contactLinks";
 import { pipelineCategoryTone } from "../../utils/options";
 
 
@@ -27,15 +28,16 @@ interface LeadRowProps {
 
 /**
  * A compact, single lead row for the phone list (per the approved mobile
- * preview). One primary line (name) + a secondary line (`phone · #id`), a
- * colour-coded stage chip on the right, and an overdue dot. Details live on
- * the detail drawer — this row is for scanning and quick stage moves.
+ * preview). One primary line (name) + a secondary line (full phone · #id), a
+ * colour-coded stage chip on the right, and a one-tap call button. Details
+ * live on the detail drawer — this row is for scanning and quick actions.
  */
 export function LeadRow({ lead, stage, overdue, onOpen, onStageTap }: LeadRowProps) {
   const name = lead.contact_name || lead.customer?.contact_name || lead.title || "Unnamed lead";
   const phone = lead.contact_phone || lead.contact_phone_alt || "";
   const tone = stage ? pipelineCategoryTone(stage.category) : "neutral";
   const stageLabel = stage ? stage.name : lead.stage_code;
+  const tel = telHref(phone);
 
   return (
     <div className="lead-row">
@@ -51,7 +53,11 @@ export function LeadRow({ lead, stage, overdue, onOpen, onStageTap }: LeadRowPro
             {name}
           </span>
           <span className="lead-row__meta">
-            {phone ? <span>{phone}</span> : <span className="muted">No phone</span>}
+            {phone ? (
+              <span className="lead-row__phone">{phone}</span>
+            ) : (
+              <span className="muted">No phone</span>
+            )}
             <span className="lead-row__sep">·</span>
             <span className="muted">#{lead.lead_number}</span>
             {overdue && <span className="lead-row__overdue">Overdue</span>}
@@ -72,6 +78,17 @@ export function LeadRow({ lead, stage, overdue, onOpen, onStageTap }: LeadRowPro
         <span className={`lead-row__stage lead-row__stage--${tone} lead-row__stage--static`}>
           <span className="lead-row__stage-label">{stageLabel}</span>
         </span>
+      )}
+      {tel && (
+        <a
+          className="lead-row__call"
+          href={tel}
+          onClick={(event) => event.stopPropagation()}
+          aria-label={`Call ${name}`}
+          title={`Call ${phone}`}
+        >
+          <Phone size={16} aria-hidden="true" />
+        </a>
       )}
     </div>
   );

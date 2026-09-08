@@ -1,4 +1,4 @@
-import { ArrowRight, Sparkles, X } from "lucide-react";
+import { ArrowRight, Mail, MessageCircle, Phone, Sparkles, X } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 
@@ -9,6 +9,7 @@ import { leadsService } from "../../services/leads";
 import { siteVisitsService } from "../../services/site-visits";
 import type { Lead, LeadCallLog, PipelineStage, StageTransition } from "../../types";
 import type { SiteVisit } from "../../types/realestate";
+import { mailtoHref, telHref, whatsAppHref } from "../../utils/contactLinks";
 import { formatCurrency, formatDate, formatDateTime, formatRelative } from "../../utils/format";
 import { industryInterestLabel, pipelineCategoryTone, titleCase } from "../../utils/options";
 import { canSetStage } from "../../utils/stageAccess";
@@ -248,6 +249,12 @@ export function LeadDrawer({ open, lead, onClose, onTransitionRequest, onLogged,
           )}
           {activeTab === "overview" && (
             <div className="stack">
+              <ContactActions
+                name={lead.contact_name || lead.title}
+                phone={lead.contact_phone}
+                altPhone={lead.contact_phone_alt}
+                email={lead.contact_email}
+              />
               <DetailRow label="Contact" value={lead.contact_name || "—"} />
               <DetailRow label="Email" value={lead.contact_email ?? "—"} />
               <DetailRow label="Phone" value={lead.contact_phone ?? "—"} />
@@ -454,6 +461,74 @@ function DetailRow({ label, value }: { label: string; value: ReactNode }) {
     <div className="detail-row">
       <span className="detail-row__label">{label}</span>
       <span className="detail-row__value">{value}</span>
+    </div>
+  );
+}
+
+
+/**
+ * The contact card at the top of a lead's Overview: the full phone number,
+ * plus one-tap Call / WhatsApp / Email. The links open the device's dialer /
+ * WhatsApp / mail app (frontend-only — no backend). Works on desktop too.
+ */
+function ContactActions({
+  name,
+  phone,
+  altPhone,
+  email,
+}: {
+  name: string;
+  phone: string | null;
+  altPhone: string | null;
+  email: string | null;
+}) {
+  const tel = telHref(phone);
+  const wa = whatsAppHref(phone);
+  const mail = mailtoHref(email);
+
+  // Nothing to act on — don't render an empty card.
+  if (!tel && !wa && !mail) return null;
+
+  return (
+    <div className="contact-actions">
+      {phone ? (
+        <div className="contact-actions__phone">
+          <span className="contact-actions__label">Phone</span>
+          <span className="contact-actions__number">{phone}</span>
+          {altPhone && <span className="contact-actions__alt">Alt · {altPhone}</span>}
+        </div>
+      ) : email ? (
+        <div className="contact-actions__phone">
+          <span className="contact-actions__label">Email</span>
+          <span className="contact-actions__number contact-actions__number--email">{email}</span>
+        </div>
+      ) : null}
+      <div className="contact-actions__btns">
+        {tel && (
+          <a className="contact-act contact-act--call" href={tel} aria-label={`Call ${name}`}>
+            <Phone size={18} aria-hidden="true" />
+            <span>Call</span>
+          </a>
+        )}
+        {wa && (
+          <a
+            className="contact-act contact-act--wa"
+            href={wa}
+            target="_blank"
+            rel="noreferrer"
+            aria-label={`WhatsApp ${name}`}
+          >
+            <MessageCircle size={18} aria-hidden="true" />
+            <span>WhatsApp</span>
+          </a>
+        )}
+        {mail && (
+          <a className="contact-act contact-act--mail" href={mail} aria-label={`Email ${name}`}>
+            <Mail size={18} aria-hidden="true" />
+            <span>Email</span>
+          </a>
+        )}
+      </div>
     </div>
   );
 }
