@@ -239,35 +239,37 @@ class LeadService(ServiceBase):
         # the Sold stage.
         await self._ensure_references(payload.customer_id, payload.assigned_to_id)
 
-        # Industry resolution priority:
-        # 1. Explicit `industry` on the request (admin/manager override).
-        # 2. The current user's `business_type` (chosen at registration).
-        # 3. Reject — we can't pick an industry for them.
-        industry = payload.industry or actor_business_type
-        if industry is None:
-            raise ValidationError(
-                "Cannot determine the lead's industry. Set your account's business_type "
-                "(via registration) or pass `industry` explicitly."
-            )
-
-        # Validate currency against the org's allow-list. We pull the org
-        # row directly (with the tenancy filter still active — the user's
-        # session is scoped to their own org, so the lookup naturally
-        # returns the right row). For unscoped contexts (which only happens
-        # in tests creating leads outside an org), fall back to INR.
+        # Industry is PINNED to the org's business_type. An org is single-industry
+        # (Organization.business_type, non-nullable), so every lead MUST match it.
+        # We deliberately ignore payload.industry and the deprecated per-user
+        # business_type here: trusting those let a manual create stamp a lead with
+        # the wrong vertical (e.g. a real-estate lead marked "education"), which
+        # then disappears from industry-scoped admin views. `actor_business_type`
+        # is used only as a fallback for unscoped contexts (tests that create leads
+        # outside an org). We pull the org row directly — the session's tenancy
+        # filter scopes it to the caller's own org.
         org_id = current_org(self.session)
-        requested_currency = (payload.currency or DEFAULT_CURRENCY).upper()
+        org = None
         if org_id is not None:
             org = (
                 await self.session.execute(select(Organization).where(Organization.id == org_id))
             ).scalar_one_or_none()
-            if org is not None:
-                allowed = allowed_currencies_for_org(org)
-                if requested_currency not in allowed:
-                    raise ValidationError(
-                        f"Currency '{requested_currency}' is not enabled for this organization. "
-                        f"Allowed: {', '.join(allowed)}."
-                    )
+        industry = (org.business_type if org is not None else None) or actor_business_type
+        if industry is None:
+            raise ValidationError(
+                "Cannot determine the lead's industry — this organization has no business type set."
+            )
+
+        # Validate currency against the org's allow-list (same org row). Unscoped
+        # contexts (tests) skip the check and fall back to INR.
+        requested_currency = (payload.currency or DEFAULT_CURRENCY).upper()
+        if org is not None:
+            allowed = allowed_currencies_for_org(org)
+            if requested_currency not in allowed:
+                raise ValidationError(
+                    f"Currency '{requested_currency}' is not enabled for this organization. "
+                    f"Allowed: {', '.join(allowed)}."
+                )
 
         initial_code = initial_stage_code(industry.value)
         lead_number = await self.repository.next_lead_number()
@@ -338,6 +340,10 @@ class LeadService(ServiceBase):
     ):
         lead = await self.get_lead(lead_id)
         update_data = payload.model_dump(exclude_unset=True)
+        # A lead's industry is fixed to the org's (single-industry) — never let a
+        # PUT change it to a mismatched vertical. (stage_code is likewise blocked,
+        # at the endpoint.)
+        update_data.pop("industry", None)
         await self._ensure_references(update_data.get("customer_id"), update_data.get("assigned_to_id"))
         update_data["updated_by_id"] = actor_id
         lead = await self.repository.update(lead, update_data)

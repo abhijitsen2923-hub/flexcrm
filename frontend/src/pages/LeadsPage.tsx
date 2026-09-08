@@ -195,6 +195,18 @@ export default function LeadsPage() {
     () => (org?.allowed_currencies?.length ? org.allowed_currencies : ["INR"]),
     [org]
   );
+  // The org's business_type is the authoritative industry (single-industry org);
+  // prefer it over the deprecated per-user business_type, which can be stale/null.
+  const inheritedIndustry: LeadIndustry | null = org?.business_type ?? user?.business_type ?? null;
+
+  // Once the org loads, adopt its industry as the default view filter (the
+  // per-user business_type may be stale/null).
+  useEffect(() => {
+    if (org?.business_type && industryFilter === "") {
+      setIndustryFilter(org.business_type);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [org?.business_type]);
 
   const query = useMemo(() => {
     // Turn the picked day into the user's LOCAL-day UTC boundaries so "due that day"
@@ -460,7 +472,10 @@ export default function LeadsPage() {
   }
 
   function openCreate() {
-    setForm(makeEmptyForm(user?.business_type ?? "education", allowedCurrencies[0] ?? "INR"));
+    // Industry is the ORG's (single-industry, authoritative) — the per-user
+    // business_type can be stale/null. The backend pins it regardless; this just
+    // drives which optional (real-estate) fields the form shows.
+    setForm(makeEmptyForm(org?.business_type ?? user?.business_type ?? "education", allowedCurrencies[0] ?? "INR"));
     setFormError(null);
     setDuplicates([]);
     setDupChecked(false);
@@ -516,10 +531,9 @@ export default function LeadsPage() {
         }
       }
       await createLead({
-        // Industry is inherited from the logged-in user's business_type on
-        // the backend. We don't ask in the form (single-vertical accounts);
-        // only fall through with an explicit value if the user has none set.
-        ...(user?.business_type ? {} : { industry: form.industry }),
+        // Industry is PINNED to the org's business_type by the backend (an org is
+        // single-industry). We never send it — trusting a client-supplied industry
+        // is what let a real-estate lead get stamped "education".
         title: form.title.trim(),
         salutation: form.salutation || null,
         contact_name: form.contact_name.trim(),
@@ -1166,20 +1180,11 @@ export default function LeadsPage() {
         }
       >
         <form id="lead-form" className="form" onSubmit={handleCreateSubmit}>
-          {user?.business_type ? (
+          {inheritedIndustry && (
             <div className="muted text-sm" style={{ marginBottom: "0.25rem" }}>
-              Industry: <strong>{titleCase(user.business_type)}</strong>{" "}
-              <span className="text-xs">(inherited from your account)</span>
+              Industry: <strong>{titleCase(inheritedIndustry)}</strong>{" "}
+              <span className="text-xs">(set by your organization)</span>
             </div>
-          ) : (
-            <SelectField
-              id="lead-industry"
-              label="Industry"
-              value={form.industry}
-              onChange={(event) => setForm({ ...form, industry: event.target.value as LeadIndustry })}
-              options={leadIndustryOptions}
-              hint="Your account has no business type set — pick one for this lead."
-            />
           )}
           {form.industry === "real_estate" && (
             <SelectField
