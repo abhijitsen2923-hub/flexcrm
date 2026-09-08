@@ -7,6 +7,9 @@ export interface DataTableColumn<T> {
   render: (row: T) => ReactNode;
   width?: string;
   align?: "left" | "right" | "center";
+  /** Row-label shown on the phone stacked-card layout. Defaults to a string
+   * `header`, else the `key`. Set when `header` is JSX or a raw key reads badly. */
+  label?: string;
 }
 
 
@@ -45,7 +48,11 @@ export function DataTable<T>({ columns, rows, rowKey, empty, onRowClick }: DataT
             style={onRowClick ? { cursor: "pointer" } : undefined}
           >
             {columns.map((column) => (
-              <td key={column.key} data-label={column.key} style={{ textAlign: column.align ?? "left" }}>
+              <td
+                key={column.key}
+                data-label={column.label ?? (typeof column.header === "string" ? column.header : column.key)}
+                style={{ textAlign: column.align ?? "left" }}
+              >
                 {column.render(row)}
               </td>
             ))}

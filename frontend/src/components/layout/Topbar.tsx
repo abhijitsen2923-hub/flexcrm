@@ -57,8 +57,9 @@ export function Topbar({ onMenuClick }: TopbarProps) {
             icon={<LogOut size={14} />}
             onClick={() => void logout()}
             title="Sign out"
+            aria-label="Sign out"
           >
-            Sign out
+            <span className="topbar__signout-label">Sign out</span>
           </Button>
         </div>
       </div>

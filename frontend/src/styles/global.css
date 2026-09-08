@@ -150,6 +150,7 @@ p {
 .app-shell {
   display: flex;
   min-height: 100vh;
+  min-height: 100dvh; /* dvh so mobile browser chrome doesn't crop the shell */
 }
 
 .app-main {
@@ -1404,7 +1405,9 @@ p {
   border: none;
   cursor: pointer;
   color: var(--color-text-muted);
-  padding: 0.4rem;
+  padding: 0.5rem;
+  min-width: 44px;
+  min-height: 44px;
   border-radius: var(--radius-sm);
   flex-shrink: 0;
 }
@@ -1418,7 +1421,9 @@ p {
   border: none;
   cursor: pointer;
   color: #94a3b8;
-  padding: 0.25rem;
+  padding: 0.5rem;
+  min-width: 44px;
+  min-height: 44px;
   border-radius: var(--radius-sm);
   margin-left: auto;
 }
@@ -1439,10 +1444,10 @@ p {
   flex: 0 0 auto;
   background: var(--color-surface);
   border-top: 1px solid var(--color-border);
-  height: 64px;
+  min-height: 64px;
   align-items: stretch;
   justify-content: space-around;
-  padding: 0 var(--space-1);
+  padding: 0 var(--space-1) env(safe-area-inset-bottom); /* sit above the home indicator */
   position: sticky;
   bottom: 0;
   z-index: 30;
@@ -1460,7 +1465,7 @@ p {
   cursor: pointer;
   color: var(--color-text-subtle);
   font-family: inherit;
-  font-size: 0.65625rem;
+  font-size: 0.72rem;
   font-weight: 700;
 }
 .bottom-nav__tab span { line-height: 1; }
@@ -1500,11 +1505,15 @@ p {
 
 /* --- Phone only: <640px -------------------------------------------------- */
 @media (max-width: 639px) {
-  /* Extra bottom padding so content clears the fixed bottom tab bar */
-  .app-content { padding: var(--space-4) var(--space-4) var(--space-10); }
+  /* Bottom padding clears the 64px tab bar + the phone's home indicator
+     (safe-area) so the last rows are never hidden under the nav. */
+  .app-content { padding: var(--space-4) var(--space-4) calc(72px + env(safe-area-inset-bottom)); }
 
   /* Show the mobile bottom tab bar */
   .bottom-nav { display: flex; }
+
+  /* Icon-only Sign out in the tight top bar */
+  .topbar__signout-label { display: none; }
 
   /* Page header stacks vertically */
   .page-header {
@@ -1569,4 +1578,6 @@ p {
     flex-shrink: 0;
     margin-right: var(--space-2);
   }
+  /* Undo the desktop fixed-layout clip so card values wrap instead of truncating. */
+  .table-wrap--leads .table td { overflow: visible; white-space: normal; }
 }
