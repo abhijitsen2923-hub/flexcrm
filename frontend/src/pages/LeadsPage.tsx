@@ -1,4 +1,4 @@
-import { Download, LayoutGrid, List as ListIcon, Plus, RefreshCw, SlidersHorizontal, Upload } from "lucide-react";
+import { Download, LayoutGrid, List as ListIcon, Plus, RefreshCw, SlidersHorizontal, Upload, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type DragEvent, type FormEvent } from "react";
 
 import {
@@ -143,7 +143,9 @@ export default function LeadsPage() {
   // Phone gets a dedicated compact list + a bottom-sheet for the heavy filters,
   // instead of the desktop table/kanban and the wide filter bar.
   const isPhone = useMediaQuery("(max-width: 639px)");
-  const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false);
+  // One shared Filters panel for both phone and desktop (a centered dialog on
+  // desktop, a bottom sheet on phone).
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
   const [industryFilter, setIndustryFilter] = useState<LeadIndustry | "">(defaultIndustry);
@@ -260,6 +262,22 @@ export default function LeadsPage() {
 
   function toggleStage(code: string) {
     setStageFilter((prev) => (prev.includes(code) ? prev.filter((c) => c !== code) : [...prev, code]));
+    setPage(1);
+  }
+
+  // Reset every filter (the Filters panel footer + the summary "Clear all" chip).
+  // The search box is separate and left untouched.
+  function clearAllFilters() {
+    setStageFilter([]);
+    setSourceFilter("");
+    setCampaignFilter("");
+    setOwnerFilter("");
+    setNextActionOn("");
+    setStageChangedFrom("");
+    setStageChangedTo("");
+    if (!user?.business_type) setIndustryFilter("");
+    setSelectedIds(new Set());
+    setBulkStageCode("");
     setPage(1);
   }
 
@@ -914,52 +932,86 @@ export default function LeadsPage() {
       </div>
 
       <div className="card" style={{ padding: 0 }}>
+        {/* Unified toolbar — one search box + one Filters button (both viewports). */}
+        <div className="leads-toolbar">
+          <input
+            className="input leads-toolbar__search"
+            type="search"
+            value={searchInput}
+            onChange={(event) => setSearchInput(event.target.value)}
+            placeholder="Search name, phone, email or lead #"
+            aria-label="Search leads"
+          />
+          <button
+            type="button"
+            className="leads-toolbar__filter"
+            onClick={() => setFiltersOpen(true)}
+            aria-label="Open filters"
+          >
+            <SlidersHorizontal size={16} />
+            <span>Filters</span>
+            {activeFilterCount > 0 && (
+              <span className="leads-toolbar__count">{activeFilterCount}</span>
+            )}
+          </button>
+        </div>
+
+        {/* Active-filter summary chips — each removable; mirrors the panel. */}
+        {activeFilterCount > 0 && (
+          <div className="active-filters">
+            {stageFilter.map((code) => (
+              <button key={code} type="button" className="active-filter" onClick={() => toggleStage(code)}>
+                Stage: {stageOptionsForFilter.find((o) => o.value === code)?.label ?? code}
+                <X size={12} aria-hidden="true" />
+              </button>
+            ))}
+            {!user?.business_type && industryFilter && (
+              <button type="button" className="active-filter" onClick={() => { setIndustryFilter(""); setPage(1); }}>
+                Industry: {titleCase(industryFilter)}
+                <X size={12} aria-hidden="true" />
+              </button>
+            )}
+            {sourceFilter && (
+              <button type="button" className="active-filter" onClick={() => { setSourceFilter(""); setPage(1); }}>
+                Source: {leadSourceOptions.find((o) => o.value === sourceFilter)?.label ?? sourceFilter}
+                <X size={12} aria-hidden="true" />
+              </button>
+            )}
+            {campaignFilter && (
+              <button type="button" className="active-filter" onClick={() => { setCampaignFilter(""); setPage(1); }}>
+                Campaign: {campaignFilter}
+                <X size={12} aria-hidden="true" />
+              </button>
+            )}
+            {canAssign && ownerFilter && (
+              <button type="button" className="active-filter" onClick={() => { setOwnerFilter(""); setPage(1); }}>
+                Owner: {ownerFilter === "__unassigned__"
+                  ? "Unassigned"
+                  : (() => { const o = assignableUsers.find((u) => u.id === ownerFilter); return o ? `${o.first_name} ${o.last_name}` : "Selected"; })()}
+                <X size={12} aria-hidden="true" />
+              </button>
+            )}
+            {nextActionOn && (
+              <button type="button" className="active-filter" onClick={() => { setNextActionOn(""); setPage(1); }}>
+                Next action: {nextActionOn}
+                <X size={12} aria-hidden="true" />
+              </button>
+            )}
+            {(stageChangedFrom || stageChangedTo) && (
+              <button type="button" className="active-filter" onClick={() => { setStageChangedFrom(""); setStageChangedTo(""); setPage(1); }}>
+                Stage changed: {stageChangedFrom || "…"} – {stageChangedTo || "…"}
+                <X size={12} aria-hidden="true" />
+              </button>
+            )}
+            <button type="button" className="active-filter active-filter--clear" onClick={clearAllFilters}>
+              Clear all
+            </button>
+          </div>
+        )}
+
+        {/* Content — compact list on phone, table/kanban on desktop. */}
         {isPhone ? (
           <>
-            {/* Phone: slim search + a Filters button that opens the bottom-sheet. */}
-            <div className="leads-mobile-bar">
-              <input
-                className="input leads-mobile-bar__search"
-                type="search"
-                value={searchInput}
-                onChange={(event) => setSearchInput(event.target.value)}
-                placeholder="Search leads"
-                aria-label="Search leads"
-              />
-              <button
-                type="button"
-                className="leads-mobile-bar__filter"
-                onClick={() => setMobileFiltersOpen(true)}
-                aria-label="Open filters"
-              >
-                <SlidersHorizontal size={16} />
-                {activeFilterCount > 0 && (
-                  <span className="leads-mobile-bar__count">{activeFilterCount}</span>
-                )}
-              </button>
-            </div>
-
-            {/* Quick stage filter chips (horizontal scroll). */}
-            <div className="leads-chips" role="group" aria-label="Quick stage filter">
-              <button
-                type="button"
-                className={`leads-chip${stageFilter.length === 0 ? " is-active" : ""}`}
-                onClick={() => { setStageFilter([]); setPage(1); }}
-              >
-                All
-              </button>
-              {stageOptionsForFilter.map((option) => (
-                <button
-                  key={option.value}
-                  type="button"
-                  className={`leads-chip${stageFilter.includes(option.value) ? " is-active" : ""}`}
-                  onClick={() => toggleStage(option.value)}
-                >
-                  {option.label}
-                </button>
-              ))}
-            </div>
-
             <div className="leads-mobile-list">
               <LeadRowList
                 leads={leads}
@@ -983,320 +1035,9 @@ export default function LeadsPage() {
               onPageSizeChange={(size) => { setPageSize(size); setPage(1); }}
               showJumpToLast
             />
-
-            {/* Advanced filters — a bottom sheet reusing the desktop controls. */}
-            <Modal
-              open={mobileFiltersOpen}
-              onClose={() => setMobileFiltersOpen(false)}
-              title="Filters"
-              footer={
-                <div className="row" style={{ gap: "0.5rem", justifyContent: "space-between", width: "100%" }}>
-                  <Button
-                    variant="ghost"
-                    onClick={() => {
-                      setStageFilter([]);
-                      setSourceFilter("");
-                      setCampaignFilter("");
-                      setOwnerFilter("");
-                      setNextActionOn("");
-                      setStageChangedFrom("");
-                      setStageChangedTo("");
-                      if (!user?.business_type) setIndustryFilter("");
-                      setPage(1);
-                    }}
-                  >
-                    Clear all
-                  </Button>
-                  <Button onClick={() => setMobileFiltersOpen(false)}>
-                    Show {pagination?.total ?? 0} leads
-                  </Button>
-                </div>
-              }
-            >
-              <div className="mobile-filters">
-                {!user?.business_type && (
-                  <label className="mobile-filters__field">
-                    <span className="mobile-filters__label">Industry</span>
-                    <select
-                      className="select"
-                      value={industryFilter}
-                      onChange={(event) => {
-                        setIndustryFilter((event.target.value || "") as LeadIndustry | "");
-                        setStageFilter([]);
-                        setSelectedIds(new Set());
-                        setBulkStageCode("");
-                        setPage(1);
-                      }}
-                      aria-label="Filter by industry"
-                    >
-                      <option value="">All industries</option>
-                      {leadIndustryOptions.map((option) => (
-                        <option key={option.value} value={option.value}>{option.label}</option>
-                      ))}
-                    </select>
-                  </label>
-                )}
-                <label className="mobile-filters__field">
-                  <span className="mobile-filters__label">Source</span>
-                  <select
-                    className="select"
-                    value={sourceFilter}
-                    onChange={(event) => { setSourceFilter(event.target.value); setPage(1); }}
-                    aria-label="Filter by source"
-                  >
-                    <option value="">All sources</option>
-                    {leadSourceOptions.map((option) => (
-                      <option key={option.value} value={option.value}>{option.label}</option>
-                    ))}
-                  </select>
-                </label>
-                <label className="mobile-filters__field">
-                  <span className="mobile-filters__label">Campaign</span>
-                  <select
-                    className="select"
-                    value={campaignFilter}
-                    onChange={(event) => { setCampaignFilter(event.target.value); setPage(1); }}
-                    aria-label="Filter by campaign"
-                  >
-                    <option value="">All campaigns</option>
-                    {campaignFilterOptions.map((option) => (
-                      <option key={option.value} value={option.value}>{option.label}</option>
-                    ))}
-                  </select>
-                </label>
-                {canAssign && (
-                  <label className="mobile-filters__field">
-                    <span className="mobile-filters__label">Owner</span>
-                    <select
-                      className="select"
-                      value={ownerFilter}
-                      onChange={(event) => { setOwnerFilter(event.target.value); setPage(1); }}
-                      aria-label="Filter by owner"
-                    >
-                      <option value="">All owners</option>
-                      <option value="__unassigned__">Unassigned</option>
-                      {assignableUsers.map((u) => (
-                        <option key={u.id} value={u.id}>{u.first_name} {u.last_name}</option>
-                      ))}
-                    </select>
-                  </label>
-                )}
-                <label className="mobile-filters__field">
-                  <span className="mobile-filters__label">Next action due on</span>
-                  <input
-                    className="input"
-                    type="date"
-                    value={nextActionOn}
-                    onChange={(event) => { setNextActionOn(event.target.value); setPage(1); }}
-                    aria-label="Filter by next action due date"
-                  />
-                </label>
-                <div className="mobile-filters__field">
-                  <span className="mobile-filters__label">Stage changed</span>
-                  <div className="row" style={{ gap: "0.5rem" }}>
-                    <input
-                      className="input"
-                      type="date"
-                      value={stageChangedFrom}
-                      onChange={(event) => { setStageChangedFrom(event.target.value); setPage(1); }}
-                      aria-label="Stage changed from date"
-                      style={{ flex: 1 }}
-                    />
-                    <input
-                      className="input"
-                      type="date"
-                      value={stageChangedTo}
-                      onChange={(event) => { setStageChangedTo(event.target.value); setPage(1); }}
-                      aria-label="Stage changed to date"
-                      style={{ flex: 1 }}
-                    />
-                  </div>
-                </div>
-              </div>
-            </Modal>
           </>
         ) : (
         <>
-        <div className="row" style={{ gap: "0.75rem", padding: "1rem 1.25rem", borderBottom: "1px solid var(--color-border)", flexWrap: "wrap" }}>
-          <input
-            className="input"
-            type="search"
-            value={searchInput}
-            onChange={(event) => setSearchInput(event.target.value)}
-            placeholder="Search name, phone, email, lead #"
-            aria-label="Search leads"
-            style={{ minWidth: 240, flex: "1 1 240px" }}
-          />
-          {user?.business_type ? (
-            // Single-vertical orgs (the default since Phase 7) — the industry
-            // is implicit. Show it as a read-only chip instead of a dropdown
-            // that would offer the other vertical we can never load data for.
-            <div
-              className="muted text-sm"
-              style={{ display: "flex", alignItems: "center", padding: "0 0.5rem" }}
-              title="Your account is scoped to this industry"
-            >
-              Industry: <strong style={{ marginLeft: 4 }}>{titleCase(user.business_type)}</strong>
-            </div>
-          ) : (
-            <select
-              className="select"
-              value={industryFilter}
-              onChange={(event) => {
-                setIndustryFilter((event.target.value || "") as LeadIndustry | "");
-                setStageFilter([]);
-                // Drop any selection — it may span the industry we're leaving, and the
-                // bulk stage picker is industry-scoped.
-                setSelectedIds(new Set());
-                setBulkStageCode("");
-                setPage(1);
-              }}
-              aria-label="Filter by industry"
-            >
-              <option value="">All industries</option>
-              {leadIndustryOptions.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-          )}
-          <details className="stage-multiselect" style={{ position: "relative" }}>
-            <summary className="select" style={{ minWidth: 200, cursor: "pointer", userSelect: "none", listStyle: "none" }} aria-label="Filter by stage">
-              {stageFilter.length ? `Stages (${stageFilter.length})` : "All stages"}
-            </summary>
-            <div
-              style={{
-                position: "absolute", zIndex: 30, top: "calc(100% + 4px)", left: 0,
-                minWidth: 240, maxHeight: 300, overflowY: "auto",
-                background: "var(--color-surface)", border: "1px solid var(--color-border)",
-                borderRadius: "var(--radius-sm)", boxShadow: "0 6px 20px rgba(0,0,0,.14)", padding: "0.4rem"
-              }}
-            >
-              {stageFilter.length > 0 && (
-                <button
-                  type="button"
-                  className="link text-xs"
-                  onClick={() => { setStageFilter([]); setPage(1); }}
-                  style={{ background: "none", border: "none", cursor: "pointer", padding: "0.2rem 0.4rem", marginBottom: 2 }}
-                >
-                  Clear ({stageFilter.length})
-                </button>
-              )}
-              {stageOptionsForFilter.map((option) => (
-                <label
-                  key={`${option.value}-${option.label}`}
-                  style={{ display: "flex", alignItems: "center", gap: 8, padding: "0.35rem 0.4rem", cursor: "pointer" }}
-                >
-                  <input
-                    type="checkbox"
-                    checked={stageFilter.includes(option.value)}
-                    onChange={() => toggleStage(option.value)}
-                  />
-                  <span className="text-sm">{option.label}</span>
-                </label>
-              ))}
-            </div>
-          </details>
-          <input
-            className="input"
-            type="date"
-            value={nextActionOn}
-            onChange={(event) => { setNextActionOn(event.target.value); setPage(1); }}
-            aria-label="Filter by next action due date"
-            title="Show leads whose next call/follow-up is due on this day"
-            style={{ minWidth: 150 }}
-          />
-          <span
-            className="row"
-            style={{ gap: "0.35rem", alignItems: "center", flexWrap: "nowrap" }}
-            title="Filter leads by when their stage last changed (From–To)"
-          >
-            <span className="muted text-xs" style={{ whiteSpace: "nowrap" }}>Stage changed</span>
-            <input
-              className="input"
-              type="date"
-              value={stageChangedFrom}
-              onChange={(event) => { setStageChangedFrom(event.target.value); setPage(1); }}
-              aria-label="Stage changed from date"
-              title="Stage last changed on/after this date"
-              style={{ minWidth: 140 }}
-            />
-            <span className="muted text-xs">to</span>
-            <input
-              className="input"
-              type="date"
-              value={stageChangedTo}
-              onChange={(event) => { setStageChangedTo(event.target.value); setPage(1); }}
-              aria-label="Stage changed to date"
-              title="Stage last changed on/before this date"
-              style={{ minWidth: 140 }}
-            />
-          </span>
-          <select
-            className="select"
-            value={sourceFilter}
-            onChange={(event) => {
-              setSourceFilter(event.target.value);
-              setPage(1);
-            }}
-            aria-label="Filter by source"
-            style={{ minWidth: 170 }}
-          >
-            <option value="">All sources</option>
-            {leadSourceOptions.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-          <select
-            className="select"
-            value={campaignFilter}
-            onChange={(event) => {
-              setCampaignFilter(event.target.value);
-              setPage(1);
-            }}
-            aria-label="Filter by campaign"
-            style={{ minWidth: 180 }}
-          >
-            <option value="">All campaigns</option>
-            {campaignFilterOptions.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-          {canAssign && (
-            <select
-              className="select"
-              value={ownerFilter}
-              onChange={(event) => {
-                setOwnerFilter(event.target.value);
-                setPage(1);
-              }}
-              aria-label="Filter by owner"
-              style={{ minWidth: 200 }}
-            >
-              <option value="">All owners</option>
-              <option value="__unassigned__">Unassigned</option>
-              {assignableUsers.map((u) => (
-                <option key={u.id} value={u.id}>
-                  {u.first_name} {u.last_name}
-                </option>
-              ))}
-            </select>
-          )}
-          {nextActionOn && (
-            <span
-              style={{ display: "inline-flex", alignItems: "center", alignSelf: "center", whiteSpace: "nowrap" }}
-              title="Leads matching the current filters due on the selected day"
-            >
-              <Badge tone="warning">{pagination?.total ?? 0} due</Badge>
-            </span>
-          )}
-        </div>
-
         {view === "list" ? (
           <>
             {(canAssign || canManage) && selectedIds.size > 0 && (
@@ -1387,6 +1128,136 @@ export default function LeadsPage() {
         )}
         </>
         )}
+
+        {/* Shared Filters panel — one labelled place for every filter. The Modal
+            renders as a centered dialog on desktop and a bottom sheet on phone. */}
+        <Modal
+          open={filtersOpen}
+          onClose={() => setFiltersOpen(false)}
+          title="Filters"
+          footer={
+            <div className="row" style={{ gap: "0.5rem", justifyContent: "space-between", width: "100%" }}>
+              <Button variant="ghost" onClick={clearAllFilters}>Clear all</Button>
+              <Button onClick={() => setFiltersOpen(false)}>Show {pagination?.total ?? 0} leads</Button>
+            </div>
+          }
+        >
+          <div className="mobile-filters">
+            {!user?.business_type && (
+              <label className="mobile-filters__field">
+                <span className="mobile-filters__label">Industry</span>
+                <select
+                  className="select"
+                  value={industryFilter}
+                  onChange={(event) => {
+                    setIndustryFilter((event.target.value || "") as LeadIndustry | "");
+                    setStageFilter([]);
+                    setSelectedIds(new Set());
+                    setBulkStageCode("");
+                    setPage(1);
+                  }}
+                  aria-label="Filter by industry"
+                >
+                  <option value="">All industries</option>
+                  {leadIndustryOptions.map((option) => (
+                    <option key={option.value} value={option.value}>{option.label}</option>
+                  ))}
+                </select>
+              </label>
+            )}
+            <div className="mobile-filters__field">
+              <span className="mobile-filters__label">Stage</span>
+              <div className="filter-stage-list">
+                {stageOptionsForFilter.map((option) => (
+                  <label key={`${option.value}-${option.label}`} className="filter-stage-list__item">
+                    <input
+                      type="checkbox"
+                      checked={stageFilter.includes(option.value)}
+                      onChange={() => toggleStage(option.value)}
+                    />
+                    <span>{option.label}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+            <label className="mobile-filters__field">
+              <span className="mobile-filters__label">Source</span>
+              <select
+                className="select"
+                value={sourceFilter}
+                onChange={(event) => { setSourceFilter(event.target.value); setPage(1); }}
+                aria-label="Filter by source"
+              >
+                <option value="">All sources</option>
+                {leadSourceOptions.map((option) => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
+              </select>
+            </label>
+            <label className="mobile-filters__field">
+              <span className="mobile-filters__label">Campaign</span>
+              <select
+                className="select"
+                value={campaignFilter}
+                onChange={(event) => { setCampaignFilter(event.target.value); setPage(1); }}
+                aria-label="Filter by campaign"
+              >
+                <option value="">All campaigns</option>
+                {campaignFilterOptions.map((option) => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
+              </select>
+            </label>
+            {canAssign && (
+              <label className="mobile-filters__field">
+                <span className="mobile-filters__label">Owner</span>
+                <select
+                  className="select"
+                  value={ownerFilter}
+                  onChange={(event) => { setOwnerFilter(event.target.value); setPage(1); }}
+                  aria-label="Filter by owner"
+                >
+                  <option value="">All owners</option>
+                  <option value="__unassigned__">Unassigned</option>
+                  {assignableUsers.map((u) => (
+                    <option key={u.id} value={u.id}>{u.first_name} {u.last_name}</option>
+                  ))}
+                </select>
+              </label>
+            )}
+            <label className="mobile-filters__field">
+              <span className="mobile-filters__label">Next action due on</span>
+              <input
+                className="input"
+                type="date"
+                value={nextActionOn}
+                onChange={(event) => { setNextActionOn(event.target.value); setPage(1); }}
+                aria-label="Filter by next action due date"
+              />
+            </label>
+            <div className="mobile-filters__field">
+              <span className="mobile-filters__label">Stage changed (From – To)</span>
+              <div className="row" style={{ gap: "0.5rem" }}>
+                <input
+                  className="input"
+                  type="date"
+                  value={stageChangedFrom}
+                  onChange={(event) => { setStageChangedFrom(event.target.value); setPage(1); }}
+                  aria-label="Stage changed from date"
+                  style={{ flex: 1 }}
+                />
+                <input
+                  className="input"
+                  type="date"
+                  value={stageChangedTo}
+                  onChange={(event) => { setStageChangedTo(event.target.value); setPage(1); }}
+                  aria-label="Stage changed to date"
+                  style={{ flex: 1 }}
+                />
+              </div>
+            </div>
+          </div>
+        </Modal>
       </div>
 
       {canManage && isPhone && (
