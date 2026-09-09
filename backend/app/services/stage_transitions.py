@@ -43,6 +43,15 @@ TRAVEL_DOCS_PENDING_STAGE = "visa_documentation_pending"
 # normal backward-only-by-manager rule.
 CLOSED_LOST_STAGE_CODES = {"did_not_pick", "not_interested", "disqualified"}
 
+# The DNP / Follow-up cluster. A rep working a lead flips between "did not pick"
+# and "follow up" constantly, and in the real-estate pipeline `did_not_pickup`
+# sits at an EARLIER position than `follow_up`, so Follow-up → DNP counts as a
+# "backward" move and would otherwise be manager-only. Moving BETWEEN these two
+# (either direction) is a normal daily action for any role that can set them, so
+# it is exempt from the backward-move rule. (Codes vary by vertical: real-estate
+# `did_not_pickup`, education/travel `did_not_pick`; `follow_up` is shared.)
+DNP_FOLLOWUP_STAGE_CODES = {"follow_up", "did_not_pickup", "did_not_pick"}
+
 # Stages a BULK move must NOT target: each needs per-lead capture (a booking/token
 # on "booked", a site-visit slot on "site_visit_confirmed") or fires heavy, near-
 # irreversible side effects ("sold" → Customer + SalesOrder + Invoice + commission +
@@ -124,8 +133,16 @@ class StageTransitionService(ServiceBase):
         # flows (out of a closed-lost stage) skip this. Fixed to use the real
         # manager roles — the old {admin, manager} set is legacy and unassignable,
         # so backward moves were silently blocked for every real user.
+        # Exception: toggling between DNP and Follow-up is a normal daily action
+        # for any role, so it's allowed both directions even though DNP sits at an
+        # earlier position than Follow-up in the real-estate pipeline.
+        is_dnp_followup_toggle = (
+            current_stage.code in DNP_FOLLOWUP_STAGE_CODES
+            and target_stage.code in DNP_FOLLOWUP_STAGE_CODES
+        )
         if (
             not is_reopen
+            and not is_dnp_followup_toggle
             and target_stage.position < current_stage.position
             and target_stage.category == PipelineStageCategory.active
             and actor_role not in STAGE_MANAGER_ROLES
