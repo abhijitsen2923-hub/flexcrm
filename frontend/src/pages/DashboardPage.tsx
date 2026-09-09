@@ -50,7 +50,10 @@ export default function DashboardPage() {
   // A freshly-provisioned tenant has no optional modules until the provider
   // grants them. Wait for `org` to load so the notice doesn't flash on refresh.
   const noModules = org !== null && Object.values(FEATURES).every((enabled) => !enabled);
-  const dashboard = useDashboard();
+  // The dashboard shows no analytics (revenue/leads/conversion) — those live on
+  // the Analytics page. Skip fetching them here so a role with DASHBOARD_VIEW but
+  // not ANALYTICS_VIEW (e.g. sales_executive) doesn't 403 and blank the page.
+  const dashboard = useDashboard({ includeAnalytics: false });
   const toast = useToast();
   const { has } = usePermissions();
   const { getStage } = usePipelines();

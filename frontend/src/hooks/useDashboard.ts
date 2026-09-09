@@ -45,7 +45,14 @@ interface DashboardPayload {
   conversionAnalytics: AnalyticsConversion;
 }
 
-export function useDashboard() {
+// `includeAnalytics` controls the three /analytics/* calls (revenue, leads,
+// conversion), which require ANALYTICS_VIEW. The Dashboard doesn't display any
+// of them, so it passes false and never requests them — that alone stops the
+// 403s a lead role (e.g. sales_executive, which has DASHBOARD_VIEW but not
+// ANALYTICS_VIEW) used to hit. The Analytics page needs them, so it keeps the
+// default (true); there the calls are tolerated per-endpoint (a 403 leaves that
+// slice empty instead of blanking the page).
+export function useDashboard({ includeAnalytics = true }: { includeAnalytics?: boolean } = {}) {
   const cached = () => getCached<DashboardPayload>(CACHE_KEY);
 
   const [summary, setSummary] = useState(() => cached()?.summary ?? initialSummary);
@@ -75,22 +82,34 @@ export function useDashboard() {
     const slowTimer = setTimeout(() => setSlow(true), 4000);
 
     try {
-      const [summaryResponse, chartsResponse, recentResponse, revenueResponse, leadsResponse, conversionResponse] =
-        await Promise.all([
-          dashboardService.summary(),
-          dashboardService.charts(),
-          dashboardService.recentActivities(),
-          dashboardService.revenueAnalytics(),
-          dashboardService.leadsAnalytics(),
-          dashboardService.conversionAnalytics()
-        ]);
-
+      // Core dashboard data — every dashboard role has DASHBOARD_VIEW, so a
+      // failure here is a genuine error worth surfacing.
+      const [summaryResponse, chartsResponse, recentResponse] = await Promise.all([
+        dashboardService.summary(),
+        dashboardService.charts(),
+        dashboardService.recentActivities()
+      ]);
       setSummary(summaryResponse);
       setCharts(chartsResponse);
       setRecentActivities(recentResponse);
-      setRevenueAnalytics(revenueResponse);
-      setLeadAnalytics(leadsResponse);
-      setConversionAnalytics(conversionResponse);
+
+      // Analytics (ANALYTICS_VIEW-gated) — only where displayed, and each
+      // tolerated so a 403 for a role without the permission leaves that slice
+      // empty rather than rejecting the whole load / firing the error toast.
+      let revenueResponse: AnalyticsRevenue = initialRevenue;
+      let leadsResponse: AnalyticsLeads = initialLeads;
+      let conversionResponse: AnalyticsConversion = initialConversion;
+      if (includeAnalytics) {
+        const [rev, leads, conv] = await Promise.all([
+          dashboardService.revenueAnalytics().catch(() => null),
+          dashboardService.leadsAnalytics().catch(() => null),
+          dashboardService.conversionAnalytics().catch(() => null)
+        ]);
+        if (rev) { revenueResponse = rev; setRevenueAnalytics(rev); }
+        if (leads) { leadsResponse = leads; setLeadAnalytics(leads); }
+        if (conv) { conversionResponse = conv; setConversionAnalytics(conv); }
+      }
+
       setCached(CACHE_KEY, {
         summary: summaryResponse,
         charts: chartsResponse,
@@ -109,7 +128,7 @@ export function useDashboard() {
       setSlow(false);
       setInitialized(true);
     }
-  }, []);
+  }, [includeAnalytics]);
 
   useEffect(() => {
     void refresh();
