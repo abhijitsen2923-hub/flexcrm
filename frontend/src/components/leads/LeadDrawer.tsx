@@ -2,14 +2,16 @@ import { ArrowRight, Mail, MessageCircle, Phone, Sparkles, X } from "lucide-reac
 import { useEffect, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 
-import { Badge, Button, LoadingBlock, EmptyState } from "../../components";
+import { Badge, Button, LoadingBlock, EmptyState, useToast } from "../../components";
 import { usePipelines } from "../../context/PipelineContext";
 import { useAuth } from "../../hooks/useAuth";
+import { usePermissions } from "../../hooks/usePermissions";
 import { leadsService } from "../../services/leads";
 import { siteVisitsService } from "../../services/site-visits";
 import type { Lead, LeadCallLog, PipelineStage, StageTransition } from "../../types";
 import type { SiteVisit } from "../../types/realestate";
 import { mailtoHref, telHref, whatsAppHref } from "../../utils/contactLinks";
+import { extractErrorMessage } from "../../utils/errors";
 import { formatCurrency, formatDate, formatDateTime, formatRelative } from "../../utils/format";
 import { industryInterestLabel, pipelineCategoryTone, titleCase } from "../../utils/options";
 import { canSetStage } from "../../utils/stageAccess";
@@ -18,6 +20,14 @@ import { LeadBookingsTab } from "./LeadBookingsTab";
 
 // Mirror the stage-transition comment floor so a DNP is captured "like Call".
 const MIN_DNP_COMMENT = 10;
+
+/** ISO instant → `YYYY-MM-DDTHH:mm` in local time, to seed a datetime-local input. */
+function toLocalInput(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
 
 type TabKey = "overview" | "bookings" | "siteVisits" | "history" | "activity";
 
@@ -46,6 +56,9 @@ interface LeadDrawerProps {
 export function LeadDrawer({ open, lead, onClose, onTransitionRequest, onLogged, refreshKey }: LeadDrawerProps) {
   const { byIndustry, getStage } = usePipelines();
   const { user } = useAuth();
+  const { has } = usePermissions();
+  const toast = useToast();
+  const canManageVisits = has("LEAD_MANAGE");
   const [tab, setTab] = useState<TabKey>("overview");
   const [history, setHistory] = useState<StageTransition[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
@@ -53,11 +66,21 @@ export function LeadDrawer({ open, lead, onClose, onTransitionRequest, onLogged,
   const [calls, setCalls] = useState<LeadCallLog[]>([]);
   const [visits, setVisits] = useState<SiteVisit[]>([]);
   const [visitsLoading, setVisitsLoading] = useState(false);
+  // Inline reschedule for a single site visit (id being edited + its new time).
+  const [rescheduleVisitId, setRescheduleVisitId] = useState<string | null>(null);
+  const [rescheduleAt, setRescheduleAt] = useState("");
+  const [visitBusy, setVisitBusy] = useState(false);
   // "Did Not Pick" inline form — logs a DNP with a comment + a scheduled next call.
   const [dnpOpen, setDnpOpen] = useState(false);
   const [dnpComment, setDnpComment] = useState("");
   const [dnpDate, setDnpDate] = useState("");
   const [dnpBusy, setDnpBusy] = useState(false);
+  // "Log follow-up" inline form (shown only in the Follow-up stage) — records a
+  // repeated follow-up call; each one stacks in the call log as Follow-up #N.
+  const [fuOpen, setFuOpen] = useState(false);
+  const [fuComment, setFuComment] = useState("");
+  const [fuDate, setFuDate] = useState("");
+  const [fuBusy, setFuBusy] = useState(false);
 
   // Escape key + lock body scroll while drawer is open.
   useEffect(() => {
@@ -123,12 +146,57 @@ export function LeadDrawer({ open, lead, onClose, onTransitionRequest, onLogged,
     return () => { cancelled = true; };
   }, [open, lead?.id, refreshKey]);
 
-  // Reset the DNP form when switching leads.
+  // Reset the DNP + follow-up forms when switching leads.
   useEffect(() => {
     setDnpOpen(false);
     setDnpComment("");
     setDnpDate("");
+    setFuOpen(false);
+    setFuComment("");
+    setFuDate("");
+    setRescheduleVisitId(null);
+    setRescheduleAt("");
   }, [lead?.id]);
+
+  async function refreshVisits() {
+    if (!lead) return;
+    try {
+      setVisits(await siteVisitsService.list({ leadId: lead.id }));
+    } catch {
+      /* non-critical */
+    }
+  }
+
+  async function saveReschedule(visitId: string) {
+    if (!rescheduleAt) return;
+    setVisitBusy(true);
+    try {
+      // Convert the local datetime-local value to a real UTC instant.
+      await siteVisitsService.update(visitId, { scheduledAt: new Date(rescheduleAt).toISOString() });
+      await refreshVisits();
+      setRescheduleVisitId(null);
+      setRescheduleAt("");
+      toast.success("Visit rescheduled");
+      onLogged?.();
+    } catch (err) {
+      toast.error("Reschedule failed", extractErrorMessage(err));
+    } finally {
+      setVisitBusy(false);
+    }
+  }
+
+  async function cancelVisit(visitId: string) {
+    setVisitBusy(true);
+    try {
+      await siteVisitsService.update(visitId, { status: "cancelled" });
+      await refreshVisits();
+      toast.success("Visit cancelled");
+    } catch (err) {
+      toast.error("Cancel failed", extractErrorMessage(err));
+    } finally {
+      setVisitBusy(false);
+    }
+  }
 
   async function submitDnp() {
     if (!lead || dnpComment.trim().length < MIN_DNP_COMMENT) return;
@@ -151,6 +219,30 @@ export function LeadDrawer({ open, lead, onClose, onTransitionRequest, onLogged,
       /* non-critical */
     } finally {
       setDnpBusy(false);
+    }
+  }
+
+  async function submitFollowUp() {
+    if (!lead || fuComment.trim().length < MIN_DNP_COMMENT) return;
+    setFuBusy(true);
+    try {
+      await leadsService.logCall(
+        lead.id,
+        "follow_up",
+        fuComment.trim(),
+        fuDate ? new Date(fuDate).toISOString() : null
+      );
+      setCalls(await leadsService.calls(lead.id));
+      setFuOpen(false);
+      setFuComment("");
+      setFuDate("");
+      // A follow-up (optionally) reschedules next_action_date + updates the last
+      // comment — refresh the parent list / "due" filter like the DNP path does.
+      onLogged?.();
+    } catch {
+      /* non-critical */
+    } finally {
+      setFuBusy(false);
     }
   }
 
@@ -232,18 +324,67 @@ export function LeadDrawer({ open, lead, onClose, onTransitionRequest, onLogged,
                   description="Move this lead to “Site Visit Confirmed” to book one or more visits."
                 />
               ) : (
-                visits.map((v) => (
-                  <div key={v.id} className="card" style={{ padding: "0.75rem 1rem" }}>
-                    <div className="row row--between">
-                      <strong>{v.project?.name ?? "Site"}</strong>
-                      <span className="muted text-sm">{formatDateTime(v.scheduledAt)}</span>
+                visits.map((v) => {
+                  const cancelled = v.status === "cancelled";
+                  const isRescheduling = rescheduleVisitId === v.id;
+                  return (
+                    <div key={v.id} className="card" style={{ padding: "0.75rem 1rem", opacity: cancelled ? 0.6 : 1 }}>
+                      <div className="row row--between">
+                        <strong style={cancelled ? { textDecoration: "line-through" } : undefined}>
+                          {v.project?.name ?? "Site"}
+                        </strong>
+                        <span className="muted text-sm">{formatDateTime(v.scheduledAt)}</span>
+                      </div>
+                      <div className="muted text-sm" style={{ marginTop: 4 }}>
+                        {cancelled
+                          ? "Cancelled"
+                          : v.attended === null
+                            ? "Not recorded"
+                            : v.attended
+                              ? "Attended"
+                              : "Absent"}
+                        {v.feedback ? ` · ${v.feedback}` : ""}
+                      </div>
+
+                      {canManageVisits && !cancelled && (
+                        <div style={{ marginTop: "0.6rem" }}>
+                          {isRescheduling ? (
+                            <div className="stack" style={{ gap: "0.4rem" }}>
+                              <input
+                                className="input"
+                                type="datetime-local"
+                                value={rescheduleAt}
+                                onChange={(e) => setRescheduleAt(e.target.value)}
+                                aria-label="New visit date & time"
+                              />
+                              <div className="row" style={{ justifyContent: "flex-end", gap: "0.4rem" }}>
+                                <Button size="sm" variant="secondary" disabled={visitBusy} onClick={() => { setRescheduleVisitId(null); setRescheduleAt(""); }}>
+                                  Cancel
+                                </Button>
+                                <Button size="sm" loading={visitBusy} disabled={!rescheduleAt} onClick={() => void saveReschedule(v.id)}>
+                                  Save time
+                                </Button>
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="row" style={{ gap: "0.4rem" }}>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                onClick={() => { setRescheduleVisitId(v.id); setRescheduleAt(toLocalInput(v.scheduledAt)); }}
+                              >
+                                Reschedule
+                              </Button>
+                              <Button size="sm" variant="ghost" disabled={visitBusy} onClick={() => void cancelVisit(v.id)}>
+                                Cancel visit
+                              </Button>
+                            </div>
+                          )}
+                        </div>
+                      )}
                     </div>
-                    <div className="muted text-sm" style={{ marginTop: 4 }}>
-                      {v.attended === null ? "Not recorded" : v.attended ? "Attended" : "Absent"}
-                      {v.feedback ? ` · ${v.feedback}` : ""}
-                    </div>
-                  </div>
-                ))
+                  );
+                })
               )}
             </div>
           )}
@@ -339,6 +480,16 @@ export function LeadDrawer({ open, lead, onClose, onTransitionRequest, onLogged,
                   >
                     Did Not Pick
                   </button>
+                  {lead.stage_code === "follow_up" && (
+                    <button
+                      type="button"
+                      className="btn btn--sm btn--ghost"
+                      onClick={() => setFuOpen((v) => !v)}
+                      title="Log another follow-up and (optionally) schedule the next one"
+                    >
+                      Log follow-up
+                    </button>
+                  )}
                 </div>
 
                 {dnpOpen && (
@@ -363,21 +514,56 @@ export function LeadDrawer({ open, lead, onClose, onTransitionRequest, onLogged,
                   </div>
                 )}
 
+                {fuOpen && (
+                  <div className="stack" style={{ gap: "0.5rem", marginTop: "0.6rem", padding: "0.6rem 0.75rem", background: "var(--color-surface-muted)", borderRadius: "var(--radius-sm)" }}>
+                    <textarea
+                      className="input"
+                      rows={2}
+                      placeholder={`How did the follow-up go? (min ${MIN_DNP_COMMENT} chars)`}
+                      value={fuComment}
+                      onChange={(e) => setFuComment(e.target.value)}
+                    />
+                    <label className="stack" style={{ gap: 2 }}>
+                      <span className="muted text-xs">Next follow-up date &amp; time (optional)</span>
+                      <input className="input" type="datetime-local" value={fuDate} onChange={(e) => setFuDate(e.target.value)} />
+                    </label>
+                    <div className="row" style={{ justifyContent: "flex-end", gap: "0.4rem" }}>
+                      <Button size="sm" variant="secondary" onClick={() => setFuOpen(false)} disabled={fuBusy}>Cancel</Button>
+                      <Button size="sm" loading={fuBusy} disabled={fuComment.trim().length < MIN_DNP_COMMENT} onClick={() => void submitFollowUp()}>
+                        Log follow-up
+                      </Button>
+                    </div>
+                  </div>
+                )}
+
                 {calls.length > 0 && (
                   <div style={{ marginTop: "0.75rem" }}>
                     <div className="muted text-xs" style={{ textTransform: "uppercase", letterSpacing: ".04em", marginBottom: "0.35rem" }}>
                       Call log
                     </div>
                     <div className="stack" style={{ gap: "0.25rem" }}>
-                      {calls.slice().reverse().slice(0, 6).map((c) => (
-                        <div key={c.id} className="text-xs muted">
-                          {c.call_type === "first_call" ? "First call" : c.call_type === "dnp" ? "Did not pick" : "Follow-up"}
-                          {" · "}{c.user ? `${c.user.first_name} ${c.user.last_name}` : "—"}
-                          {" · "}{formatDateTime(c.created_at)}
-                          {c.next_action_date ? ` · next call ${formatDateTime(c.next_action_date)}` : ""}
-                          {c.notes ? ` — ${c.notes}` : ""}
-                        </div>
-                      ))}
+                      {(() => {
+                        // Number follow-ups chronologically (#1, #2, …) — `calls`
+                        // arrives oldest-first from the backend.
+                        const fuOrdinal = new Map<string, number>();
+                        let n = 0;
+                        for (const c of calls) {
+                          if (c.call_type === "follow_up") { n += 1; fuOrdinal.set(c.id, n); }
+                        }
+                        return calls.slice().reverse().slice(0, 6).map((c) => (
+                          <div key={c.id} className="text-xs muted">
+                            {c.call_type === "first_call"
+                              ? "First call"
+                              : c.call_type === "dnp"
+                                ? "Did not pick"
+                                : `Follow-up #${fuOrdinal.get(c.id) ?? ""}`}
+                            {" · "}{c.user ? `${c.user.first_name} ${c.user.last_name}` : "—"}
+                            {" · "}{formatDateTime(c.created_at)}
+                            {c.next_action_date ? ` · next call ${formatDateTime(c.next_action_date)}` : ""}
+                            {c.notes ? ` — ${c.notes}` : ""}
+                          </div>
+                        ));
+                      })()}
                     </div>
                   </div>
                 )}

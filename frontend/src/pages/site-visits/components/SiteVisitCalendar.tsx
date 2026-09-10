@@ -148,7 +148,9 @@ export function SiteVisitCalendar({ visits, onSchedule, onUpdateFeedback }: Prop
         await onSchedule({
           leadId: form.leadId || null,
           projectId,
-          scheduledAt: form.scheduledAt,
+          // Convert the local datetime-local value to a real UTC instant, so the
+          // stored time matches what the user picked (matches the booking flow).
+          scheduledAt: new Date(form.scheduledAt).toISOString(),
           assignedToId: form.assignedToId || null,
           notes: form.notes || null,
         });
@@ -391,7 +393,7 @@ export function SiteVisitCalendar({ visits, onSchedule, onUpdateFeedback }: Prop
                     value={rescheduleAt}
                     onChange={(e) => setRescheduleAt(e.target.value)}
                   />
-                  <Button size="sm" variant="secondary" loading={saving} disabled={!rescheduleAt} onClick={() => void patchVisit({ scheduledAt: rescheduleAt }, "Rescheduled")}>
+                  <Button size="sm" variant="secondary" loading={saving} disabled={!rescheduleAt} onClick={() => void patchVisit({ scheduledAt: new Date(rescheduleAt).toISOString() }, "Rescheduled")}>
                     Save time
                   </Button>
                   <Button size="sm" variant="danger" loading={saving} onClick={() => void patchVisit({ status: "cancelled" }, "Visit cancelled")}>
