@@ -36,6 +36,12 @@ interface LeadRowListProps {
   onOpenLead: (lead: Lead) => void;
   /** Pick a target stage → hand off to the existing transition flow (comment modal). */
   onChangeStage: (lead: Lead, target: PipelineStage) => void;
+  /** Bulk-select mode: rows show a checkbox and their body toggles selection. */
+  selectionMode?: boolean;
+  /** The set of selected lead ids (selection mode only). */
+  selectedIds?: Set<string>;
+  /** Toggle a lead's selection (selection mode only). */
+  onToggleSelect?: (id: string) => void;
 }
 
 
@@ -55,6 +61,9 @@ export function LeadRowList({
   userRole,
   onOpenLead,
   onChangeStage,
+  selectionMode = false,
+  selectedIds,
+  onToggleSelect,
 }: LeadRowListProps) {
   // Which lead's stage picker is open (null = closed).
   const [stagePickerLead, setStagePickerLead] = useState<Lead | null>(null);
@@ -97,7 +106,10 @@ export function LeadRowList({
             stage={getStage(lead.industry, lead.stage_code)}
             overdue={isOverdue(lead.next_action_date)}
             onOpen={() => onOpenLead(lead)}
-            onStageTap={canManage ? () => setStagePickerLead(lead) : null}
+            onStageTap={canManage && !selectionMode ? () => setStagePickerLead(lead) : null}
+            selectionMode={selectionMode}
+            selected={selectedIds?.has(lead.id) ?? false}
+            onToggleSelect={() => onToggleSelect?.(lead.id)}
           />
         ))}
       </div>

@@ -1,4 +1,4 @@
-import { ChevronDown, Phone } from "lucide-react";
+import { Check, ChevronDown, Phone } from "lucide-react";
 
 import type { Lead, PipelineStage } from "../../types";
 import { telHref } from "../../utils/contactLinks";
@@ -23,6 +23,12 @@ interface LeadRowProps {
   onOpen: () => void;
   /** Tap the stage chip → open the stage picker. Null when the user can't move stages. */
   onStageTap: (() => void) | null;
+  /** Bulk-select mode: the row body toggles selection instead of opening. */
+  selectionMode?: boolean;
+  /** Whether this row is selected (selection mode only). */
+  selected?: boolean;
+  /** Toggle this row's selection (selection mode only). */
+  onToggleSelect?: () => void;
 }
 
 
@@ -31,8 +37,20 @@ interface LeadRowProps {
  * preview). One primary line (name) + a secondary line (full phone · #id), a
  * colour-coded stage chip on the right, and a one-tap call button. Details
  * live on the detail drawer — this row is for scanning and quick actions.
+ *
+ * In selection mode the row shows a leading checkbox and its body toggles
+ * selection; the stage chip becomes static and the call button is hidden.
  */
-export function LeadRow({ lead, stage, overdue, onOpen, onStageTap }: LeadRowProps) {
+export function LeadRow({
+  lead,
+  stage,
+  overdue,
+  onOpen,
+  onStageTap,
+  selectionMode = false,
+  selected = false,
+  onToggleSelect,
+}: LeadRowProps) {
   const name = lead.contact_name || lead.customer?.contact_name || lead.title || "Unnamed lead";
   const phone = lead.contact_phone || lead.contact_phone_alt || "";
   const tone = stage ? pipelineCategoryTone(stage.category) : "neutral";
@@ -40,8 +58,21 @@ export function LeadRow({ lead, stage, overdue, onOpen, onStageTap }: LeadRowPro
   const tel = telHref(phone);
 
   return (
-    <div className="lead-row">
-      <button type="button" className="lead-row__main" onClick={onOpen} aria-label={`Open lead ${name}`}>
+    <div className={`lead-row${selectionMode && selected ? " lead-row--selected" : ""}`}>
+      <button
+        type="button"
+        className="lead-row__main"
+        onClick={selectionMode ? onToggleSelect : onOpen}
+        aria-pressed={selectionMode ? selected : undefined}
+        aria-label={
+          selectionMode ? `${selected ? "Deselect" : "Select"} lead ${name}` : `Open lead ${name}`
+        }
+      >
+        {selectionMode && (
+          <span className={`lead-row__check${selected ? " is-checked" : ""}`} aria-hidden="true">
+            {selected && <Check size={13} />}
+          </span>
+        )}
         <span className={`lead-row__avatar${overdue ? " lead-row__avatar--overdue" : ""}`} aria-hidden="true">
           {initialsFor(name)}
         </span>
@@ -64,31 +95,40 @@ export function LeadRow({ lead, stage, overdue, onOpen, onStageTap }: LeadRowPro
           </span>
         </span>
       </button>
-      {onStageTap ? (
-        <button
-          type="button"
-          className={`lead-row__stage lead-row__stage--${tone}`}
-          onClick={onStageTap}
-          aria-label={`Change stage (currently ${stageLabel})`}
-        >
-          <span className="lead-row__stage-label">{stageLabel}</span>
-          <ChevronDown size={13} aria-hidden="true" />
-        </button>
-      ) : (
+
+      {selectionMode ? (
         <span className={`lead-row__stage lead-row__stage--${tone} lead-row__stage--static`}>
           <span className="lead-row__stage-label">{stageLabel}</span>
         </span>
-      )}
-      {tel && (
-        <a
-          className="lead-row__call"
-          href={tel}
-          onClick={(event) => event.stopPropagation()}
-          aria-label={`Call ${name}`}
-          title={`Call ${phone}`}
-        >
-          <Phone size={16} aria-hidden="true" />
-        </a>
+      ) : (
+        <>
+          {onStageTap ? (
+            <button
+              type="button"
+              className={`lead-row__stage lead-row__stage--${tone}`}
+              onClick={onStageTap}
+              aria-label={`Change stage (currently ${stageLabel})`}
+            >
+              <span className="lead-row__stage-label">{stageLabel}</span>
+              <ChevronDown size={13} aria-hidden="true" />
+            </button>
+          ) : (
+            <span className={`lead-row__stage lead-row__stage--${tone} lead-row__stage--static`}>
+              <span className="lead-row__stage-label">{stageLabel}</span>
+            </span>
+          )}
+          {tel && (
+            <a
+              className="lead-row__call"
+              href={tel}
+              onClick={(event) => event.stopPropagation()}
+              aria-label={`Call ${name}`}
+              title={`Call ${phone}`}
+            >
+              <Phone size={16} aria-hidden="true" />
+            </a>
+          )}
+        </>
       )}
     </div>
   );

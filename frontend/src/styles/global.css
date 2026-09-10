@@ -1862,6 +1862,60 @@ p {
 }
 .leads-fab:active { background: var(--color-primary-hover); }
 
+/* Bulk-select mode (phone) */
+.leads-toolbar__filter.is-active {
+  background: var(--color-primary-soft);
+  border-color: var(--color-primary);
+  color: var(--color-primary-hover);
+}
+.lead-row--selected { background: var(--color-primary-soft); }
+.lead-row__check {
+  flex: 0 0 auto;
+  width: 1.25rem;
+  height: 1.25rem;
+  border-radius: 6px;
+  border: 2px solid var(--color-border);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #1a1205;
+}
+.lead-row__check.is-checked {
+  background: var(--color-primary);
+  border-color: var(--color-primary);
+}
+
+.bulk-bar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: calc(64px + env(safe-area-inset-bottom));
+  z-index: 36;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  padding: 0.6rem 0.8rem;
+  background: var(--color-surface);
+  border-top: 1px solid var(--color-border);
+  box-shadow: 0 -6px 18px rgba(0, 0, 0, 0.12);
+}
+.bulk-bar__count { flex: 0 0 auto; font-weight: 800; font-size: 0.85rem; }
+.bulk-bar__actions { display: flex; gap: 0.5rem; flex: 1 1 100%; flex-wrap: wrap; }
+.bulk-bar__group { display: flex; gap: 0.35rem; align-items: center; flex: 1 1 auto; min-width: 0; }
+.bulk-bar__group .select { flex: 1 1 auto; min-width: 0; }
+.bulk-bar__clear {
+  flex: 0 0 auto;
+  background: none;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: 0.4rem 0.8rem;
+  font-weight: 700;
+  font-size: 0.85rem;
+  color: var(--color-text);
+  cursor: pointer;
+}
+
 /* Lead-detail contact card — full number + one-tap Call / WhatsApp / Email
    (used on phone and desktop). */
 .contact-actions {

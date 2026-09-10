@@ -1,4 +1,4 @@
-import { Download, LayoutGrid, List as ListIcon, Plus, RefreshCw, SlidersHorizontal, Upload, X } from "lucide-react";
+import { CheckSquare, Download, LayoutGrid, List as ListIcon, Plus, RefreshCw, SlidersHorizontal, Upload, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type DragEvent, type FormEvent } from "react";
 
 import {
@@ -146,6 +146,8 @@ export default function LeadsPage() {
   // One shared Filters panel for both phone and desktop (a centered dialog on
   // desktop, a bottom sheet on phone).
   const [filtersOpen, setFiltersOpen] = useState(false);
+  // Phone-only bulk-select mode (desktop uses the always-on table checkboxes).
+  const [selectMode, setSelectMode] = useState(false);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
   const [industryFilter, setIndustryFilter] = useState<LeadIndustry | "">(defaultIndustry);
@@ -954,6 +956,23 @@ export default function LeadsPage() {
               <span className="leads-toolbar__count">{activeFilterCount}</span>
             )}
           </button>
+          {/* Phone-only: enter bulk-select mode (desktop uses table checkboxes). */}
+          {isPhone && (canAssign || canManage) && (
+            <button
+              type="button"
+              className={`leads-toolbar__filter${selectMode ? " is-active" : ""}`}
+              onClick={() => {
+                setSelectMode((on) => {
+                  if (on) setSelectedIds(new Set()); // leaving select mode clears the picks
+                  return !on;
+                });
+              }}
+              aria-pressed={selectMode}
+            >
+              <CheckSquare size={16} />
+              <span>{selectMode ? "Done" : "Select"}</span>
+            </button>
+          )}
         </div>
 
         {/* Active-filter summary chips — each removable; mirrors the panel. */}
@@ -1022,6 +1041,9 @@ export default function LeadsPage() {
                 userRole={user?.role}
                 onOpenLead={(lead) => setDrawerLead(lead)}
                 onChangeStage={(lead, target) => openTransition(lead, target)}
+                selectionMode={selectMode}
+                selectedIds={selectedIds}
+                onToggleSelect={toggleSelect}
               />
             </div>
 
@@ -1035,6 +1057,58 @@ export default function LeadsPage() {
               onPageSizeChange={(size) => { setPageSize(size); setPage(1); }}
               showJumpToLast
             />
+
+            {/* Mobile bulk action bar — fixed above the bottom nav while selecting. */}
+            {selectMode && selectedIds.size > 0 && (
+              <div className="bulk-bar">
+                <div className="bulk-bar__count">{selectedIds.size} selected</div>
+                <div className="bulk-bar__actions">
+                  {canAssign && (
+                    <div className="bulk-bar__group">
+                      <select
+                        className="select"
+                        value={bulkOwner}
+                        onChange={(e) => setBulkOwner(e.target.value)}
+                        aria-label="Change owner to"
+                      >
+                        <option value="">Change owner to…</option>
+                        {assignableUsers.map((u) => (
+                          <option key={u.id} value={u.id}>{u.first_name} {u.last_name}</option>
+                        ))}
+                      </select>
+                      <Button size="sm" loading={bulkReassigning} disabled={!bulkOwner} onClick={() => void handleBulkReassign()}>
+                        Owner
+                      </Button>
+                    </div>
+                  )}
+                  {canManage && (
+                    <div className="bulk-bar__group">
+                      <select
+                        className="select"
+                        value={bulkStageCode}
+                        onChange={(e) => setBulkStageCode(e.target.value)}
+                        aria-label="Move to stage"
+                      >
+                        <option value="">Move to stage…</option>
+                        {bulkStageOptions.map((o) => (
+                          <option key={o.value} value={o.value}>{o.label}</option>
+                        ))}
+                      </select>
+                      <Button size="sm" disabled={!bulkStageCode} onClick={() => setBulkStageOpen(true)}>
+                        Stage
+                      </Button>
+                    </div>
+                  )}
+                </div>
+                <button
+                  type="button"
+                  className="bulk-bar__clear"
+                  onClick={() => { setSelectedIds(new Set()); setSelectMode(false); }}
+                >
+                  Done
+                </button>
+              </div>
+            )}
           </>
         ) : (
         <>
@@ -1260,7 +1334,7 @@ export default function LeadsPage() {
         </Modal>
       </div>
 
-      {canManage && isPhone && (
+      {canManage && isPhone && !selectMode && (
         <button type="button" className="leads-fab" onClick={openCreate} aria-label="New lead">
           <Plus size={22} />
         </button>
