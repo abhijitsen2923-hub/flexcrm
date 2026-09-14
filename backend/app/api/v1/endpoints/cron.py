@@ -13,6 +13,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, status
 from app.core.config import get_settings
 from app.database.session import db_manager
 from app.jobs.archive import dispatch_archival
+from app.jobs.callyzer_sync import dispatch_callyzer_sync
 from app.jobs.customer_health import dispatch_customer_health
 from app.jobs.followup_reminders import dispatch_followup_reminders
 from app.jobs.google_sheet_sync import dispatch_google_sheet_sync
@@ -88,6 +89,17 @@ async def trigger_google_sheet_sync(_: None = Depends(require_cron_secret)):
     dispatch switches org scope itself and commits per row."""
     async with db_manager.session_factory() as session:
         counts = await dispatch_google_sheet_sync(session)
+    return counts
+
+
+@router.post("/callyzer-sync")
+async def trigger_callyzer_sync(_: None = Depends(require_cron_secret)):
+    """Cross-org: poll every org with the `callyzer` module + an active connection,
+    fetching Callyzer callHistory and upserting synced call records (idempotent on
+    external_id). Fresh session; dispatch switches org scope itself and commits per
+    connection. Meant to run every ~20 min."""
+    async with db_manager.session_factory() as session:
+        counts = await dispatch_callyzer_sync(session)
     return counts
 
 

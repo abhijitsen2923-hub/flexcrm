@@ -16,6 +16,7 @@ MODULE_KEYS = (
     "meta_facebook", "meta_instagram",            # Integrations — Meta Lead Ads, per platform
     "portal_99acres",                             # Integrations — 99acres inbound leads (push)
     "sheet_leads",                                # Integrations — Google Sheet lead sync (pull)
+    "callyzer",                                   # Integrations — Callyzer call tracking (pull)
 )
 
 

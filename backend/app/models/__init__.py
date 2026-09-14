@@ -1,8 +1,10 @@
 from app.models.activity import Activity
+from app.models.callyzer_connection import CallyzerConnection
 from app.models.channel_partner import BrokeragePayout, ChannelPartner
 from app.models.customer import Customer
 from app.models.deal import Deal
 from app.models.delivery_log import DeliveryLog
+from app.models.external_call import ExternalCall
 from app.models.lead import Lead
 from app.models.lead_document import LeadDocument
 from app.models.lead_source_connection import LeadSourceConnection
@@ -25,10 +27,12 @@ from app.models.user_permission_grant import UserPermissionGrant
 __all__ = [
     "Activity",
     "BrokeragePayout",
+    "CallyzerConnection",
     "ChannelPartner",
     "Customer",
     "Deal",
     "DeliveryLog",
+    "ExternalCall",
     "Lead",
     "LeadDocument",
     "LeadSourceConnection",

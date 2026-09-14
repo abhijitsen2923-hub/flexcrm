@@ -5,6 +5,7 @@ from app.api.v1.endpoints import (
     admin,
     analytics,
     auth,
+    callyzer,
     channel_partners,
     cron,
     customer_lifecycle,
@@ -39,6 +40,8 @@ api_router.include_router(webhooks.router, prefix="/webhooks", tags=["Webhooks"]
 api_router.include_router(organizations.router, prefix="/organizations", tags=["Organizations"])
 api_router.include_router(integrations.router, prefix="/integrations", tags=["Integrations"])
 api_router.include_router(lead_sources.router, prefix="/integrations", tags=["Integrations"])
+api_router.include_router(callyzer.router, prefix="/integrations", tags=["Integrations"])
+api_router.include_router(callyzer.calls_router, prefix="/calls", tags=["Calls"])
 api_router.include_router(users.router, prefix="/users", tags=["Users"])
 api_router.include_router(customers.router, prefix="/customers", tags=["Customers"])
 # Customer lifecycle sub-routes (delivery / renewals / referrals) also live
