@@ -3,9 +3,12 @@ import { useEffect, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 
 import { Badge, Button, LoadingBlock, EmptyState, useToast } from "../../components";
+import { mergeModules } from "../../config/features";
+import { useOrgModules } from "../../context/OrgContext";
 import { usePipelines } from "../../context/PipelineContext";
 import { useAuth } from "../../hooks/useAuth";
 import { usePermissions } from "../../hooks/usePermissions";
+import { callsService, type ExternalCall } from "../../services/callyzer";
 import { leadsService } from "../../services/leads";
 import { siteVisitsService } from "../../services/site-visits";
 import type { Lead, LeadCallLog, PipelineStage, StageTransition } from "../../types";
@@ -70,6 +73,9 @@ export function LeadDrawer({ open, lead, onClose, onTransitionRequest, onLogged,
   const [rescheduleVisitId, setRescheduleVisitId] = useState<string | null>(null);
   const [rescheduleAt, setRescheduleAt] = useState("");
   const [visitBusy, setVisitBusy] = useState(false);
+  // Callyzer synced calls matched to this lead's number (only when the module is on).
+  const hasCallyzer = mergeModules(useOrgModules()).callyzer;
+  const [externalCalls, setExternalCalls] = useState<ExternalCall[]>([]);
   // "Did Not Pick" inline form — logs a DNP with a comment + a scheduled next call.
   const [dnpOpen, setDnpOpen] = useState(false);
   const [dnpComment, setDnpComment] = useState("");
@@ -129,6 +135,17 @@ export function LeadDrawer({ open, lead, onClose, onTransitionRequest, onLogged,
     void leadsService.calls(lead.id).then((rows) => { if (!cancelled) setCalls(rows); }).catch(() => {});
     return () => { cancelled = true; };
   }, [open, lead?.id, refreshKey]);
+
+  // Callyzer synced calls for this lead (module-gated so non-Callyzer orgs don't fetch).
+  useEffect(() => {
+    if (!open || !lead || !hasCallyzer) {
+      setExternalCalls([]);
+      return;
+    }
+    let cancelled = false;
+    void callsService.forLead(lead.id).then((rows) => { if (!cancelled) setExternalCalls(rows); }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [open, lead?.id, refreshKey, hasCallyzer]);
 
   // Site visits (real-estate only) — a lead can have many; list them all.
   useEffect(() => {
@@ -568,6 +585,8 @@ export function LeadDrawer({ open, lead, onClose, onTransitionRequest, onLogged,
                   </div>
                 )}
               </div>
+
+              <RecordedCalls calls={externalCalls} />
             </div>
           )}
 
@@ -647,6 +666,51 @@ function DetailRow({ label, value }: { label: string; value: ReactNode }) {
     <div className="detail-row">
       <span className="detail-row__label">{label}</span>
       <span className="detail-row__value">{value}</span>
+    </div>
+  );
+}
+
+
+function fmtCallDuration(seconds: number | null): string {
+  if (seconds == null) return "";
+  const m = Math.floor(seconds / 60);
+  const s = seconds % 60;
+  return `${m}m ${String(s).padStart(2, "0")}s`;
+}
+
+
+/** Callyzer synced calls matched to this lead, with a link out to the recording.
+ * Renders nothing when there are no matched calls (so non-Callyzer leads are clean). */
+function RecordedCalls({ calls }: { calls: ExternalCall[] }) {
+  if (calls.length === 0) return null;
+  return (
+    <div className="card" style={{ padding: "0.75rem 1rem" }}>
+      <div className="muted text-xs" style={{ textTransform: "uppercase", letterSpacing: ".04em", marginBottom: "0.5rem" }}>
+        Recorded calls · Callyzer
+      </div>
+      <div className="stack" style={{ gap: "0.5rem" }}>
+        {calls.map((c) => (
+          <div key={c.id} className="row row--between" style={{ alignItems: "center", gap: "0.6rem" }}>
+            <div style={{ minWidth: 0 }}>
+              <div className="text-sm" style={{ fontWeight: 600 }}>
+                {c.call_type ?? "Call"}{c.crm_status ? ` · ${c.crm_status}` : ""}
+              </div>
+              <div className="muted text-xs">
+                {c.emp_name ? `by ${c.emp_name}` : c.emp_number ? `by ${c.emp_number}` : "—"}
+                {c.call_at ? ` · ${formatDateTime(c.call_at)}` : ""}
+                {c.duration_seconds != null ? ` · ${fmtCallDuration(c.duration_seconds)}` : ""}
+              </div>
+            </div>
+            {c.recording_url ? (
+              <a className="link text-sm" href={c.recording_url} target="_blank" rel="noreferrer" style={{ flex: "none" }}>
+                ▶ Recording
+              </a>
+            ) : (
+              <span className="muted text-xs" style={{ flex: "none" }}>No recording</span>
+            )}
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

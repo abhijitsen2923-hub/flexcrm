@@ -4,6 +4,7 @@ import { useSearchParams } from "react-router-dom";
 import { Badge, Button, LoadingBlock, Modal, TextField, useToast } from "../../components";
 import { mergeModules } from "../../config/features";
 import { useOrgModules } from "../../context/OrgContext";
+import { callyzerService, type CallyzerConnection } from "../../services/callyzer";
 import {
   integrationsService,
   googleSheetsService,
@@ -54,6 +55,7 @@ export default function IntegrationsPage() {
   const showMeta = modules.meta_facebook || modules.meta_instagram;
   const show99acres = modules.portal_99acres;
   const showSheets = modules.sheet_leads;
+  const showCallyzer = modules.callyzer;
   // FB & IG share one connection; the poll ingests only platforms enabled for
   // this workspace (per-tenant admin toggles). Show which are active.
   const activePlatforms = [
@@ -95,6 +97,14 @@ export default function IntegrationsPage() {
   const [sheetBusy, setSheetBusy] = useState(false);
   const [sheetError, setSheetError] = useState<string | null>(null);
 
+  // Callyzer (call tracking) — one connection per tenant (encrypted API token).
+  const [callyzerConns, setCallyzerConns] = useState<CallyzerConnection[]>([]);
+  const [callyzerLoading, setCallyzerLoading] = useState(true);
+  const [callyzerToken, setCallyzerToken] = useState("");
+  const [callyzerLabel, setCallyzerLabel] = useState("");
+  const [callyzerBusy, setCallyzerBusy] = useState(false);
+  const [callyzerError, setCallyzerError] = useState<string | null>(null);
+
   async function refresh() {
     setLoading(true);
     try {
@@ -109,6 +119,7 @@ export default function IntegrationsPage() {
     void refresh();
     void refreshLeadSources();
     void refreshSheets();
+    void refreshCallyzer();
   }, []);
 
   // Handle the return leg of the OAuth round-trip: Meta's callback redirects the browser to
@@ -333,6 +344,45 @@ export default function IntegrationsPage() {
       await googleSheetsService.disconnect(conn.id);
       toast.success("Disconnected", conn.label ?? conn.external_account_id ?? "Google Sheet");
       await refreshSheets();
+    } catch (err) {
+      toast.error("Disconnect failed", extractErrorMessage(err));
+    }
+  }
+
+  async function refreshCallyzer() {
+    setCallyzerLoading(true);
+    try {
+      setCallyzerConns(await callyzerService.list());
+    } catch {
+      /* leave the list as-is */
+    } finally {
+      setCallyzerLoading(false);
+    }
+  }
+
+  async function connectCallyzer() {
+    const token = callyzerToken.trim();
+    if (!token) return;
+    setCallyzerBusy(true);
+    setCallyzerError(null);
+    try {
+      await callyzerService.connect(token, callyzerLabel.trim() || null);
+      setCallyzerToken("");
+      setCallyzerLabel("");
+      toast.success("Connected", "Callyzer connected — calls will sync automatically.");
+      await refreshCallyzer();
+    } catch (err) {
+      setCallyzerError(extractErrorMessage(err));
+    } finally {
+      setCallyzerBusy(false);
+    }
+  }
+
+  async function disconnectCallyzer(conn: CallyzerConnection) {
+    try {
+      await callyzerService.disconnect(conn.id);
+      toast.success("Disconnected", conn.label ?? "Callyzer");
+      await refreshCallyzer();
     } catch (err) {
       toast.error("Disconnect failed", extractErrorMessage(err));
     }
@@ -586,6 +636,75 @@ export default function IntegrationsPage() {
               onClick={() => void connectSheet()}
             >
               Connect sheet
+            </Button>
+          </div>
+        </div>
+      </div>
+      )}
+
+      {showCallyzer && (
+      <div className="card" style={{ padding: "1rem 1.25rem" }}>
+        <div className="row row--between" style={{ alignItems: "center", marginBottom: "0.35rem" }}>
+          <strong>Callyzer — Call Tracking</strong>
+          <Button size="sm" variant="ghost" onClick={() => void refreshCallyzer()}>Refresh</Button>
+        </div>
+        <p className="muted text-sm">
+          Sync your team's call logs + recordings from Callyzer. Generate an API access key in Callyzer
+          (<strong>Connectors → API &amp; Webhook → API Config</strong>) and paste it below. Calls are
+          matched to leads by phone number and shown on the lead and the <strong>Calls</strong> page.
+          Recordings link out to Callyzer — we never store the audio.
+        </p>
+        {callyzerLoading ? (
+          <LoadingBlock />
+        ) : callyzerConns.length > 0 ? (
+          <div className="stack" style={{ gap: "0.5rem", marginTop: "0.5rem" }}>
+            {callyzerConns.map((c) => (
+              <div key={c.id} className="row row--between" style={{ alignItems: "center", padding: "0.5rem 0", borderTop: "1px solid var(--color-border)" }}>
+                <div className="stack" style={{ gap: "0.15rem" }}>
+                  <strong>{c.label ?? "Callyzer account"}</strong>
+                  <span className="text-xs muted">
+                    {c.last_synced_at ? `Last synced ${formatDateTime(c.last_synced_at)}` : "Not synced yet"}
+                    {c.last_call_at ? ` · Last call ${formatDateTime(c.last_call_at)}` : ""}
+                    {c.status_detail ? ` · ${c.status_detail}` : ""}
+                  </span>
+                </div>
+                <div className="row" style={{ gap: "0.5rem", alignItems: "center" }}>
+                  <Badge tone={STATUS_TONE[c.status] ?? "neutral"}>{STATUS_LABEL[c.status] ?? c.status}</Badge>
+                  <Button size="sm" variant="ghost" onClick={() => void disconnectCallyzer(c)}>Disconnect</Button>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="muted text-sm" style={{ marginTop: "0.35rem" }}>Callyzer not connected yet.</p>
+        )}
+        <div className="stack" style={{ gap: "0.5rem", marginTop: "0.75rem" }}>
+          <TextField
+            id="callyzer-token"
+            label="Callyzer API access key"
+            type="password"
+            value={callyzerToken}
+            onChange={(e) => setCallyzerToken(e.target.value)}
+            placeholder="Paste your Callyzer API token"
+            hint="Stored encrypted; never shown again."
+          />
+          <TextField
+            id="callyzer-label"
+            label="Label (optional)"
+            value={callyzerLabel}
+            onChange={(e) => setCallyzerLabel(e.target.value)}
+            placeholder="e.g. Sales team – Vadodara"
+          />
+          {callyzerError && (
+            <p className="text-sm" style={{ color: "var(--color-danger)" }}>{callyzerError}</p>
+          )}
+          <div className="row">
+            <Button
+              loading={callyzerBusy}
+              disabled={callyzerBusy || !callyzerToken.trim()}
+              onClick={() => void connectCallyzer()}
+            >
+              Connect Callyzer
             </Button>
           </div>
         </div>

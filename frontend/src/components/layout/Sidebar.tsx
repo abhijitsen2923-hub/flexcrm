@@ -15,6 +15,7 @@ import {
   FileText,
   Handshake,
   Landmark,
+  PhoneCall,
   PieChart,
   KeyRound,
   Layers,
@@ -72,6 +73,7 @@ const NAV: ReadonlyArray<NavEntry> = [
   // Everyday core CRM — always flat at the top.
   { type: "item", item: { to: "/", label: "Dashboard", icon: LayoutDashboard, requires: ["DASHBOARD_VIEW"] } },
   { type: "item", item: { to: "/leads", label: "Leads", icon: Sparkles, requires: ["LEAD_VIEW"] } },
+  { type: "item", item: { to: "/calls", label: "Calls", icon: PhoneCall, requires: ["LEAD_VIEW"], moduleKey: "callyzer" } },
   { type: "item", item: { to: "/customers", label: "Customers", icon: UserRound, requires: ["CUSTOMER_VIEW"] } },
   { type: "item", item: { to: "/deals", label: "Deals", icon: Briefcase, requires: ["DEAL_VIEW"], moduleKey: "deals" } },
   { type: "item", item: { to: "/tasks", label: "Tasks", icon: ClipboardList, requires: ["TASK_VIEW"], moduleKey: "tasks" } },
@@ -133,7 +135,7 @@ const NAV: ReadonlyArray<NavEntry> = [
   },
 
   // Cross-cutting — flat at the bottom.
-  { type: "item", item: { to: "/integrations", label: "Integrations", icon: Plug, requires: ["ORG_MANAGE"], moduleKeys: ["meta_facebook", "meta_instagram", "portal_99acres", "sheet_leads"] } },
+  { type: "item", item: { to: "/integrations", label: "Integrations", icon: Plug, requires: ["ORG_MANAGE"], moduleKeys: ["meta_facebook", "meta_instagram", "portal_99acres", "sheet_leads", "callyzer"] } },
   { type: "item", item: { to: "/analytics", label: "Analytics", icon: BarChart3, requires: ["ANALYTICS_VIEW"] } },
   { type: "item", item: { to: "/users", label: "Users", icon: Users, requires: ["USER_VIEW"] } }
 ];

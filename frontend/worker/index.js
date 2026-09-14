@@ -29,6 +29,11 @@ const DEFAULT_META_TOKEN_REFRESH_URL = `${BACKEND}/api/v1/cron/meta-token-refres
 const DEFAULT_LEAD_SOURCE_RECONCILE_URL = `${BACKEND}/api/v1/cron/lead-source-reconcile`;
 // Google Sheet lead sync (pull): read tenant-connected sheets and ingest new rows as leads.
 const DEFAULT_GOOGLE_SHEET_SYNC_URL = `${BACKEND}/api/v1/cron/google-sheet-sync`;
+// Callyzer call-tracking sync (pull): fetch tenant call history and upsert synced call records.
+// Piggybacks the existing twice-daily crons (a dedicated fast cron would wake Neon's free tier
+// too often — see the note above); move to a ~20-min Cloud Scheduler job on a paid plan for
+// near-real-time, or add the Callyzer webhook.
+const DEFAULT_CALLYZER_SYNC_URL = `${BACKEND}/api/v1/cron/callyzer-sync`;
 // Nightly maintenance. These three were CLI-only and therefore never ran in
 // production: nothing scheduled them, so retention purging, customer-health
 // re-evaluation and HR scorecards were all silently dormant.
@@ -65,6 +70,7 @@ export default {
     ctx.waitUntil(post(env.META_SYNC_URL || DEFAULT_META_SYNC_URL));
     ctx.waitUntil(post(env.LEAD_SOURCE_RECONCILE_URL || DEFAULT_LEAD_SOURCE_RECONCILE_URL));
     ctx.waitUntil(post(env.GOOGLE_SHEET_SYNC_URL || DEFAULT_GOOGLE_SHEET_SYNC_URL));
+    ctx.waitUntil(post(env.CALLYZER_SYNC_URL || DEFAULT_CALLYZER_SYNC_URL));
 
     // Once-daily work rides only the morning cron. (event.cron is undefined when
     // triggered manually via the dashboard "Trigger" button — treat that as daily.)
