@@ -229,20 +229,20 @@ class CallyzerConnectionService(ServiceBase):
             return stats
 
         now = datetime.now(UTC)
-        start = (
+        # Poll by SYNC time (when Callyzer synced the record), so late-uploaded calls
+        # are still caught. Overlap a day each run; seed a week back on first sync.
+        synced_from = (
             (conn.last_synced_at - timedelta(days=_OVERLAP_DAYS))
             if conn.last_synced_at
             else now - timedelta(days=_FIRST_SYNC_DAYS)
         )
-        start_date = start.strftime("%Y-%m-%d")
-        end_date = now.strftime("%Y-%m-%d")
 
         user_map = await self._user_phone_map(organization_id)
         latest_call: datetime | None = conn.last_call_at
 
         client = CallyzerClient(token)
         try:
-            async for rec in client.iter_call_history(start_date=start_date, end_date=end_date):
+            async for rec in client.iter_call_history(synced_from=synced_from, synced_to=now):
                 mapped = map_call_record(rec)
                 if not mapped["external_id"]:
                     continue

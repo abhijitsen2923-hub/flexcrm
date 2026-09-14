@@ -1,29 +1,39 @@
 """Thin Callyzer call-tracking API client (bring-your-own per-tenant token).
 
-Wraps httpx to call Callyzer's callHistory endpoint with a Bearer token. Surfaces
-errors as `CallyzerError`, flagging `is_auth_error` (401/403 → token revoked/expired)
-so the caller can flip the connection to `needs_reauth` and stop polling that tenant.
-Respects Callyzer's documented rate limit (~1 request / 2s) with a pause between
-pages and a bounded retry on HTTP 429. No global client exists in the app, so — like
-services/meta_graph.py — each call constructs its own short-lived AsyncClient. The
-token is never logged.
+Confirmed live against the Callyzer API (v2.2 prod / v2.1 sandbox):
+  POST https://api1.callyzer.co/api/v2.2/call-log/history        (production)
+  POST https://sandbox.api.callyzer.co/api/v2.1/call-log/history (free sandbox, sandbox=True)
+  Authorization: Bearer <token>
+  body: { synced_from, synced_to (epoch seconds, UTC; < 180-day window), page_no, page_size }
+  → { "result": [ ...call records... ], "message": "Success",
+      "total_records": N, "page_no": X, "page_size": Y }
+
+Prod host/version override via CALLYZER_BASE_URL / CALLYZER_API_VERSION env. Errors
+surface as `CallyzerError` (`is_auth_error` on 401/403 → connection needs re-auth).
+Callyzer rate-limits to ~1 request / 2 seconds (HTTP 429) — we pause between pages and
+retry a 429 with backoff. Each call uses its own short-lived AsyncClient; token never logged.
 """
 from __future__ import annotations
 
 import asyncio
+import os
 from collections.abc import AsyncIterator
+from datetime import UTC, datetime, timedelta
 
 import httpx
 
-_BASE_URL = "https://api1.callyzer.co"
-_CALL_HISTORY_PATH = "/admin/api/call/callHistory"
-# Callyzer documents ~1 request / 2s; pause a hair over 2s between pages.
-_RATE_LIMIT_SLEEP = 2.1
+# Production is v2.2 on api1.callyzer.co; the free Sandbox is v2.1 on
+# sandbox.api.callyzer.co. Both accept the same call-log/history request shape.
+# Override the prod host/version via env if Callyzer changes them.
+_PROD_BASE = os.environ.get("CALLYZER_BASE_URL", "https://api1.callyzer.co").rstrip("/")
+_PROD_VERSION = os.environ.get("CALLYZER_API_VERSION", "v2.2")
+_SANDBOX_BASE = "https://sandbox.api.callyzer.co"
+_SANDBOX_VERSION = "v2.1"
+_PATH = "call-log/history"
+# Callyzer documents ~1 request / 2 seconds; pause a hair over 2s between pages.
+_RATE_LIMIT_SLEEP = 2.2
 _MAX_429_RETRIES = 3
 _PAGE_SIZE = 100
-# Common envelope keys Callyzer might wrap the record list in (docs are a JS SPA the
-# fetcher couldn't read, so we accept the documented shape or a bare list).
-_LIST_KEYS = ("data", "result", "results", "callHistory", "call_history", "logs", "records")
 
 
 class CallyzerError(RuntimeError):
@@ -38,77 +48,76 @@ class CallyzerError(RuntimeError):
 
 
 class CallyzerClient:
-    def __init__(self, token: str) -> None:
+    def __init__(self, token: str, *, sandbox: bool = False) -> None:
         self._token = token or ""
+        if sandbox:
+            self._base, self._version = _SANDBOX_BASE, _SANDBOX_VERSION
+        else:
+            self._base, self._version = _PROD_BASE, _PROD_VERSION
+
+    @property
+    def _url(self) -> str:
+        return f"{self._base}/api/{self._version}/{_PATH}"
 
     @property
     def _headers(self) -> dict[str, str]:
         return {"Authorization": f"Bearer {self._token}", "Content-Type": "application/json"}
 
-    @staticmethod
-    def _extract_records(data: object) -> list[dict]:
-        """Pull the call-record list out of whatever envelope Callyzer returns."""
-        if isinstance(data, list):
-            return [r for r in data if isinstance(r, dict)]
-        if isinstance(data, dict):
-            for key in _LIST_KEYS:
-                val = data.get(key)
-                if isinstance(val, list):
-                    return [r for r in val if isinstance(r, dict)]
-        return []
-
-    async def _post(self, body: dict) -> object:
+    async def _post(self, body: dict) -> dict:
         attempt = 0
         while True:
             try:
                 async with httpx.AsyncClient(timeout=30.0) as client:
-                    resp = await client.post(
-                        f"{_BASE_URL}{_CALL_HISTORY_PATH}", json=body, headers=self._headers
-                    )
+                    resp = await client.post(self._url, json=body, headers=self._headers)
             except httpx.HTTPError as exc:  # network/timeout — transient
                 raise CallyzerError(f"Callyzer request failed: {exc}") from exc
             if resp.status_code == 429 and attempt < _MAX_429_RETRIES:
                 attempt += 1
                 await asyncio.sleep(_RATE_LIMIT_SLEEP * (attempt + 1))
                 continue
-            if resp.status_code >= 400:
-                raise CallyzerError(
-                    f"Callyzer API error (HTTP {resp.status_code}): {resp.text[:200]}",
-                    http_status=resp.status_code,
-                )
+            data: object = None
             try:
-                return resp.json()
-            except ValueError as exc:
+                data = resp.json()
+            except ValueError:
+                data = None
+            if resp.status_code >= 400:
+                msg = data.get("message") if isinstance(data, dict) else None
                 raise CallyzerError(
-                    f"Non-JSON Callyzer response (HTTP {resp.status_code}).",
-                    http_status=resp.status_code,
-                ) from exc
+                    msg or f"Callyzer API error (HTTP {resp.status_code}).", http_status=resp.status_code
+                )
+            return data if isinstance(data, dict) else {}
 
     async def probe(self) -> None:
-        """Validation probe for the connect wizard — a tiny 1-record call-history request.
-        Succeeds (even with 0 records) when the token is valid; raises CallyzerError with
-        is_auth_error on a bad token."""
-        await self._post({"recordFrom": "0", "pageSize": "1"})
+        """Validate the token with a tiny recent-window request (0 records is still a
+        success). Raises CallyzerError (is_auth_error) on a bad token."""
+        now = datetime.now(UTC)
+        await self._post(
+            {
+                "synced_from": int((now - timedelta(days=1)).timestamp()),
+                "synced_to": int(now.timestamp()),
+                "page_no": 1,
+                "page_size": 1,
+            }
+        )
 
     async def iter_call_history(
-        self, *, start_date: str, end_date: str
+        self, *, synced_from: datetime, synced_to: datetime
     ) -> AsyncIterator[dict]:
-        """Yield every call record in [start_date, end_date] (YYYY-MM-DD), paginating via
-        recordFrom/pageSize and pausing between pages to honour the rate limit."""
-        offset = 0
+        """Yield every call record whose sync time is in [synced_from, synced_to],
+        paging via page_no/page_size and pausing between pages for the rate limit."""
+        sf, st = int(synced_from.timestamp()), int(synced_to.timestamp())
+        page = 1
         while True:
             data = await self._post(
-                {
-                    "callStartDate": start_date,
-                    "callEndDate": end_date,
-                    "recordFrom": str(offset),
-                    "pageSize": str(_PAGE_SIZE),
-                }
+                {"synced_from": sf, "synced_to": st, "page_no": page, "page_size": _PAGE_SIZE}
             )
-            records = self._extract_records(data)
+            records = data.get("result")
+            records = records if isinstance(records, list) else []
             for rec in records:
-                yield rec
-            if len(records) < _PAGE_SIZE:
+                if isinstance(rec, dict):
+                    yield rec
+            total = data.get("total_records") or 0
+            if not records or page * _PAGE_SIZE >= int(total):
                 break
-            offset += _PAGE_SIZE
+            page += 1
             await asyncio.sleep(_RATE_LIMIT_SLEEP)
