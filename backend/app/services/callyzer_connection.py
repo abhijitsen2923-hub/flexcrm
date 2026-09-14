@@ -9,7 +9,7 @@ schema (both tables are tenant-scoped). The token is never returned.
 from __future__ import annotations
 
 import re
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, timedelta, timezone
 from uuid import UUID
 
 from sqlalchemy import select
@@ -33,6 +33,11 @@ _PROVIDER = "callyzer"
 _FIRST_SYNC_DAYS = 7
 # Re-fetch a day of overlap each run so a boundary call isn't missed.
 _OVERLAP_DAYS = 1
+# Callyzer returns call_date/call_time (and reminder_date/time) in the ACCOUNT's local
+# timezone, NOT UTC — the sandbox stamps records "... IST" and ignores a Time-Zone header.
+# FlexCRM is an India-only product (see frontend formatDateTime), so treat these wall-clock
+# strings as IST (a fixed +5:30, no DST) and let the timestamptz column store the true instant.
+_CALLYZER_TZ = timezone(timedelta(hours=5, minutes=30))
 
 
 def normalize_phone_key(number: object) -> str | None:
@@ -58,14 +63,15 @@ def _first(rec: dict, *keys: str) -> object:
 
 
 def _parse_dt(value: object) -> datetime | None:
-    """Parse Callyzer date/time strings into an aware datetime (assume UTC when no
-    tz — Callyzer omits one). Accepts 'YYYY-MM-DD HH:MM:SS', ISO, or a date only."""
+    """Parse a Callyzer date/time string into an aware datetime. Callyzer omits the tz
+    but the values are the account's LOCAL wall-clock (IST) — tag them _CALLYZER_TZ so the
+    stored instant is correct. Accepts 'YYYY-MM-DD HH:MM:SS', ISO, or a date only."""
     if not value:
         return None
     s = str(value).strip().replace("/", "-")
     for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M", "%Y-%m-%d"):
         try:
-            return datetime.strptime(s, fmt).replace(tzinfo=UTC)
+            return datetime.strptime(s, fmt).replace(tzinfo=_CALLYZER_TZ)
         except ValueError:
             continue
     return None
