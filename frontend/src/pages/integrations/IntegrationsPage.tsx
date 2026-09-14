@@ -654,6 +654,10 @@ export default function IntegrationsPage() {
           matched to leads by phone number and shown on the lead and the <strong>Calls</strong> page.
           Recordings link out to Callyzer — we never store the audio.
         </p>
+        <p className="text-xs muted" style={{ marginTop: "0.35rem" }}>
+          Requires Callyzer's <strong>API &amp; Webhook add-on</strong> (₹150/employee/month, billed on your Callyzer
+          account) for live call data. The free Sandbox key works for testing.
+        </p>
         {callyzerLoading ? (
           <LoadingBlock />
         ) : callyzerConns.length > 0 ? (
