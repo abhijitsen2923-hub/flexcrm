@@ -167,6 +167,12 @@ p {
   display: flex;
   flex-direction: column;
   gap: var(--space-6);
+  /* App-wide guard: contain any page's stray horizontal overflow so it can never
+     widen the page and trigger a pinch/zoom-out on phones. `clip` (not `hidden`)
+     doesn't create a scroll container, so sticky headers and vertical dropdowns are
+     unaffected, and intentional horizontal scrollers (kanban, wide tables) keep
+     their own inner overflow-x: auto. */
+  overflow-x: clip;
 }
 
 
@@ -1214,6 +1220,9 @@ p {
   display: flex;
   flex-direction: column;
   box-shadow: var(--shadow-lg);
+  /* Never let inner content (wide tab strip, long values) spill to the page and
+     trigger a horizontal pan / zoom-out on phones. */
+  overflow-x: hidden;
 }
 .drawer__header {
   padding: 1.25rem 1.5rem;
@@ -1227,7 +1236,13 @@ p {
   display: flex;
   border-bottom: 1px solid var(--color-border);
   padding: 0 1rem;
+  /* Many tabs (esp. real-estate) exceed a phone's width — scroll them WITHIN the
+     strip instead of widening the drawer/page. */
+  overflow-x: auto;
+  flex-wrap: nowrap;
+  scrollbar-width: none; /* Firefox */
 }
+.drawer__tabs::-webkit-scrollbar { display: none; } /* Chrome/Safari */
 .drawer__body {
   padding: 1.25rem 1.5rem;
   overflow-y: auto;
@@ -1248,6 +1263,9 @@ p {
   color: var(--color-text-muted);
   cursor: pointer;
   border-bottom: 2px solid transparent;
+  /* Keep each tab on one line and its own width so the strip scrolls cleanly. */
+  white-space: nowrap;
+  flex: 0 0 auto;
 }
 .tab--active {
   color: var(--color-primary);

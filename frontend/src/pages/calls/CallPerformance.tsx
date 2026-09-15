@@ -201,6 +201,7 @@ export default function CallPerformance() {
     {
       key: "actions",
       header: "",
+      label: "Action", // stacked-card row label on phones (header is blank on desktop)
       align: "right",
       render: (r) =>
         r.unmatched ? (
