@@ -6,7 +6,7 @@ Two routers:
   Calls page and the per-lead call list for the lead drawer.
 Both operate in the caller's tenant schema.
 """
-from datetime import datetime
+from datetime import UTC, datetime
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query, status
@@ -14,18 +14,25 @@ from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import pagination_params, require_permissions
-from app.core.permissions import PermissionCode
+from app.core.permissions import ASSIGNED_ONLY_LEAD_ROLES, PermissionCode
+from app.core.tenancy import current_org
 from app.database.session import get_db_session
 from app.models.external_call import ExternalCall
 from app.models.lead import Lead
+from app.models.user import User
 from app.schemas.callyzer import (
+    CallAgentAssignRequest,
+    CallAgentMappingRead,
     CallLeadMini,
+    CallStatsResponse,
+    CallTrendResponse,
     CallyzerConnectionRead,
     CallyzerConnectRequest,
     ExternalCallRead,
 )
 from app.schemas.common import PaginatedResponse, PaginationParams, build_page_meta
 from app.services.callyzer_connection import CallyzerConnectionService, normalize_phone_key
+from app.services.external_call_stats import ExternalCallStatsService
 from app.services.lead_documents import get_lead_or_404
 
 router = APIRouter()
@@ -150,6 +157,99 @@ async def list_calls(
             read.lead = lead_by_key.get(r.client_number_key)
         items.append(read)
     return PaginatedResponse[ExternalCallRead](items=items, pagination=build_page_meta(total, pagination))
+
+
+@calls_router.get("/stats", response_model=CallStatsResponse)
+async def call_stats(
+    date_from: datetime | None = Query(default=None),
+    date_to: datetime | None = Query(default=None),
+    current_user=Depends(require_permissions(PermissionCode.LEAD_VIEW)),
+    session: AsyncSession = Depends(get_db_session),
+):
+    """Per-employee call performance over a date range (default: the current calendar
+    month). Reps (ASSIGNED_ONLY_LEAD_ROLES) see only their own row; managers/owner see
+    the whole team — the same scoping the dashboard uses."""
+    now = datetime.now(UTC)
+    date_to = date_to or now
+    date_from = date_from or datetime(now.year, now.month, 1, tzinfo=UTC)
+    owner_user_id = current_user.id if current_user.role in ASSIGNED_ONLY_LEAD_ROLES else None
+    return await ExternalCallStatsService(session).employee_stats(
+        date_from=date_from, date_to=date_to, owner_user_id=owner_user_id
+    )
+
+
+@calls_router.get("/stats/trend", response_model=CallTrendResponse)
+async def call_stats_trend(
+    user_id: UUID = Query(...),
+    date_from: datetime | None = Query(default=None),
+    date_to: datetime | None = Query(default=None),
+    current_user=Depends(require_permissions(PermissionCode.LEAD_VIEW)),
+    session: AsyncSession = Depends(get_db_session),
+):
+    """Per-day call counts for one employee (the Performance drill-down). Reps may only
+    view their own trend; managers/owner may view any user's."""
+    now = datetime.now(UTC)
+    date_to = date_to or now
+    date_from = date_from or datetime(now.year, now.month, 1, tzinfo=UTC)
+    if current_user.role in ASSIGNED_ONLY_LEAD_ROLES:
+        user_id = current_user.id
+    return await ExternalCallStatsService(session).daily_trend(
+        user_id=user_id, date_from=date_from, date_to=date_to
+    )
+
+
+# --- Caller → user mapping (fix unmatched attribution; USER_VIEW = managers) ---
+
+@calls_router.get("/agents", response_model=list[CallAgentMappingRead])
+async def list_call_agents(
+    current_user=Depends(require_permissions(PermissionCode.USER_VIEW)),
+    session: AsyncSession = Depends(get_db_session),
+):
+    rows = await CallyzerConnectionService(session).list_agent_mappings()
+    ids = [m.user_id for m in rows]
+    names: dict[UUID, str] = {}
+    if ids:
+        org_id = current_org(session)
+        urows = (
+            await session.execute(
+                select(User.id, User.first_name, User.last_name).where(
+                    User.organization_id == org_id, User.id.in_(ids)
+                )
+            )
+        ).all()
+        names = {uid: f"{(fn or '').strip()} {(ln or '').strip()}".strip() for uid, fn, ln in urows}
+    out: list[CallAgentMappingRead] = []
+    for m in rows:
+        read = CallAgentMappingRead.model_validate(m)
+        read.user_name = names.get(m.user_id)
+        out.append(read)
+    return out
+
+
+@calls_router.post("/agents", response_model=CallAgentMappingRead, status_code=status.HTTP_201_CREATED)
+async def assign_call_agent(
+    payload: CallAgentAssignRequest,
+    current_user=Depends(require_permissions(PermissionCode.USER_VIEW)),
+    session: AsyncSession = Depends(get_db_session),
+):
+    """Pin a device number to a FlexCRM user; re-attributes that number's past calls too."""
+    mapping = await CallyzerConnectionService(session).assign_agent(
+        emp_number=payload.emp_number,
+        emp_name=payload.emp_name,
+        user_id=payload.user_id,
+        actor_id=current_user.id,
+    )
+    return CallAgentMappingRead.model_validate(mapping)
+
+
+@calls_router.delete("/agents/{emp_key}")
+async def clear_call_agent(
+    emp_key: str,
+    current_user=Depends(require_permissions(PermissionCode.USER_VIEW)),
+    session: AsyncSession = Depends(get_db_session),
+):
+    await CallyzerConnectionService(session).clear_agent(emp_key)
+    return {"status": "cleared"}
 
 
 @calls_router.get("/lead/{lead_id}", response_model=list[ExternalCallRead])

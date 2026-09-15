@@ -49,6 +49,71 @@ export interface CallsQuery {
   page_size?: number;
 }
 
+/** Per-employee call performance (Calls → Performance tab). */
+export interface EmployeeCallStats {
+  user_id: string | null;
+  name: string;
+  emp_number: string | null;
+  unmatched: boolean;
+  total: number;
+  outgoing: number;
+  incoming: number;
+  missed: number;
+  rejected: number;
+  connected: number;
+  connect_rate: number; // 0..1
+  total_talk_seconds: number;
+  avg_talk_seconds: number;
+  unique_clients: number;
+  last_call_at: string | null;
+}
+
+export interface CallStatsTotals {
+  callers: number;
+  total: number;
+  connected: number;
+  missed: number;
+  total_talk_seconds: number;
+  unique_clients: number;
+}
+
+export interface CallStatsResponse {
+  date_from: string;
+  date_to: string;
+  totals: CallStatsTotals;
+  rows: EmployeeCallStats[];
+}
+
+export interface CallStatsQuery {
+  date_from?: string;
+  date_to?: string;
+}
+
+/** A manual caller → FlexCRM-user mapping (fixes unmatched attribution). */
+export interface CallAgentMapping {
+  id: string;
+  emp_key: string;
+  emp_number: string | null;
+  emp_name: string | null;
+  user_id: string;
+  user_name: string | null;
+  created_at: string;
+}
+
+export interface CallTrendPoint {
+  date: string; // YYYY-MM-DD (IST day)
+  calls: number;
+  connected: number;
+  missed: number;
+}
+
+export interface CallTrendResponse {
+  user_id: string;
+  date_from: string;
+  date_to: string;
+  points: CallTrendPoint[];
+}
+
 
 /** Tenant-facing Callyzer connection management (Integrations page). */
 export const callyzerService = {
@@ -78,5 +143,26 @@ export const callsService = {
   async forLead(leadId: string): Promise<ExternalCall[]> {
     const { data } = await apiClient.get<ExternalCall[]>(`/calls/lead/${leadId}`);
     return data;
+  },
+  async stats(params: CallStatsQuery = {}): Promise<CallStatsResponse> {
+    const { data } = await apiClient.get<CallStatsResponse>("/calls/stats", { params });
+    return data;
+  },
+  async trend(userId: string, params: CallStatsQuery = {}): Promise<CallTrendResponse> {
+    const { data } = await apiClient.get<CallTrendResponse>("/calls/stats/trend", {
+      params: { user_id: userId, ...params },
+    });
+    return data;
+  },
+  async agents(): Promise<CallAgentMapping[]> {
+    const { data } = await apiClient.get<CallAgentMapping[]>("/calls/agents");
+    return data;
+  },
+  async assignAgent(payload: { emp_number: string; emp_name?: string | null; user_id: string }): Promise<CallAgentMapping> {
+    const { data } = await apiClient.post<CallAgentMapping>("/calls/agents", payload);
+    return data;
+  },
+  async clearAgent(empKey: string): Promise<void> {
+    await apiClient.delete(`/calls/agents/${empKey}`);
   },
 };

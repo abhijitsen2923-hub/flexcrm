@@ -68,6 +68,12 @@ export default function HRPage() {
     { key: "revenue", header: "Revenue", align: "right", render: (row) => formatCurrency(row.revenue) },
     { key: "collections", header: "Collections", align: "right", render: (row) => formatCurrency(row.collections) },
     { key: "conv", header: "Conv. rate", align: "right", render: (row) => `${row.conversion_rate}%` },
+    {
+      key: "calls",
+      header: "Call score",
+      align: "right",
+      render: (row) => (row.call_activity != null ? Math.round(Number(row.call_activity)) : "—"),
+    },
     { key: "score", header: "Score", align: "right", render: (row) => <strong>{row.score}</strong> },
     { key: "grade", header: "Grade", render: (row) => <Badge tone={gradeTone(row.grade)}>{row.grade}</Badge> },
     {

@@ -683,17 +683,26 @@ function fmtCallDuration(seconds: number | null): string {
  * Renders nothing when there are no matched calls (so non-Callyzer leads are clean). */
 function RecordedCalls({ calls }: { calls: ExternalCall[] }) {
   if (calls.length === 0) return null;
+  // calls arrive newest-first (call_at desc, nulls last) — the first with a time is the latest.
+  const lastAt = calls.find((c) => c.call_at)?.call_at ?? null;
   return (
     <div className="card" style={{ padding: "0.75rem 1rem" }}>
-      <div className="muted text-xs" style={{ textTransform: "uppercase", letterSpacing: ".04em", marginBottom: "0.5rem" }}>
+      <div className="muted text-xs" style={{ textTransform: "uppercase", letterSpacing: ".04em", marginBottom: "0.25rem" }}>
         Recorded calls · Callyzer
+      </div>
+      <div className="text-sm" style={{ marginBottom: "0.5rem" }}>
+        {lastAt ? <>Last call <strong>{formatDateTime(lastAt)}</strong> · </> : null}
+        {calls.length} {calls.length === 1 ? "call" : "calls"}
       </div>
       <div className="stack" style={{ gap: "0.5rem" }}>
         {calls.map((c) => (
           <div key={c.id} className="row row--between" style={{ alignItems: "center", gap: "0.6rem" }}>
             <div style={{ minWidth: 0 }}>
               <div className="text-sm" style={{ fontWeight: 600 }}>
-                {c.call_type ?? "Call"}{c.crm_status ? ` · ${c.crm_status}` : ""}
+                {c.call_type ?? "Call"}
+                {c.call_method === "WhatsAppCall" ? " · WhatsApp" : ""}
+                {c.call_mode === "Video" ? " · Video" : ""}
+                {c.crm_status ? ` · ${c.crm_status}` : ""}
               </div>
               <div className="muted text-xs">
                 {c.emp_name ? `by ${c.emp_name}` : c.emp_number ? `by ${c.emp_number}` : "—"}

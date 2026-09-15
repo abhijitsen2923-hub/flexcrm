@@ -12,12 +12,13 @@ import re
 from datetime import UTC, datetime, timedelta, timezone
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import func, select, update
 
 from app.core.crypto import decrypt_secret, encrypt_secret
 from app.core.exceptions import NotFoundError, ValidationError
 from app.core.logging import get_logger
 from app.core.tenancy import current_org
+from app.models.call_agent_mapping import CallAgentMapping
 from app.models.callyzer_connection import CallyzerConnection
 from app.models.external_call import ExternalCall
 from app.models.organization import Organization
@@ -220,6 +221,85 @@ class CallyzerConnectionService(ServiceBase):
                 out.setdefault(key, user_id)
         return out
 
+    async def _agent_override_map(self) -> dict[str, UUID]:
+        """{emp_key: user_id} manual overrides — preferred over the phone auto-match."""
+        rows = (
+            await self.session.execute(
+                select(CallAgentMapping.emp_key, CallAgentMapping.user_id).where(
+                    CallAgentMapping.provider == _PROVIDER
+                )
+            )
+        ).all()
+        return {emp_key: uid for emp_key, uid in rows}
+
+    # --- caller → user mapping (fix unmatched attribution) -----------------
+
+    async def list_agent_mappings(self) -> list[CallAgentMapping]:
+        return list(
+            (
+                await self.session.execute(
+                    select(CallAgentMapping)
+                    .where(CallAgentMapping.provider == _PROVIDER)
+                    .order_by(CallAgentMapping.created_at.desc())
+                )
+            )
+            .scalars()
+            .all()
+        )
+
+    async def assign_agent(
+        self, *, emp_number: str, emp_name: str | None, user_id: UUID, actor_id: UUID
+    ) -> CallAgentMapping:
+        """Pin a device number to a user (upsert by emp_key), then re-attribute that
+        number's EXISTING calls so past performance reflects the mapping at once."""
+        emp_key = normalize_phone_key(emp_number)
+        if not emp_key:
+            raise ValidationError("A valid employee/device number is required.")
+        mapping = (
+            await self.session.execute(
+                select(CallAgentMapping).where(
+                    CallAgentMapping.provider == _PROVIDER, CallAgentMapping.emp_key == emp_key
+                )
+            )
+        ).scalar_one_or_none()
+        if mapping is None:
+            mapping = CallAgentMapping(
+                provider=_PROVIDER,
+                emp_key=emp_key,
+                emp_number=emp_number,
+                emp_name=emp_name,
+                user_id=user_id,
+                created_by_id=actor_id,
+            )
+            self.session.add(mapping)
+        else:
+            mapping.emp_number = emp_number
+            mapping.emp_name = emp_name
+            mapping.user_id = user_id
+        await self.session.execute(
+            update(ExternalCall)
+            .where(
+                ExternalCall.provider == _PROVIDER,
+                func.right(func.regexp_replace(ExternalCall.emp_number, r"[^0-9]", "", "g"), 10) == emp_key,
+            )
+            .values(user_id=user_id)
+        )
+        await self.commit()
+        return mapping
+
+    async def clear_agent(self, emp_key: str) -> None:
+        mapping = (
+            await self.session.execute(
+                select(CallAgentMapping).where(
+                    CallAgentMapping.provider == _PROVIDER, CallAgentMapping.emp_key == emp_key
+                )
+            )
+        ).scalar_one_or_none()
+        if mapping is None:
+            raise NotFoundError("Mapping not found.")
+        await self.session.delete(mapping)
+        await self.commit()
+
     async def sync_connection(
         self, conn: CallyzerConnection, *, organization_id: UUID
     ) -> dict[str, int]:
@@ -244,6 +324,7 @@ class CallyzerConnectionService(ServiceBase):
         )
 
         user_map = await self._user_phone_map(organization_id)
+        override_map = await self._agent_override_map()
         latest_call: datetime | None = conn.last_call_at
 
         client = CallyzerClient(token)
@@ -253,7 +334,8 @@ class CallyzerConnectionService(ServiceBase):
                 if not mapped["external_id"]:
                     continue
                 stats["fetched"] += 1
-                mapped["user_id"] = user_map.get(normalize_phone_key(mapped["emp_number"]) or "")
+                emp_key = normalize_phone_key(mapped["emp_number"]) or ""
+                mapped["user_id"] = override_map.get(emp_key) or user_map.get(emp_key)
                 if mapped["call_at"] and (latest_call is None or mapped["call_at"] > latest_call):
                     latest_call = mapped["call_at"]
 

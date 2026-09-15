@@ -22,13 +22,20 @@ from app.database.enums import (
     UserStatus,
 )
 from app.finance.models import Invoice, Payment, SalesOrder
-from app.hr.models import DEFAULT_SCORE_WEIGHTS, EmployeeProfile, PerformanceSnapshot
+from app.hr.models import (
+    CALL_ACTIVITY_WEIGHT,
+    DEFAULT_MONTHLY_CONNECTED_TARGET,
+    DEFAULT_SCORE_WEIGHTS,
+    EmployeeProfile,
+    PerformanceSnapshot,
+)
 from app.models.customer import Customer
 from app.models.lead import Lead
 from app.models.pipeline_stage import PipelineStage
 from app.models.stage_transition import StageTransition
 from app.models.user import User
 from app.services.base import ServiceBase
+from app.services.external_call_stats import ExternalCallStatsService
 
 
 def grade_for_score(score: Decimal) -> str:
@@ -58,10 +65,24 @@ class ScorecardService(ServiceBase):
         await self.session.flush()
         return profile
 
-    async def compute_user(self, user_id: UUID, *, snapshot_date: date | None = None) -> PerformanceSnapshot:
+    async def compute_user(
+        self,
+        user_id: UUID,
+        *,
+        snapshot_date: date | None = None,
+        call_activity: Decimal | None = None,
+    ) -> PerformanceSnapshot:
         snapshot_date = snapshot_date or datetime.now(UTC).date()
         profile = await self.get_profile(user_id)
-        weights = self._normalised_weights(profile.score_weights or DEFAULT_SCORE_WEIGHTS)
+        # The call factor is org-conditional: when `call_activity` is provided (a Callyzer
+        # org) it joins the weight set and the whole set renormalises to 100; when None the
+        # weights are the base six — identical grading to before.
+        defaults = (
+            DEFAULT_SCORE_WEIGHTS
+            if call_activity is None
+            else {**DEFAULT_SCORE_WEIGHTS, "call_activity": CALL_ACTIVITY_WEIGHT}
+        )
+        weights = self._normalised_weights(profile.score_weights or DEFAULT_SCORE_WEIGHTS, defaults=defaults)
 
         deals_closed, revenue = await self._revenue_factor(user_id, snapshot_date)
         collections = await self._collections_factor(user_id, snapshot_date)
@@ -83,7 +104,10 @@ class ScorecardService(ServiceBase):
             + Decimal(velocity_score) * Decimal(weights["pipeline_velocity"]) / Decimal(100)
             + Decimal(activity_quality) * Decimal(weights["activity_quality"]) / Decimal(100)
             + Decimal(retention) * Decimal(weights["retention"]) / Decimal(100)
-        ).quantize(Decimal("0.01"))
+        )
+        if call_activity is not None:
+            composite += Decimal(call_activity) * Decimal(weights.get("call_activity", 0)) / Decimal(100)
+        composite = composite.quantize(Decimal("0.01"))
 
         # Upsert today's snapshot.
         existing = (
@@ -105,6 +129,7 @@ class ScorecardService(ServiceBase):
         existing.pipeline_velocity_days = pipeline_velocity_days
         existing.activity_quality = activity_quality
         existing.retention = retention
+        existing.call_activity = call_activity
         existing.score = composite
         existing.grade = grade_for_score(composite)
         existing.computed_at = datetime.now(UTC)
@@ -277,11 +302,30 @@ class ScorecardService(ServiceBase):
         capped = min(days, Decimal("60"))
         return ((Decimal("60") - capped) / Decimal("60") * Decimal("100")).quantize(Decimal("0.01"))
 
-    def _normalised_weights(self, weights: dict) -> dict[str, int]:
-        merged = {**DEFAULT_SCORE_WEIGHTS, **weights}
-        # Normalise so the keys sum to 100; protects against partial overrides.
-        total = sum(merged[k] for k in DEFAULT_SCORE_WEIGHTS) or 1
-        return {k: int(merged[k] / total * 100) for k in DEFAULT_SCORE_WEIGHTS}
+    def _normalised_weights(self, weights: dict, *, defaults: dict | None = None) -> dict[str, int]:
+        defaults = defaults or DEFAULT_SCORE_WEIGHTS
+        merged = {**defaults, **weights}
+        # Normalise so the active keys sum to 100; protects against partial overrides and
+        # lets an optional extra factor (call_activity) shrink the others proportionally.
+        total = sum(merged[k] for k in defaults) or 1
+        return {k: int(merged[k] / total * 100) for k in defaults}
+
+    async def call_activity_scores(
+        self, *, date_from: datetime, date_to: datetime
+    ) -> dict[UUID, Decimal]:
+        """{user_id: 0–100 call sub-score} over the window — connected calls vs the monthly
+        target. Unmatched device numbers (no user_id) are skipped. Reused by the nightly job
+        and on-demand recompute so both agree with the Calls → Performance tab."""
+        resp = await ExternalCallStatsService(self.session).employee_stats(
+            date_from=date_from, date_to=date_to
+        )
+        scores: dict[UUID, Decimal] = {}
+        for row in resp.rows:
+            if row.user_id is None:
+                continue
+            raw = Decimal(row.connected) / Decimal(DEFAULT_MONTHLY_CONNECTED_TARGET) * Decimal(100)
+            scores[row.user_id] = min(raw, Decimal(100)).quantize(Decimal("0.01"))
+        return scores
 
 
 async def list_active_sales_users(session, organization_id: UUID) -> list[User]:

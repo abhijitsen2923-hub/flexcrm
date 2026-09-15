@@ -230,6 +230,7 @@ export interface ScorecardRow {
   revenue: string;
   collections: string;
   conversion_rate: string;
+  call_activity: string | null;
   score: string;
   grade: string;
 }

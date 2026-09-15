@@ -1,4 +1,5 @@
 from app.models.activity import Activity
+from app.models.call_agent_mapping import CallAgentMapping
 from app.models.callyzer_connection import CallyzerConnection
 from app.models.channel_partner import BrokeragePayout, ChannelPartner
 from app.models.customer import Customer
@@ -27,6 +28,7 @@ from app.models.user_permission_grant import UserPermissionGrant
 __all__ = [
     "Activity",
     "BrokeragePayout",
+    "CallAgentMapping",
     "CallyzerConnection",
     "ChannelPartner",
     "Customer",

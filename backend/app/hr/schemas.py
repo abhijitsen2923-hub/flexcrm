@@ -34,6 +34,7 @@ class PerformanceSnapshotRead(ORMModel):
     pipeline_velocity_days: Decimal
     activity_quality: Decimal
     retention: Decimal
+    call_activity: Decimal | None = None
     score: Decimal
     grade: str
     computed_at: datetime
@@ -46,6 +47,7 @@ class ScorecardRow(ORMModel):
     revenue: Decimal
     collections: Decimal
     conversion_rate: Decimal
+    call_activity: Decimal | None = None
     score: Decimal
     grade: str
 

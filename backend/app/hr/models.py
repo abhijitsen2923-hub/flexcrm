@@ -31,6 +31,13 @@ DEFAULT_SCORE_WEIGHTS: dict[str, int] = {
     "retention": 5,
 }
 
+# Callyzer call-activity factor — applied ONLY when the org has the callyzer module
+# (see jobs/scorecard_compute.py). It is added ON TOP of the base six weights and the
+# whole set is renormalised to 100, so orgs without call tracking grade exactly as before.
+CALL_ACTIVITY_WEIGHT = 10
+# A user reaching this many *connected* calls in the month scores 100 on the call factor.
+DEFAULT_MONTHLY_CONNECTED_TARGET = 200
+
 
 class EmployeeProfile(TenantBase, UUIDPrimaryKeyMixin, TimestampMixin):
     __tablename__ = "employee_profiles"
@@ -82,6 +89,9 @@ class PerformanceSnapshot(TenantBase, UUIDPrimaryKeyMixin):
     pipeline_velocity_days: Mapped[Decimal] = mapped_column(Numeric(6, 2), nullable=False, default=0)
     activity_quality: Mapped[Decimal] = mapped_column(Numeric(5, 2), nullable=False, default=0)
     retention: Mapped[Decimal] = mapped_column(Numeric(5, 2), nullable=False, default=0)
+    # Callyzer call-activity sub-score (0–100); NULL when the factor was not applied
+    # (org without the callyzer module), so that grade is unaffected.
+    call_activity: Mapped[Decimal | None] = mapped_column(Numeric(5, 2), nullable=True)
     score: Mapped[Decimal] = mapped_column(Numeric(5, 2), nullable=False, default=0)
     grade: Mapped[str] = mapped_column(String(2), nullable=False, default="D")
     computed_at: Mapped[datetime] = mapped_column(

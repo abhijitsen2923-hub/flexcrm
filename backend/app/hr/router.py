@@ -1,4 +1,6 @@
+from datetime import UTC, datetime
 from datetime import date as _date
+from decimal import Decimal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -7,8 +9,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import require_permissions
 from app.core.permissions import PermissionCode
+from app.core.tenancy import current_org
 from app.database.session import get_db_session
 from app.hr.models import EmployeeProfile, PerformanceSnapshot
+from app.models.organization import Organization
 from app.hr.schemas import (
     EmployeeProfileRead,
     EmployeeProfileUpdate,
@@ -54,6 +58,7 @@ async def team_scorecard(
             revenue=snap.revenue,
             collections=snap.collections,
             conversion_rate=snap.conversion_rate,
+            call_activity=snap.call_activity,
             score=snap.score,
             grade=snap.grade,
         )
@@ -86,7 +91,18 @@ async def recompute_user(
     session: AsyncSession = Depends(get_db_session),
 ):
     service = ScorecardService(session)
-    snapshot = await service.compute_user(user_id)
+    # Mirror the nightly job: fold in call activity only when this org uses Callyzer.
+    org_id = current_org(session)
+    features = (
+        await session.execute(select(Organization.features).where(Organization.id == org_id))
+    ).scalar_one_or_none() or {}
+    call_activity = None
+    if features.get("module.callyzer"):
+        now = datetime.now(UTC)
+        month_start = datetime(now.year, now.month, 1, tzinfo=UTC)
+        scores = await service.call_activity_scores(date_from=month_start, date_to=now)
+        call_activity = scores.get(user_id, Decimal("0"))
+    snapshot = await service.compute_user(user_id, call_activity=call_activity)
     await service.commit()
     return snapshot
 

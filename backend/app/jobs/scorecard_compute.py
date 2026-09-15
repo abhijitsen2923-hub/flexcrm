@@ -20,6 +20,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 from datetime import UTC, datetime
+from decimal import Decimal
 
 from sqlalchemy import select
 
@@ -42,9 +43,13 @@ async def dispatch_scorecard_compute(session) -> dict[str, int]:
     with bypass(session):
         rows = (await session.execute(select(Organization))).scalars().all()
         # Snapshot while fresh — commit()/rollback() expires persistent objects.
-        org_scopes = [(o.id, o.schema_name) for o in rows]
+        org_scopes = [(o.id, o.schema_name, o.features or {}) for o in rows]
 
-    for org_id, schema_name in org_scopes:
+    # Calendar-month window for the call-activity factor (matches the monthly factors).
+    now = datetime.now(UTC)
+    month_start = datetime(today.year, today.month, 1, tzinfo=UTC)
+
+    for org_id, schema_name, features in org_scopes:
         if not schema_name:
             continue
         set_scope(session, org_id)
@@ -53,8 +58,16 @@ async def dispatch_scorecard_compute(session) -> dict[str, int]:
         try:
             users = await list_active_sales_users(session, org_id)
             service = ScorecardService(session)
+            # Fold call activity into the grade only for Callyzer orgs; others are unchanged.
+            include_calls = bool(features.get("module.callyzer"))
+            call_scores = (
+                await service.call_activity_scores(date_from=month_start, date_to=now)
+                if include_calls
+                else {}
+            )
             for user in users:
-                await service.compute_user(user.id, snapshot_date=today)
+                call_activity = call_scores.get(user.id, Decimal("0")) if include_calls else None
+                await service.compute_user(user.id, snapshot_date=today, call_activity=call_activity)
                 counts["snapshots_written"] += 1
             counts["users"] += len(users)
             await session.commit()

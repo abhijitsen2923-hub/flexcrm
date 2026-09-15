@@ -14,6 +14,7 @@ import {
 import { callsService, type CallsListResponse, type ExternalCall } from "../../services/callyzer";
 import { extractErrorMessage } from "../../utils/errors";
 import { formatDateTime } from "../../utils/format";
+import CallPerformance from "./CallPerformance";
 
 
 type TypeFilter = "" | "Incoming" | "Outgoing" | "Missed";
@@ -44,6 +45,7 @@ const EMPTY: CallsListResponse = { items: [], pagination: { page: 1, page_size: 
 
 export default function CallsPage() {
   const toast = useToast();
+  const [mode, setMode] = useState<"activity" | "performance">("activity");
   const [data, setData] = useState<CallsListResponse>(EMPTY);
   const [loading, setLoading] = useState(true);
   const [typeFilter, setTypeFilter] = useState<TypeFilter | "unmatched">("");
@@ -93,8 +95,13 @@ export default function CallsPage() {
     {
       key: "type",
       header: "Type",
-      render: (c) =>
-        c.call_type ? <Badge tone={TYPE_TONE[c.call_type] ?? "neutral"}>{c.call_type}</Badge> : "—",
+      render: (c) => (
+        <span className="row" style={{ gap: "0.3rem", flexWrap: "wrap", alignItems: "center" }}>
+          {c.call_type ? <Badge tone={TYPE_TONE[c.call_type] ?? "neutral"}>{c.call_type}</Badge> : "—"}
+          {c.call_method === "WhatsAppCall" && <Badge tone="success">WhatsApp</Badge>}
+          {c.call_mode === "Video" && <Badge tone="info">Video</Badge>}
+        </span>
+      ),
     },
     { key: "when", header: "When", render: (c) => (c.call_at ? formatDateTime(c.call_at) : "—") },
     { key: "duration", header: "Duration", render: (c) => <span className="cell-nowrap">{fmtDuration(c.duration_seconds)}</span> },
@@ -129,12 +136,34 @@ export default function CallsPage() {
           <p>Synced call activity from Callyzer — matched to leads by phone number.</p>
         </div>
         <div className="page-header__actions">
-          <Button variant="secondary" size="sm" icon={<RefreshCw size={14} />} onClick={() => void load()} loading={loading}>
-            Refresh
-          </Button>
+          {mode === "activity" && (
+            <Button variant="secondary" size="sm" icon={<RefreshCw size={14} />} onClick={() => void load()} loading={loading}>
+              Refresh
+            </Button>
+          )}
         </div>
       </div>
 
+      <div className="row" style={{ gap: "0.4rem", marginBottom: "1rem", flexWrap: "wrap" }}>
+        <button
+          type="button"
+          className={`filter-chip${mode === "activity" ? " is-active" : ""}`}
+          onClick={() => setMode("activity")}
+        >
+          Activity
+        </button>
+        <button
+          type="button"
+          className={`filter-chip${mode === "performance" ? " is-active" : ""}`}
+          onClick={() => setMode("performance")}
+        >
+          Performance
+        </button>
+      </div>
+
+      {mode === "performance" ? (
+        <CallPerformance />
+      ) : (
       <div className="card" style={{ padding: 0 }}>
         <div className="row" style={{ gap: "0.6rem", padding: "1rem 1.25rem", borderBottom: "1px solid var(--color-border)", flexWrap: "wrap", alignItems: "center" }}>
           <input
@@ -188,6 +217,7 @@ export default function CallsPage() {
           onPageSizeChange={(s) => { setPageSize(s); setPage(1); }}
         />
       </div>
+      )}
     </>
   );
 }
