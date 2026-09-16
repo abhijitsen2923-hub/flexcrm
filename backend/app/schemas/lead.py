@@ -187,9 +187,14 @@ class LeadRead(ORMModel):
     assigned_to: UserSummary | None = None
     partner: LeadPartnerCompact | None = None
     # True when another active lead in the tenant shares this lead's email or
-    # phone — surfaced as a "!" marker in the list so duplicates are visible.
+    # phone — surfaced as a marker in the list so duplicates are visible.
     # Computed at list time (not stored); defaults False for single-lead reads.
     is_duplicate: bool = False
+    # For a shared phone NUMBER: "fresh" (no other lead owns it) or "assigned"
+    # (already given to someone). `duplicate_owner` names that owner but is withheld
+    # (None) from front-line reps. Both computed at list time.
+    duplicate_status: str | None = None
+    duplicate_owner: str | None = None
 
 
 class LeadDuplicate(ORMModel):

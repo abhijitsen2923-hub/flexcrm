@@ -322,8 +322,12 @@ export interface Lead {
   assigned_to?: UserSummary | null;
   partner?: { id: string; company_name: string; contact_name: string } | null;
   // Set by the list endpoint when another active lead shares this lead's email
-  // or phone. Drives the "!" duplicate marker in the UI.
+  // or phone. Drives the duplicate marker in the UI.
   is_duplicate?: boolean;
+  // For a shared phone number: "fresh" (unowned) or "assigned" (already given to
+  // someone). `duplicate_owner` names that owner (null for front-line reps).
+  duplicate_status?: "fresh" | "assigned" | null;
+  duplicate_owner?: string | null;
 }
 
 export interface Deal {

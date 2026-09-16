@@ -141,7 +141,13 @@ class LeadService(ServiceBase):
         `owner_id` scopes the result to a front-line rep's own leads (BR-2)."""
         return await self.repository.distinct_campaigns(owner_id=owner_id)
 
-    async def list_leads(self, pagination: PaginationParams, filters: LeadFilterParams):
+    async def list_leads(
+        self,
+        pagination: PaginationParams,
+        filters: LeadFilterParams,
+        *,
+        reveal_duplicate_owner: bool = True,
+    ):
         sort_by = validate_sort_field(filters.sort_by, self.allowed_sort_fields)
         # Stage filter accepts a single code or a comma-joined list (multi-select) →
         # a list value makes the repo emit `stage_code IN (...)`.
@@ -200,6 +206,7 @@ class LeadService(ServiceBase):
         # UI can show a duplicate ("!") marker. Two aggregate queries, then a
         # transient attribute LeadRead reads via from_attributes.
         dup_emails, dup_phones = await self.repository.duplicate_contact_keys()
+        assign_map = await self.repository.duplicate_assignment_map(dup_phones) if dup_phones else {}
         for lead in items:
             email_key = lead.contact_email.lower() if lead.contact_email else None
             phone_key = re.sub(r"\D", "", lead.contact_phone) if lead.contact_phone else ""
@@ -207,6 +214,21 @@ class LeadService(ServiceBase):
                 (email_key and email_key in dup_emails)
                 or (phone_key and phone_key in dup_phones)
             )
+            # Fresh vs already-assigned label for a shared phone NUMBER: look at the
+            # OTHER matching leads — if any is assigned, the number is already given to
+            # that owner (name withheld from reps); otherwise it's fresh (unowned).
+            lead.duplicate_status = None
+            lead.duplicate_owner = None
+            if phone_key and phone_key in dup_phones:
+                others_assigned = [
+                    (lid, name) for (lid, name) in assign_map.get(phone_key, []) if lid != lead.id
+                ]
+                if others_assigned:
+                    lead.duplicate_status = "assigned"
+                    if reveal_duplicate_owner:
+                        lead.duplicate_owner = others_assigned[0][1] or None
+                else:
+                    lead.duplicate_status = "fresh"
         return items, total
 
     async def get_lead(self, lead_id: UUID):

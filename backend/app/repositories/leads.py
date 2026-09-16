@@ -1,7 +1,9 @@
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import selectinload
 
+from app.core.tenancy import current_org
 from app.models.lead import Lead
+from app.models.user import User
 from app.repositories.base import BaseRepository
 
 
@@ -78,6 +80,32 @@ class LeadRepository(BaseRepository[Lead]):
             {r for (r,) in email_rows if r},
             {r for (r,) in phone_rows if r},
         )
+
+    async def duplicate_assignment_map(self, phone_keys: set[str]) -> dict[str, list[tuple]]:
+        """{phone_key: [(lead_id, "First Last"), …]} for ASSIGNED active leads whose
+        digits-only phone is one of `phone_keys`, earliest-assigned first. Powers the
+        "fresh vs already assigned to <owner>" duplicate label; the joined public.users
+        row is org-filtered (users are cross-tenant)."""
+        if not phone_keys:
+            return {}
+        org_id = current_org(self.session)
+        phone_expr = func.regexp_replace(Lead.contact_phone, r"[^0-9]", "", "g")
+        rows = await self.session.execute(
+            select(phone_expr.label("k"), Lead.id, User.first_name, User.last_name)
+            .join(User, User.id == Lead.assigned_to_id)
+            .where(
+                Lead.is_deleted.is_(False),
+                Lead.assigned_to_id.is_not(None),
+                User.organization_id == org_id,
+                phone_expr.in_(phone_keys),
+            )
+            .order_by(Lead.created_at.asc())
+        )
+        out: dict[str, list[tuple]] = {}
+        for key, lead_id, first_name, last_name in rows:
+            name = f"{(first_name or '').strip()} {(last_name or '').strip()}".strip()
+            out.setdefault(key, []).append((lead_id, name))
+        return out
 
     async def distinct_campaigns(self, owner_id=None) -> list[str]:
         """Distinct non-empty campaign values across the tenant's active leads.

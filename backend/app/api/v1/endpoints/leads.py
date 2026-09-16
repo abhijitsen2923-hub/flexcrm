@@ -72,7 +72,13 @@ async def list_leads(
         # Reps are scoped to their own leads, so an "unassigned" (owner IS NULL)
         # filter would contradict that and return nothing — ignore it for them.
         filters.unassigned = None
-    items, total = await LeadService(session).list_leads(pagination, filters)
+    # Reps see that a duplicate number is "already assigned" but not WHO owns it
+    # (anti-poaching); managers/owner see the owner's name.
+    items, total = await LeadService(session).list_leads(
+        pagination,
+        filters,
+        reveal_duplicate_owner=current_user.role not in ASSIGNED_ONLY_LEAD_ROLES,
+    )
     return PaginatedResponse[LeadRead](items=items, pagination=build_page_meta(total, pagination))
 
 

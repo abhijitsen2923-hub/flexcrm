@@ -15,6 +15,7 @@ import {
   type DataTableColumn
 } from "../components";
 import { BulkStageModal } from "../components/leads/BulkStageModal";
+import { DuplicateChip } from "../components/leads/DuplicateChip";
 import { LeadDrawer } from "../components/leads/LeadDrawer";
 import { LeadRowList } from "../components/leads/LeadRowList";
 import { StageTransitionModal } from "../components/leads/StageTransitionModal";
@@ -40,32 +41,6 @@ import { canSetStage } from "../utils/stageAccess";
 type ViewMode = "list" | "kanban";
 
 
-// Red "!" marker shown on any lead that shares an email or phone with another
-// active lead (backend sets `is_duplicate` on the list response).
-function DuplicateMark() {
-  return (
-    <span
-      title="Possible duplicate — shares an email or phone with another lead"
-      aria-label="Possible duplicate lead"
-      style={{
-        display: "inline-flex",
-        alignItems: "center",
-        justifyContent: "center",
-        width: 16,
-        height: 16,
-        borderRadius: "50%",
-        background: "#dc2626",
-        color: "#fff",
-        fontSize: 11,
-        fontWeight: 800,
-        lineHeight: 1,
-        flexShrink: 0
-      }}
-    >
-      !
-    </span>
-  );
-}
 
 
 interface CreateFormState {
@@ -704,7 +679,7 @@ export default function LeadsPage() {
       render: (lead) => (
         <button type="button" className="link" onClick={() => setDrawerLead(lead)} style={{ textAlign: "left", maxWidth: "100%" }}>
           <div style={{ fontWeight: 600, display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
-            {lead.is_duplicate && <DuplicateMark />}
+            <DuplicateChip status={lead.duplicate_status} owner={lead.duplicate_owner} isDuplicate={lead.is_duplicate} />
             <span className="cell-truncate">{lead.contact_name || lead.customer?.contact_name || lead.title}</span>
           </div>
           <div className="muted text-xs cell-truncate">{lead.title}</div>
@@ -1911,7 +1886,7 @@ function KanbanView({ leads, industryFilter, onCardClick, onStageDrop }: KanbanV
                   onClick={() => onCardClick(lead)}
                 >
                   <div className="kanban__card-title" style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                    {lead.is_duplicate && <DuplicateMark />}
+                    <DuplicateChip status={lead.duplicate_status} owner={lead.duplicate_owner} isDuplicate={lead.is_duplicate} />
                     <span>{lead.title}</span>
                   </div>
                   <div className="kanban__card-meta">

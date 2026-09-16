@@ -1,5 +1,6 @@
 import { Check, ChevronDown, Phone } from "lucide-react";
 
+import { DuplicateChip } from "./DuplicateChip";
 import type { Lead, PipelineStage } from "../../types";
 import { telHref } from "../../utils/contactLinks";
 import { pipelineCategoryTone } from "../../utils/options";
@@ -78,9 +79,7 @@ export function LeadRow({
         </span>
         <span className="lead-row__text">
           <span className="lead-row__name">
-            {lead.is_duplicate && (
-              <span className="lead-row__dup" title="Possible duplicate — shares an email or phone">!</span>
-            )}
+            <DuplicateChip status={lead.duplicate_status} isDuplicate={lead.is_duplicate} />
             {name}
           </span>
           <span className="lead-row__meta">

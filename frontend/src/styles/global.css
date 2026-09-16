@@ -1784,6 +1784,24 @@ p {
   align-items: center;
   justify-content: center;
 }
+/* Duplicate-lead status chip (Fresh / Assigned · owner / Duplicate) — next to the name. */
+.dup-chip {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  max-width: 170px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  line-height: 1.5;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.dup-chip--assigned { background: var(--color-danger-soft, #fee2e2); color: var(--color-danger, #dc2626); }
+.dup-chip--fresh { background: var(--color-success-soft, #dcfce7); color: var(--color-success, #16a34a); }
+.dup-chip--dup { background: var(--color-warning-soft, #fef3c7); color: var(--color-warning, #b45309); }
 .lead-row__meta {
   display: flex;
   align-items: center;
