@@ -13,7 +13,7 @@ from app.api.deps import require_permissions
 from app.core import storage
 from app.core.exceptions import NotFoundError
 from app.core.pdf import html_to_pdf
-from app.core.permissions import PermissionCode
+from app.core.permissions import ASSIGNED_ONLY_LEAD_ROLES, PermissionCode
 from app.database.enums import BookingStatus, InvoiceStatus, UnitStatus, UnitType
 from app.database.session import get_db_session
 from app.models.customer import Customer
@@ -637,7 +637,7 @@ async def archive_unit(
 async def list_site_visits(
     project_id: UUID | None = Query(default=None),
     lead_id: UUID | None = Query(default=None),
-    _: object = Depends(require_permissions(PermissionCode.LEAD_VIEW)),
+    current_user=Depends(require_permissions(PermissionCode.LEAD_VIEW)),
     session: AsyncSession = Depends(get_db_session),
 ):
     stmt = (
@@ -649,6 +649,9 @@ async def list_site_visits(
         stmt = stmt.where(SiteVisit.project_id == project_id)
     if lead_id:
         stmt = stmt.where(SiteVisit.lead_id == lead_id)
+    # Front-line reps see only visits assigned to them; managers/owner see all.
+    if current_user.role in ASSIGNED_ONLY_LEAD_ROLES:
+        stmt = stmt.where(SiteVisit.assigned_to_id == current_user.id)
     return list((await session.execute(stmt)).scalars().all())
 
 
@@ -664,10 +667,14 @@ async def _site_visit_read(session: AsyncSession, visit_id: UUID) -> SiteVisit:
 @router.post("/site-visits", response_model=SiteVisitRead, status_code=status.HTTP_201_CREATED)
 async def create_site_visit(
     payload: SiteVisitCreate,
-    _: object = Depends(require_permissions(PermissionCode.LEAD_MANAGE)),
+    current_user=Depends(require_permissions(PermissionCode.LEAD_MANAGE)),
     session: AsyncSession = Depends(get_db_session),
 ):
     visit = SiteVisit(**payload.model_dump())
+    # A front-line rep's own visit defaults to them (else, unassigned, it would be
+    # invisible on their own scoped calendar).
+    if visit.assigned_to_id is None and current_user.role in ASSIGNED_ONLY_LEAD_ROLES:
+        visit.assigned_to_id = current_user.id
     session.add(visit)
     if visit.assigned_to_id:
         project = await session.get(Project, visit.project_id)
@@ -695,11 +702,15 @@ async def create_site_visit(
 async def update_site_visit(
     visit_id: UUID,
     payload: SiteVisitUpdate,
-    _: object = Depends(require_permissions(PermissionCode.LEAD_MANAGE)),
+    current_user=Depends(require_permissions(PermissionCode.LEAD_MANAGE)),
     session: AsyncSession = Depends(get_db_session),
 ):
     visit = await session.get(SiteVisit, visit_id)
     if not visit:
+        raise HTTPException(status_code=404, detail="Site visit not found")
+    # A front-line rep can only touch their own visits — 404 (not 403) so a visit's
+    # existence isn't leaked, mirroring the leads access guard.
+    if current_user.role in ASSIGNED_ONLY_LEAD_ROLES and visit.assigned_to_id != current_user.id:
         raise HTTPException(status_code=404, detail="Site visit not found")
     for field, value in payload.model_dump(exclude_unset=True).items():
         setattr(visit, field, value)
