@@ -49,6 +49,18 @@ from app.services.leads import LeadService
 from app.services.stage_transitions import StageTransitionService
 
 
+def _canon_header(value: str | None) -> str:
+    """Canonical header key: lowercased with all non-alphanumerics removed, so
+    'Contact Name' / 'contact_name' / 'contact-name' / 'CONTACTNAME' collapse to one
+    key and match."""
+    return re.sub(r"[^a-z0-9]", "", (value or "").strip().lower())
+
+
+# Split-name headers combined into contact_name when there's no single name column.
+_FIRST_NAME_ALIASES = ("first_name", "first name", "firstname", "given name", "fname")
+_LAST_NAME_ALIASES = ("last_name", "last name", "lastname", "surname", "family name", "lname")
+
+
 # Column definitions (headers, aliases, parse kinds) live in app.core.lead_csv,
 # keyed per business type, so the template / importer / exporter stay in sync.
 
@@ -120,7 +132,14 @@ class LeadImportService(ServiceBase):
         except UnicodeDecodeError as exc:
             raise ValidationError("CSV must be UTF-8 encoded.") from exc
 
-        reader = csv.DictReader(io.StringIO(text))
+        # Auto-detect the delimiter — Excel exports semicolons (or tabs) in many
+        # locales; whichever candidate appears most in the header line wins, comma
+        # is the default + tie-break.
+        first_line = next((ln for ln in text.splitlines() if ln.strip()), "")
+        delimiter = max((",", ";", "\t", "|"), key=first_line.count)
+        if first_line.count(delimiter) == 0:
+            delimiter = ","
+        reader = csv.DictReader(io.StringIO(text), delimiter=delimiter)
         if reader.fieldnames is None:
             raise ValidationError("CSV is empty or has no header row.")
 
@@ -135,10 +154,17 @@ class LeadImportService(ServiceBase):
 
         columns = import_columns_for(industry)
         header_map = self._build_header_map(reader.fieldnames, columns)
+        # Fallback: accept a split First name + Last name pair as the contact name.
+        first_header = last_header = None
         if "contact_name" not in header_map:
-            raise ValidationError(
-                "CSV must include a `contact_name` column (aliases: name, lead_name, contact)."
-            )
+            first_header = self._match_header(reader.fieldnames, _FIRST_NAME_ALIASES)
+            last_header = self._match_header(reader.fieldnames, _LAST_NAME_ALIASES)
+            if not first_header:
+                raise ValidationError(
+                    "CSV must include a `contact_name` column — accepted headers: Name, Contact, "
+                    "Contact name, Full name (or a First name + Last name pair). Tip: use the "
+                    "Download template button in the import dialog for the exact headers."
+                )
 
         allowed_currencies = allowed_currencies_for_org(org) if org else [DEFAULT_CURRENCY]
         stage_lookup = await self._stage_lookup_for_industry(industry)
@@ -150,6 +176,14 @@ class LeadImportService(ServiceBase):
         # cross-reference with their spreadsheet.
         for offset, raw in enumerate(reader, start=2):
             row = {col.key: self._read_field(raw, header_map.get(col.key)) for col in columns}
+            # Combine a split first/last name into contact_name when there's no
+            # single name column (last name optional).
+            if not row.get("contact_name") and first_header:
+                first = self._read_field(raw, first_header) or ""
+                last = (self._read_field(raw, last_header) or "") if last_header else ""
+                combined = f"{first} {last}".strip()
+                if combined:
+                    row["contact_name"] = combined
 
             # Duplicate detection: does this row's email or phone already match
             # an active lead in this tenant? Record it either way so the caller
@@ -312,16 +346,28 @@ class LeadImportService(ServiceBase):
     def _build_header_map(self, fieldnames: list[str], columns: list[CsvColumn]) -> dict[str, str]:
         """Map each registry column's key to the actual header present in the CSV.
 
-        Lowercases + strips both sides. The first matching alias wins.
+        Both sides are reduced to a canonical key (lowercased, non-alphanumerics
+        removed) so 'Contact Name' / 'contact_name' / 'contact-name' all match. The
+        first matching alias wins.
         """
-        normalised = {(h or "").strip().lower(): h for h in fieldnames}
+        normalised = {_canon_header(h): h for h in fieldnames if h}
         out: dict[str, str] = {}
         for col in columns:
             for alias in col.all_aliases():
-                if alias in normalised:
-                    out[col.key] = normalised[alias]
+                hit = normalised.get(_canon_header(alias))
+                if hit is not None:
+                    out[col.key] = hit
                     break
         return out
+
+    def _match_header(self, fieldnames: list[str], aliases: tuple[str, ...]) -> str | None:
+        """The actual CSV header matching any of `aliases` (canonical compare), else None."""
+        normalised = {_canon_header(h): h for h in fieldnames if h}
+        for alias in aliases:
+            hit = normalised.get(_canon_header(alias))
+            if hit is not None:
+                return hit
+        return None
 
     def _read_field(self, raw: dict[str, Any], header: str | None) -> str | None:
         if header is None:

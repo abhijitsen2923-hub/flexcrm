@@ -28,7 +28,7 @@ class CsvColumn:
 # --- Shared columns (every vertical) -------------------------------------
 _COMMON: list[CsvColumn] = [
     CsvColumn("title", "Title", frozenset({"subject", "lead_title"}), sample="New enquiry"),
-    CsvColumn("contact_name", "Contact name", frozenset({"name", "lead_name", "contact"}), sample="Priya Nair"),
+    CsvColumn("contact_name", "Contact name", frozenset({"name", "lead_name", "contact", "full name", "fullname", "customer name", "client name", "customer", "client"}), sample="Priya Nair"),
     CsvColumn("contact_email", "Email", frozenset({"contact_email"}), sample="priya.nair@gmail.com"),
     CsvColumn("contact_phone", "Phone", frozenset({"mobile", "phone number"}), sample="+91 99876 54321"),
     CsvColumn(
