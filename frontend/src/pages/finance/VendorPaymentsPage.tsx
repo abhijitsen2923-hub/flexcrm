@@ -6,6 +6,7 @@ import {
   Card,
   DataTable,
   EmptyState,
+  KpiCard,
   LoadingBlock,
   Modal,
   SelectField,
@@ -66,6 +67,14 @@ export default function VendorPaymentsPage() {
   }, []);
 
   const outstanding = (b: VendorBill) => Number(b.net_payable) - Number(b.amount_paid);
+
+  // KPI totals over non-cancelled bills: generated (billed) vs cleared (paid) vs outstanding.
+  const totals = useMemo(() => {
+    const live = bills.filter((b) => b.status !== "cancelled");
+    const billed = live.reduce((s, b) => s + Number(b.net_payable), 0);
+    const paid = live.reduce((s, b) => s + Number(b.amount_paid), 0);
+    return { billed, paid, outstanding: billed - paid };
+  }, [bills]);
 
   async function createBill() {
     if (!billForm.vendor_id) {
@@ -190,6 +199,12 @@ export default function VendorPaymentsPage() {
           <p>Vendor bills (accounts payable) and the payments against them.</p>
         </div>
         {canManage && <Button onClick={() => setBillOpen(true)}>Add Bill</Button>}
+      </div>
+
+      <div className="kpi-grid">
+        <KpiCard label="Total bill generated" value={formatCurrency(totals.billed, "INR")} />
+        <KpiCard label="Cleared / paid" value={formatCurrency(totals.paid, "INR")} />
+        <KpiCard label="Outstanding" value={formatCurrency(totals.outstanding, "INR")} />
       </div>
 
       <Card>

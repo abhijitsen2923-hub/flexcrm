@@ -290,6 +290,10 @@ class Vendor(TenantBase, UUIDPrimaryKeyMixin, TimestampMixin, TenantAuditMixin, 
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     contact_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     phone: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    # Point-of-contact for this vendor (the person to coordinate with), separate
+    # from the general contact_name/phone.
+    poc_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    poc_phone: Mapped[str | None] = mapped_column(String(40), nullable=True)
     email: Mapped[str | None] = mapped_column(String(255), nullable=True)
     gstin: Mapped[str | None] = mapped_column(String(15), nullable=True)
     pan: Mapped[str | None] = mapped_column(String(20), nullable=True)

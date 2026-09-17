@@ -31,6 +31,8 @@ export interface Vendor {
   name: string;
   contact_name: string | null;
   phone: string | null;
+  poc_name: string | null;
+  poc_phone: string | null;
   email: string | null;
   gstin: string | null;
   pan: string | null;

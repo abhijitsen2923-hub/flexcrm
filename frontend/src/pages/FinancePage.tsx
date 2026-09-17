@@ -275,7 +275,7 @@ export default function FinancePage() {
                 {
                   key: "booking",
                   header: "Booking",
-                  render: (row) => <strong>{row.booking_number || row.booking_id.slice(0, 8)}</strong>
+                  render: (row) => <strong>{row.customer_name || row.booking_id.slice(0, 8)}</strong>
                 },
                 { key: "project", header: "Project", render: (row) => row.project_name },
                 { key: "unit", header: "Unit", render: (row) => row.unit_number },

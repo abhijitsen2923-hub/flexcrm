@@ -18,7 +18,7 @@ import type { Vendor } from "../../types/finance";
 import { extractErrorMessage } from "../../utils/errors";
 
 const EMPTY = {
-  name: "", contact_name: "", phone: "", email: "", gstin: "", pan: "",
+  name: "", contact_name: "", phone: "", poc_name: "", poc_phone: "", email: "", gstin: "", pan: "",
   state_code: "", bank_account: "", ifsc: "", upi: "", address: "", notes: ""
 };
 
@@ -56,7 +56,8 @@ export default function VendorsPage() {
   function openEdit(v: Vendor) {
     setEditing(v);
     setForm({
-      name: v.name, contact_name: v.contact_name ?? "", phone: v.phone ?? "", email: v.email ?? "",
+      name: v.name, contact_name: v.contact_name ?? "", phone: v.phone ?? "",
+      poc_name: v.poc_name ?? "", poc_phone: v.poc_phone ?? "", email: v.email ?? "",
       gstin: v.gstin ?? "", pan: v.pan ?? "", state_code: v.state_code ?? "", bank_account: v.bank_account ?? "",
       ifsc: v.ifsc ?? "", upi: v.upi ?? "", address: v.address ?? "", notes: v.notes ?? ""
     });
@@ -158,6 +159,8 @@ export default function VendorsPage() {
           <div className="form-grid">
             <TextField id="v-contact" label="Contact name" value={form.contact_name} onChange={(e) => setForm({ ...form, contact_name: e.target.value })} />
             <TextField id="v-phone" label="Phone" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} />
+            <TextField id="v-poc-name" label="POC name" value={form.poc_name} onChange={(e) => setForm({ ...form, poc_name: e.target.value })} />
+            <TextField id="v-poc-phone" label="POC number" value={form.poc_phone} onChange={(e) => setForm({ ...form, poc_phone: e.target.value })} />
             <TextField id="v-email" label="Email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
             <TextField id="v-gstin" label="GSTIN" value={form.gstin} onChange={(e) => setForm({ ...form, gstin: e.target.value })} />
             <TextField id="v-pan" label="PAN" value={form.pan} onChange={(e) => setForm({ ...form, pan: e.target.value })} />

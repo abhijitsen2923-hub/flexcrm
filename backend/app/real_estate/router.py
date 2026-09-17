@@ -145,13 +145,33 @@ async def list_projects(
     return list((await session.execute(stmt)).scalars().all())
 
 
+def _json_demand_schedule(value):
+    """Serialise a demand-schedule list (Decimal percent / date due_date) into JSON-safe
+    dicts for the Project.demand_schedule JSON column."""
+    if not value:
+        return value
+    out = []
+    for m in value:
+        due = m.get("due_date")
+        out.append(
+            {
+                "label": m.get("label"),
+                "percent": float(m.get("percent") or 0),
+                "due_date": due.isoformat() if hasattr(due, "isoformat") else (str(due) if due else None),
+            }
+        )
+    return out
+
+
 @router.post("/inventory/projects", response_model=ProjectRead, status_code=status.HTTP_201_CREATED)
 async def create_project(
     payload: ProjectCreate,
     _: object = Depends(require_permissions(PermissionCode.LEAD_MANAGE)),
     session: AsyncSession = Depends(get_db_session),
 ):
-    project = Project(**payload.model_dump())
+    data = payload.model_dump()
+    data["demand_schedule"] = _json_demand_schedule(data.get("demand_schedule"))
+    project = Project(**data)
     session.add(project)
     await session.commit()
     await session.refresh(project)
@@ -169,7 +189,9 @@ async def create_project_full(
     Add-Project wizard). All-or-nothing: a failure rolls the whole thing back."""
     # Everything except the nested towers maps 1:1 onto Project columns (incl. the
     # Phase-B detail + default box-price fields).
-    project = Project(**payload.model_dump(exclude={"towers"}))
+    data = payload.model_dump(exclude={"towers"})
+    data["demand_schedule"] = _json_demand_schedule(data.get("demand_schedule"))
+    project = Project(**data)
     session.add(project)
     await session.flush()
 
@@ -177,17 +199,34 @@ async def create_project_full(
         tower = Tower(project_id=project.id, name=tspec.name, total_floors=tspec.total_floors)
         session.add(tower)
         await session.flush()
+        # A tower can carry several unit-type batches (residential + shop + parking …).
+        # Number units per (prefix, floor) with a running counter shared ACROSS batches, so
+        # two same-prefix specs (e.g. 2BHK + 3BHK, both default prefix "R") continue the
+        # sequence (…R102 then R103…) instead of both restarting at R101 — units.unit_number
+        # has no DB-level uniqueness, so collisions must be prevented here. Counters reset
+        # per tower (R101 may legitimately exist in another tower).
+        specs = list(tspec.unit_specs)
         if tspec.units is not None:
-            u = tspec.units
+            specs.append(tspec.units)
+        seq: dict[tuple[str, int], int] = {}
+        used: set[str] = set()
+        for u in specs:
             prefix = (u.unit_prefix or _TYPE_PREFIX.get(u.unit_type, "U")).strip()
             for fu in u.floors:
-                for n in range(1, fu.count + 1):
+                for _ in range(fu.count):
+                    n = seq.get((prefix, fu.floor), 0) + 1
+                    unit_number = f"{prefix}{fu.floor}{n:02d}"
+                    while unit_number in used:  # belt-and-braces vs any residual overlap
+                        n += 1
+                        unit_number = f"{prefix}{fu.floor}{n:02d}"
+                    seq[(prefix, fu.floor)] = n
+                    used.add(unit_number)
                     session.add(
                         Unit(
                             project_id=project.id,
                             tower_id=tower.id,
                             floor=fu.floor,
-                            unit_number=f"{prefix}{fu.floor}{n:02d}",
+                            unit_number=unit_number,
                             unit_type=u.unit_type.value,
                             area=u.area,
                             carpet_area=u.carpet_area,
@@ -508,6 +547,8 @@ async def update_project(
     if not project or project.is_deleted:
         raise HTTPException(status_code=404, detail="Project not found")
     for field, value in payload.model_dump(exclude_unset=True).items():
+        if field == "demand_schedule":
+            value = _json_demand_schedule(value)
         setattr(project, field, value)
     await session.commit()
     await session.refresh(project)
@@ -724,6 +765,7 @@ async def update_site_visit(
 
 @router.get("/bookings/collection-ledger", response_model=list[CollectionLedgerEntry])
 async def collection_ledger(
+    project_id: UUID | None = Query(default=None),
     _: object = Depends(require_permissions(PermissionCode.FINANCE_VIEW)),
     session: AsyncSession = Depends(get_db_session),
 ):
@@ -732,14 +774,19 @@ async def collection_ledger(
             PaymentSchedule,
             Booking.status,
             Unit.unit_number,
+            Project.id.label("project_id"),
             Project.name.label("project_name"),
+            Customer.contact_name.label("customer_name"),
         )
         .join(Booking, PaymentSchedule.booking_id == Booking.id)
         .join(Unit, Booking.unit_id == Unit.id)
         .join(Project, Unit.project_id == Project.id)
+        .outerjoin(Customer, Booking.customer_id == Customer.id)
         .where(Booking.is_deleted.is_(False))
         .order_by(PaymentSchedule.due_date)
     )
+    if project_id is not None:
+        stmt = stmt.where(Project.id == project_id)
     rows = (await session.execute(stmt)).all()
     today = date.today()
     return [
@@ -754,11 +801,13 @@ async def collection_ledger(
             # Overdue is time-dependent — derive at read time rather than trusting
             # the stored column (which is written nowhere and stays False).
             is_overdue=(ps.outstanding > 0 and ps.due_date < today),
+            project_id=proj_id,
             project_name=project_name,
             unit_number=unit_number,
+            customer_name=customer_name,
             status=b_status,
         )
-        for ps, b_status, unit_number, project_name in rows
+        for ps, b_status, unit_number, proj_id, project_name, customer_name in rows
     ]
 
 
@@ -806,6 +855,32 @@ async def create_booking(
         raise HTTPException(status_code=404, detail="Unit not found")
     booking = Booking(**payload.model_dump())
     session.add(booking)
+    await session.flush()  # need booking.id to attach schedules
+    # Auto-apply the project's demand schedule: % of the unit price on the builder's
+    # fixed dates. A manual payment plan (create_payment_plan) later overrides this.
+    project = await session.get(Project, unit.project_id) if unit.project_id else None
+    schedule = getattr(project, "demand_schedule", None) if project else None
+    if schedule:
+        total = unit.base_price or Decimal("0")
+        today = date.today()
+        for m in schedule:
+            try:
+                percent = Decimal(str(m.get("percent") or 0))
+                due = date.fromisoformat(str(m.get("due_date")))
+            except (InvalidOperation, TypeError, ValueError):
+                continue
+            demand = (total * percent / Decimal(100)).quantize(Decimal("0.01"))
+            session.add(
+                PaymentSchedule(
+                    booking_id=booking.id,
+                    installment_name=str(m.get("label") or "Installment"),
+                    due_date=due,
+                    demand_amount=demand,
+                    paid_amount=Decimal("0"),
+                    outstanding=demand,
+                    is_overdue=(demand > 0 and due < today),
+                )
+            )
     await session.commit()
     stmt = (
         select(Booking)

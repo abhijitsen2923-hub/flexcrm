@@ -51,6 +51,14 @@ class TowerRead(ORMModel):
 GarageOption = Literal["MLP", "CP", "IP", "OP"]
 
 
+class DemandMilestone(ORMModel):
+    """One project demand milestone — a percentage of the unit price due on a fixed
+    calendar date. Bookings inherit these as installments."""
+    label: str = Field(min_length=1, max_length=120)
+    percent: Decimal = Field(gt=0, le=100)
+    due_date: date
+
+
 class ProjectDetailsMixin(ORMModel):
     """Phase-B project detail + default box-price fields — shared, all optional,
     so ProjectRead exposes them and ProjectCreate/Update accept them uniformly."""
@@ -71,6 +79,8 @@ class ProjectDetailsMixin(ORMModel):
     other_charges: Decimal | None = Field(default=None, ge=0)
     sinking_fund: Decimal | None = Field(default=None, ge=0)
     amenities_charges: Decimal | None = Field(default=None, ge=0)
+    # Builder's demand schedule (% of unit price on fixed dates), inherited by bookings.
+    demand_schedule: list[DemandMilestone] | None = None
 
 
 class ProjectRead(ProjectDetailsMixin):
@@ -185,10 +195,13 @@ class UnitBatchCreate(ORMModel):
 
 
 class ProjectTowerCreate(ORMModel):
-    """One tower + its (optional) unit batch, for the combined Add-Project form."""
+    """One tower + its unit batches, for the combined Add-Project form. A tower can
+    hold SEVERAL unit types (residential flats + shop/commercial + parking + godown),
+    each its own batch with its own count + sizes + price."""
     name: str = Field(min_length=1, max_length=100)
     total_floors: int = Field(ge=1, le=200)
-    units: UnitBatchCreate | None = None
+    unit_specs: list[UnitBatchCreate] = Field(default_factory=list)
+    units: UnitBatchCreate | None = None  # legacy single-spec — still honoured
 
 
 class ProjectFullCreate(ProjectCreate):
@@ -457,6 +470,8 @@ class CollectionLedgerEntry(ORMModel):
     paid_amount: Decimal
     outstanding: Decimal
     is_overdue: bool
+    project_id: UUID
     project_name: str
     unit_number: str
+    customer_name: str | None = None  # "from whom" — the booking's customer
     status: BookingStatus

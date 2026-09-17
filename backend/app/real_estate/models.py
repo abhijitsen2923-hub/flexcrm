@@ -60,6 +60,11 @@ class Project(TenantBase, UUIDPrimaryKeyMixin, TimestampMixin, TenantAuditMixin,
     sinking_fund: Mapped[Decimal | None] = mapped_column(Numeric(14, 2), nullable=True)
     amenities_charges: Mapped[Decimal | None] = mapped_column(Numeric(14, 2), nullable=True)
 
+    # Builder's demand/payment plan — a list of {label, percent, due_date}. A unit booked
+    # in this project auto-generates these installments (percent of the unit's price, on
+    # the builder's fixed calendar dates).
+    demand_schedule: Mapped[list | None] = mapped_column(JSON, nullable=True)
+
     towers: Mapped[list["Tower"]] = relationship(
         "Tower", back_populates="project", cascade="all, delete-orphan"
     )

@@ -89,10 +89,7 @@ function intOrNull(s: string): number | null {
 }
 
 // One tower row in the combined Add-Project form (+ its optional unit batch).
-interface TowerBuilder {
-  name: string;
-  total_floors: string;
-  addUnits: boolean;
+interface UnitSpec {
   unit_type: UnitType;
   units_per_floor: string;
   area: string;            // super built-up (saleable)
@@ -102,10 +99,15 @@ interface TowerBuilder {
   unit_prefix: string;
 }
 
-const EMPTY_TOWER: TowerBuilder = {
-  name: "",
-  total_floors: "10",
-  addUnits: true,
+interface TowerBuilder {
+  name: string;
+  total_floors: string;
+  addUnits: boolean;
+  // A tower can hold several unit types (flats + shops + parking …), each its own spec.
+  unitSpecs: UnitSpec[];
+}
+
+const EMPTY_UNIT_SPEC: UnitSpec = {
   unit_type: "residential",
   units_per_floor: "4",
   area: "1000",
@@ -113,6 +115,13 @@ const EMPTY_TOWER: TowerBuilder = {
   built_up_area: "",
   base_price: "5000000",
   unit_prefix: "",
+};
+
+const EMPTY_TOWER: TowerBuilder = {
+  name: "",
+  total_floors: "10",
+  addUnits: true,
+  unitSpecs: [{ ...EMPTY_UNIT_SPEC }],
 };
 
 const MEDIA_TYPE_OPTIONS: { value: ProjectMedia["type"]; label: string }[] = [
@@ -245,11 +254,32 @@ export default function ProjectsPage() {
   const [editingProject, setEditingProject] = useState<Project | null>(null);
   const [form, setForm] = useState<ProjectFormState>(EMPTY_PROJECT_FORM);
   const [towers, setTowers] = useState<TowerBuilder[]>([{ ...EMPTY_TOWER }]);
+  const [demandRows, setDemandRows] = useState<{ label: string; percent: string; due_date: string }[]>([]);
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
   function setTower(i: number, patch: Partial<TowerBuilder>) {
     setTowers((prev) => prev.map((t, idx) => (idx === i ? { ...t, ...patch } : t)));
+  }
+  function setUnitSpec(ti: number, si: number, patch: Partial<UnitSpec>) {
+    setTowers((prev) =>
+      prev.map((t, idx) =>
+        idx === ti ? { ...t, unitSpecs: t.unitSpecs.map((u, uj) => (uj === si ? { ...u, ...patch } : u)) } : t,
+      ),
+    );
+  }
+  function addUnitSpec(ti: number) {
+    setTowers((prev) =>
+      prev.map((t, idx) => (idx === ti ? { ...t, unitSpecs: [...t.unitSpecs, { ...EMPTY_UNIT_SPEC }] } : t)),
+    );
+  }
+  function removeUnitSpec(ti: number, si: number) {
+    setTowers((prev) =>
+      prev.map((t, idx) => (idx === ti ? { ...t, unitSpecs: t.unitSpecs.filter((_, uj) => uj !== si) } : t)),
+    );
+  }
+  function setDemandRow(i: number, patch: Partial<{ label: string; percent: string; due_date: string }>) {
+    setDemandRows((prev) => prev.map((r, idx) => (idx === i ? { ...r, ...patch } : r)));
   }
   const [archiveProject, setArchiveProject] = useState<Project | null>(null);
   const [archiving, setArchiving] = useState(false);
@@ -266,6 +296,7 @@ export default function ProjectsPage() {
     setEditingProject(null);
     setForm(EMPTY_PROJECT_FORM);
     setTowers([{ ...EMPTY_TOWER }]);
+    setDemandRows([]);
     setFormError(null);
     setFormOpen(true);
   }
@@ -296,6 +327,9 @@ export default function ProjectsPage() {
       sinking_fund: str(project.sinkingFund),
       amenities_charges: str(project.amenitiesCharges),
     });
+    setDemandRows(
+      (project.demandSchedule ?? []).map((m) => ({ label: m.label, percent: String(m.percent), due_date: m.due_date })),
+    );
     setFormError(null);
     setFormOpen(true);
   }
@@ -336,6 +370,12 @@ export default function ProjectsPage() {
       other_charges: numOrNull(form.other_charges),
       sinking_fund: numOrNull(form.sinking_fund),
       amenities_charges: numOrNull(form.amenities_charges),
+      demand_schedule: (() => {
+        const rows = demandRows
+          .filter((r) => r.label.trim() && Number(r.percent) > 0 && r.due_date)
+          .map((r) => ({ label: r.label.trim(), percent: Number(r.percent), due_date: r.due_date }));
+        return rows.length ? rows : null;
+      })(),
     };
     try {
       if (editingProject) {
@@ -347,20 +387,20 @@ export default function ProjectsPage() {
           .filter((t) => t.name.trim())
           .map((t) => {
             const floors = Math.max(1, Number(t.total_floors) || 1);
-            const perFloor = Number(t.units_per_floor) || 0;
-            const units =
-              t.addUnits && perFloor > 0
-                ? {
-                    unit_type: t.unit_type,
-                    floors: Array.from({ length: floors }, (_, i) => ({ floor: i + 1, count: perFloor })),
-                    area: Number(t.area) || 1,
-                    carpet_area: t.carpet_area ? Number(t.carpet_area) : null,
-                    built_up_area: t.built_up_area ? Number(t.built_up_area) : null,
-                    base_price: Number(t.base_price) || 0,
-                    unit_prefix: t.unit_prefix.trim() || undefined,
-                  }
-                : null;
-            return { name: t.name.trim(), total_floors: floors, units };
+            const unit_specs = t.addUnits
+              ? t.unitSpecs
+                  .filter((u) => (Number(u.units_per_floor) || 0) > 0)
+                  .map((u) => ({
+                    unit_type: u.unit_type,
+                    floors: Array.from({ length: floors }, (_, i) => ({ floor: i + 1, count: Number(u.units_per_floor) || 0 })),
+                    area: Number(u.area) || 1,
+                    carpet_area: u.carpet_area ? Number(u.carpet_area) : null,
+                    built_up_area: u.built_up_area ? Number(u.built_up_area) : null,
+                    base_price: Number(u.base_price) || 0,
+                    unit_prefix: u.unit_prefix.trim() || undefined,
+                  }))
+              : [];
+            return { name: t.name.trim(), total_floors: floors, unit_specs };
           });
         await inventoryService.createProjectFull({ ...payload, towers: towersPayload });
         toast.success("Project created", `${payload.name}${towersPayload.length ? ` · ${towersPayload.length} tower(s)` : ""}`);
@@ -578,6 +618,46 @@ export default function ProjectsPage() {
             <TextField id="project-other-charges" label="Other Charges (₹)" type="number" min={0} value={form.other_charges} onChange={(e) => setForm({ ...form, other_charges: e.target.value })} />
           </div>
 
+          <div className="stack" style={{ gap: "0.6rem", borderTop: "1px solid var(--color-border)", paddingTop: "0.85rem" }}>
+            <div className="row row--between" style={{ alignItems: "center" }}>
+              <div>
+                <strong>Demand schedule</strong>
+                <p className="muted text-xs" style={{ margin: 0 }}>
+                  Payment milestones — % of the unit price on fixed dates. A unit booked in this project inherits these demands.
+                </p>
+              </div>
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                icon={<Plus size={14} />}
+                onClick={() => setDemandRows([...demandRows, { label: "", percent: "", due_date: "" }])}
+              >
+                Add milestone
+              </Button>
+            </div>
+            {demandRows.length > 0 && (
+              <div className="muted text-xs">
+                Total: {demandRows.reduce((s, r) => s + (Number(r.percent) || 0), 0)}%
+              </div>
+            )}
+            {demandRows.map((r, i) => (
+              <div key={i} className="row" style={{ gap: "0.5rem", alignItems: "flex-end" }}>
+                <div style={{ flex: 2 }}>
+                  <TextField id={`dm-label-${i}`} label="Milestone" maxLength={120} value={r.label} onChange={(e) => setDemandRow(i, { label: e.target.value })} placeholder="e.g. On Booking / Plinth / Possession" />
+                </div>
+                <div style={{ flex: 1 }}>
+                  <TextField id={`dm-pct-${i}`} label="%" type="number" min={0} max={100} value={r.percent} onChange={(e) => setDemandRow(i, { percent: e.target.value })} />
+                </div>
+                <div style={{ flex: 1.4 }}>
+                  <TextField id={`dm-due-${i}`} label="Due date" type="date" value={r.due_date} onChange={(e) => setDemandRow(i, { due_date: e.target.value })} />
+                </div>
+                <button type="button" className="btn btn--ghost btn--icon" onClick={() => setDemandRows(demandRows.filter((_, idx) => idx !== i))} aria-label="Remove milestone">
+                  <Trash2 size={14} />
+                </button>
+              </div>
+            ))}
+          </div>
           {!editingProject && (
             <div className="stack" style={{ gap: "0.6rem", borderTop: "1px solid var(--color-border)", paddingTop: "0.85rem" }}>
               <div className="row row--between" style={{ alignItems: "center" }}>
@@ -596,11 +676,14 @@ export default function ProjectsPage() {
                 Add one or more towers now, each with its units. You can always add more later from the project.
               </p>
               {towers.map((t, i) => {
-                const count = (Number(t.total_floors) || 0) * (Number(t.units_per_floor) || 0);
+                const floors = Number(t.total_floors) || 0;
+                const towerTotal = t.addUnits
+                  ? t.unitSpecs.reduce((s, u) => s + floors * (Number(u.units_per_floor) || 0), 0)
+                  : 0;
                 return (
                   <div key={i} className="card" style={{ padding: "0.75rem", background: "var(--color-surface-muted)" }}>
                     <div className="row row--between" style={{ alignItems: "center", marginBottom: "0.4rem" }}>
-                      <span className="muted text-xs">Tower {i + 1}</span>
+                      <span className="muted text-xs">Tower {i + 1}{towerTotal > 0 ? ` · ${towerTotal} units` : ""}</span>
                       {towers.length > 1 && (
                         <button
                           type="button"
@@ -614,35 +697,48 @@ export default function ProjectsPage() {
                     </div>
                     <div className="form-grid">
                       <TextField id={`tower-name-${i}`} label="Tower name" value={t.name} onChange={(e) => setTower(i, { name: e.target.value })} placeholder="e.g. Tower A" />
-                      <TextField id={`tower-floors-${i}`} label="Total floors" type="number" min={1} value={t.total_floors} onChange={(e) => setTower(i, { total_floors: e.target.value })} />
+                      <TextField id={`tower-floors-${i}`} label="Total floors" type="number" min={1} max={200} value={t.total_floors} onChange={(e) => setTower(i, { total_floors: e.target.value })} />
                     </div>
                     <label className="row" style={{ gap: "0.4rem", alignItems: "center", margin: "0.55rem 0 0.3rem" }}>
                       <input type="checkbox" checked={t.addUnits} onChange={(e) => setTower(i, { addUnits: e.target.checked })} />
                       <span className="text-sm">Generate units for this tower</span>
                     </label>
                     {t.addUnits && (
-                      <>
-                        <div className="form-grid">
-                          <SelectField id={`tower-utype-${i}`} label="Unit type" value={t.unit_type} onChange={(e) => setTower(i, { unit_type: e.target.value as UnitType })} options={UNIT_TYPE_OPTIONS} />
-                          <TextField id={`tower-perfloor-${i}`} label="Units per floor" type="number" min={1} value={t.units_per_floor} onChange={(e) => setTower(i, { units_per_floor: e.target.value })} />
-                        </div>
-                        <div className="form-grid">
-                          <TextField id={`tower-carpet-${i}`} label="Carpet area (sqft)" type="number" min={0} value={t.carpet_area} onChange={(e) => setTower(i, { carpet_area: e.target.value })} placeholder="e.g. 800" />
-                          <TextField id={`tower-builtup-${i}`} label="Built-up area (sqft)" type="number" min={0} value={t.built_up_area} onChange={(e) => setTower(i, { built_up_area: e.target.value })} placeholder="e.g. 950" />
-                        </div>
-                        <div className="form-grid">
-                          <TextField id={`tower-area-${i}`} label="Super built-up area (sqft)" type="number" min={1} value={t.area} onChange={(e) => setTower(i, { area: e.target.value })} required hint="Saleable area — used for pricing" />
-                          <TextField id={`tower-price-${i}`} label="Base price (₹)" type="number" min={0} value={t.base_price} onChange={(e) => setTower(i, { base_price: e.target.value })} />
-                        </div>
-                        <TextField
-                          id={`tower-prefix-${i}`}
-                          label="Unit no. prefix (optional)"
-                          value={t.unit_prefix}
-                          onChange={(e) => setTower(i, { unit_prefix: e.target.value })}
-                          placeholder="e.g. A"
-                          hint={count > 0 ? `${count} units will be created` : undefined}
-                        />
-                      </>
+                      <div className="stack" style={{ gap: "0.6rem" }}>
+                        {t.unitSpecs.map((u, si) => {
+                          const specCount = floors * (Number(u.units_per_floor) || 0);
+                          return (
+                            <div key={si} className="card" style={{ padding: "0.6rem", background: "var(--color-surface)" }}>
+                              <div className="row row--between" style={{ alignItems: "center", marginBottom: "0.35rem" }}>
+                                <span className="muted text-xs">
+                                  {UNIT_TYPE_OPTIONS.find((o) => o.value === u.unit_type)?.label ?? "Unit type"}
+                                </span>
+                                {t.unitSpecs.length > 1 && (
+                                  <button type="button" className="btn btn--ghost btn--icon" onClick={() => removeUnitSpec(i, si)} aria-label="Remove unit type">
+                                    <Trash2 size={14} />
+                                  </button>
+                                )}
+                              </div>
+                              <div className="form-grid">
+                                <SelectField id={`t${i}-utype-${si}`} label="Unit type" value={u.unit_type} onChange={(e) => setUnitSpec(i, si, { unit_type: e.target.value as UnitType })} options={UNIT_TYPE_OPTIONS} />
+                                <TextField id={`t${i}-perfloor-${si}`} label="Units per floor" type="number" min={1} max={200} value={u.units_per_floor} onChange={(e) => setUnitSpec(i, si, { units_per_floor: e.target.value })} />
+                              </div>
+                              <div className="form-grid">
+                                <TextField id={`t${i}-carpet-${si}`} label="Carpet area (sqft)" type="number" min={0} value={u.carpet_area} onChange={(e) => setUnitSpec(i, si, { carpet_area: e.target.value })} placeholder="e.g. 800" />
+                                <TextField id={`t${i}-builtup-${si}`} label="Built-up area (sqft)" type="number" min={0} value={u.built_up_area} onChange={(e) => setUnitSpec(i, si, { built_up_area: e.target.value })} placeholder="e.g. 950" />
+                              </div>
+                              <div className="form-grid">
+                                <TextField id={`t${i}-area-${si}`} label="Super built-up area (sqft)" type="number" min={1} value={u.area} onChange={(e) => setUnitSpec(i, si, { area: e.target.value })} required hint="Saleable area — used for pricing" />
+                                <TextField id={`t${i}-price-${si}`} label="Base price (₹)" type="number" min={0} value={u.base_price} onChange={(e) => setUnitSpec(i, si, { base_price: e.target.value })} />
+                              </div>
+                              <TextField id={`t${i}-prefix-${si}`} label="Unit no. prefix (optional)" value={u.unit_prefix} onChange={(e) => setUnitSpec(i, si, { unit_prefix: e.target.value })} placeholder="e.g. A / S / P" hint={specCount > 0 ? `${specCount} units will be created` : undefined} />
+                            </div>
+                          );
+                        })}
+                        <Button type="button" size="sm" variant="ghost" icon={<Plus size={14} />} onClick={() => addUnitSpec(i)}>
+                          Add unit type
+                        </Button>
+                      </div>
                     )}
                   </div>
                 );

@@ -61,9 +61,10 @@ export interface MonthlyReport {
 
 export interface CollectionEntry {
   booking_id: string;
-  booking_number: string;
   unit_number: string;
+  project_id: string;
   project_name: string;
+  customer_name: string | null; // "from whom"
   installment_name: string;
   due_date: string;
   demand_amount: number;
@@ -99,8 +100,8 @@ export const financeService = {
     const { data } = await apiClient.get<MonthlyReport>(`/finance/reports/monthly?month=${month}`);
     return data;
   },
-  async listCollectionLedger(): Promise<CollectionEntry[]> {
-    const { data } = await apiClient.get<CollectionEntry[]>("/bookings/collection-ledger");
+  async listCollectionLedger(params: { project_id?: string } = {}): Promise<CollectionEntry[]> {
+    const { data } = await apiClient.get<CollectionEntry[]>(`/bookings/collection-ledger${qs(params)}`);
     return data;
   },
 

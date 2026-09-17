@@ -71,6 +71,7 @@ interface ApiProject {
   other_charges?: number | string | null;
   sinking_fund?: number | string | null;
   amenities_charges?: number | string | null;
+  demand_schedule?: DemandMilestonePayload[] | null;
   created_at: string;
   updated_at: string;
   towers?: ApiTower[];
@@ -159,6 +160,7 @@ function mapProject(p: ApiProject): Project {
     otherCharges: numOrNull(p.other_charges),
     sinkingFund: numOrNull(p.sinking_fund),
     amenitiesCharges: numOrNull(p.amenities_charges),
+    demandSchedule: p.demand_schedule ?? null,
     towers,
     media: (p.media ?? []).map((m) => ({
       id: m.id,
@@ -175,6 +177,12 @@ function mapProject(p: ApiProject): Project {
 
 // Phase-B detail + default box-price fields (snake_case, all optional). Shared by
 // the create and update payloads so both stay in sync with the backend schema.
+export interface DemandMilestonePayload {
+  label: string;
+  percent: number;
+  due_date: string; // YYYY-MM-DD
+}
+
 export interface ProjectDetailsPayload {
   pin_code?: string | null;
   landmark?: string | null;
@@ -192,6 +200,7 @@ export interface ProjectDetailsPayload {
   other_charges?: number | null;
   sinking_fund?: number | null;
   amenities_charges?: number | null;
+  demand_schedule?: DemandMilestonePayload[] | null;
 }
 
 export interface ProjectCreatePayload extends ProjectDetailsPayload {
@@ -222,7 +231,8 @@ export interface UnitBatchPayload {
 export interface ProjectTowerPayload {
   name: string;
   total_floors: number;
-  units?: UnitBatchPayload | null;
+  unit_specs?: UnitBatchPayload[]; // several unit types per tower, each its own batch
+  units?: UnitBatchPayload | null; // legacy single-spec (still accepted)
 }
 
 export interface ProjectFullPayload extends ProjectCreatePayload {

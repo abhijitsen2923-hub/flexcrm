@@ -190,6 +190,8 @@ class VendorRead(ORMModel):
     name: str
     contact_name: str | None = None
     phone: str | None = None
+    poc_name: str | None = None
+    poc_phone: str | None = None
     email: str | None = None
     gstin: str | None = None
     pan: str | None = None
@@ -207,6 +209,8 @@ class VendorCreate(ORMModel):
     name: str = Field(min_length=1, max_length=255)
     contact_name: str | None = Field(default=None, max_length=255)
     phone: str | None = Field(default=None, max_length=40)
+    poc_name: str | None = Field(default=None, max_length=255)
+    poc_phone: str | None = Field(default=None, max_length=40)
     email: str | None = Field(default=None, max_length=255)
     gstin: str | None = Field(default=None, max_length=15)
     pan: str | None = Field(default=None, max_length=20)

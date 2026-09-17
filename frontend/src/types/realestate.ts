@@ -68,6 +68,7 @@ export interface Project {
   otherCharges: number | null;
   sinkingFund: number | null;
   amenitiesCharges: number | null;
+  demandSchedule: { label: string; percent: number; due_date: string }[] | null;
   towers: Tower[];
   media: ProjectMedia[];
   totalUnits: number;
