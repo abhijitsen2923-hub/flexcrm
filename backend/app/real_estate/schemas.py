@@ -294,6 +294,15 @@ class PaymentScheduleCreate(ORMModel):
     paid_amount: Decimal = Field(default=Decimal("0"), ge=0)
 
 
+class PaymentScheduleUpdate(ORMModel):
+    """Edit an individual demand row after it was generated. All optional — only
+    the sent fields change; payments/receipts are untouched (those go through the
+    payment endpoints)."""
+    installment_name: str | None = Field(default=None, min_length=1, max_length=120)
+    due_date: date | None = None
+    demand_amount: Decimal | None = Field(default=None, ge=0)
+
+
 class PaymentReceiptRead(ORMModel):
     id: UUID
     booking_id: UUID

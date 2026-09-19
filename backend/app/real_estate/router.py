@@ -56,7 +56,9 @@ from app.real_estate.schemas import (
     CollectionLedgerEntry,
     PaymentPlanCreate,
     PaymentReceiptCreate,
+    PaymentScheduleCreate,
     PaymentScheduleRead,
+    PaymentScheduleUpdate,
     PossessionChecklistUpdate,
     PricingUpdate,
     ProjectCreate,
@@ -1238,6 +1240,100 @@ async def create_payment_plan(
         )
     await session.commit()
     return await _booking_read(session, booking_id)
+
+
+@router.post(
+    "/bookings/{booking_id}/payment-schedules",
+    response_model=PaymentScheduleRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def add_payment_schedule(
+    booking_id: UUID,
+    payload: PaymentScheduleCreate,
+    _: object = Depends(require_permissions(PermissionCode.FINANCE_RECORD_PAYMENT)),
+    session: AsyncSession = Depends(get_db_session),
+):
+    """Add a single demand row to a booking's schedule (e.g. an installment the
+    project template didn't cover). Complements create_payment_plan, which
+    replaces the whole plan; this adds one row without disturbing recorded
+    payments on the others."""
+    booking = await session.get(Booking, booking_id)
+    if not booking or booking.is_deleted:
+        raise HTTPException(status_code=404, detail="Booking not found")
+    demand = payload.demand_amount
+    ps = PaymentSchedule(
+        booking_id=booking_id,
+        installment_name=payload.installment_name,
+        due_date=payload.due_date,
+        demand_amount=demand,
+        paid_amount=Decimal("0"),
+        outstanding=demand,
+        is_overdue=(demand > 0 and payload.due_date < date.today()),
+    )
+    session.add(ps)
+    await session.commit()
+    await session.refresh(ps)
+    return ps
+
+
+@router.patch(
+    "/bookings/{booking_id}/payment-schedules/{schedule_id}",
+    response_model=PaymentScheduleRead,
+)
+async def update_payment_schedule(
+    booking_id: UUID,
+    schedule_id: UUID,
+    payload: PaymentScheduleUpdate,
+    _: object = Depends(require_permissions(PermissionCode.FINANCE_RECORD_PAYMENT)),
+    session: AsyncSession = Depends(get_db_session),
+):
+    """Edit an individual demand row (label / due date / amount) after it was
+    generated. Recorded payments are untouched; outstanding + overdue are
+    recomputed. A demand can't be lowered below what's already been paid."""
+    ps = await session.get(PaymentSchedule, schedule_id)
+    if not ps or ps.booking_id != booking_id:
+        raise HTTPException(status_code=404, detail="Installment not found")
+    data = payload.model_dump(exclude_unset=True)
+    if "installment_name" in data:
+        ps.installment_name = data["installment_name"]
+    if "due_date" in data:
+        ps.due_date = data["due_date"]
+    if "demand_amount" in data and data["demand_amount"] is not None:
+        if data["demand_amount"] < (ps.paid_amount or Decimal("0")):
+            raise HTTPException(
+                status_code=409,
+                detail="Demand can't be less than the amount already paid.",
+            )
+        ps.demand_amount = data["demand_amount"]
+    ps.outstanding = max(Decimal("0"), ps.demand_amount - (ps.paid_amount or Decimal("0")))
+    ps.is_overdue = ps.outstanding > 0 and ps.due_date < date.today()
+    await session.commit()
+    await session.refresh(ps)
+    return ps
+
+
+@router.delete(
+    "/bookings/{booking_id}/payment-schedules/{schedule_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def delete_payment_schedule(
+    booking_id: UUID,
+    schedule_id: UUID,
+    _: object = Depends(require_permissions(PermissionCode.FINANCE_RECORD_PAYMENT)),
+    session: AsyncSession = Depends(get_db_session),
+):
+    """Remove a demand row. Blocked once any payment has been recorded against it
+    (delete the receipts first via a refund flow if truly needed)."""
+    ps = await session.get(PaymentSchedule, schedule_id)
+    if not ps or ps.booking_id != booking_id:
+        raise HTTPException(status_code=404, detail="Installment not found")
+    if (ps.paid_amount or Decimal("0")) > 0:
+        raise HTTPException(
+            status_code=409,
+            detail="Payments recorded against this demand; cannot delete it.",
+        )
+    await session.delete(ps)
+    await session.commit()
 
 
 @router.post("/bookings/{booking_id}/payments", response_model=BookingRead)
