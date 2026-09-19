@@ -6,7 +6,6 @@ from uuid import UUID
 from pydantic import Field
 
 from app.schemas.common import ORMModel
-from app.schemas.user import UserSummary
 
 
 # Spec §3.2: mandatory comment box, "stays disabled until at least 10 characters
@@ -57,6 +56,18 @@ class StageTransitionCreate(ORMModel):
     booking: BookedTokenCapture | None = None
 
 
+class TransitionActor(ORMModel):
+    """Lean actor for stage-history display — id + name only. Deliberately does
+    NOT carry the actor's email: UserSummary.email is a strict EmailStr, so a
+    performed_by whose account has a non-standard/placeholder email (a shared
+    "Sales Team" or an integration user) would fail validation and 500 the whole
+    stage-history response. The history UI only shows the actor's name."""
+
+    id: UUID
+    first_name: str | None = None
+    last_name: str | None = None
+
+
 class StageTransitionRead(ORMModel):
     id: UUID
     lead_id: UUID
@@ -68,4 +79,4 @@ class StageTransitionRead(ORMModel):
     performed_by_id: UUID | None = None
     performed_at: datetime
     mentions: list[UUID] | None = None
-    performed_by: UserSummary | None = None
+    performed_by: TransitionActor | None = None

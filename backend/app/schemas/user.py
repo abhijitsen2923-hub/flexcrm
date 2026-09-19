@@ -1,7 +1,7 @@
 from datetime import datetime
 from uuid import UUID
 
-from pydantic import EmailStr, Field
+from pydantic import Field
 
 from app.database.enums import LeadIndustry, UserRole, UserStatus
 from app.schemas.common import NormalizedEmail, ORMModel, SearchSortParams
@@ -11,7 +11,12 @@ class UserSummary(ORMModel):
     id: UUID
     first_name: str
     last_name: str
-    email: EmailStr
+    # Read-only output: keep as a plain string, NOT EmailStr. The value was already
+    # validated on write; re-validating here means any account with a reserved-TLD
+    # placeholder email (e.g. the integration/system user at "…@flexcrm.local")
+    # 500s every read that nests a UserSummary (stage history, task/lead/customer
+    # owner). A read schema must not reject data the DB already holds.
+    email: str
     role: UserRole
     status: UserStatus
     business_type: LeadIndustry | None = None
