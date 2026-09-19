@@ -75,6 +75,16 @@ class LeadService(ServiceBase):
                 message=f"{count} lead{'s' if count != 1 else ''} assigned to you.",
             )
         await self.commit()
+        if count:
+            # A bulk owner change alters the dashboard/analytics summary counts
+            # (both the new owner's own-scoped tile and the org/manager view) and
+            # any open leads list. Mirror the single-lead path so those refresh
+            # immediately instead of serving the pre-assignment values until the
+            # 5-minute reporting-cache TTL lapses.
+            await self.invalidate_reporting_cache()
+            await realtime_manager.broadcast(
+                {"event": "lead.reassigned", "payload": {"count": count, "assigned_to_id": str(assigned_to_id)}}
+            )
         return count
 
     async def log_call(
