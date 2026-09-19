@@ -1,6 +1,6 @@
 # FlexCRM
 
-A full-stack CRM (customers, leads, deals, tasks, activities, dashboards, analytics) with role-based access, JWT auth, real-time WebSocket updates, and Redis-backed caching/rate-limiting.
+A multi-tenant (schema-per-tenant) full-stack CRM with role-based access, JWT auth, real-time WebSocket updates, and Redis-backed caching/rate-limiting. Core CRM (customers, leads, deals, tasks, activities, dashboards, analytics) plus a rich **real-estate vertical** (inventory → bookings → payment schedules/receivables, site visits, registration/possession trackers), a **finance vertical** (expenses, vendors, income, customer demands, payroll, budgets, bank/reconciliation), **HR** scorecards, **customer** and **channel-partner** portals, and four lead-source integrations (**Meta** Lead Ads, **99acres**, **Google Sheets**, and **Callyzer** call-tracking).
 
 - **Backend** — FastAPI (Python 3.10+) + SQLAlchemy 2.0 async + PostgreSQL + Alembic
 - **Frontend** — React 18 + TypeScript + Vite + axios + recharts

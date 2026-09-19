@@ -1,9 +1,44 @@
-# FlexCRM — Project Handoff / MEMORY (as of 2026-08-21)
+# FlexCRM — Project Handoff / MEMORY (as of 2026-09-19)
 
 > Complete record of the FlexCRM application — architecture, every module, deployment, current status,
 > and the roadmap — written so you can step away (or hand off) and resume with zero context loss.
-> The Meta Lead Ads integration is the most recent work and the only thing currently blocked; it has
-> its own detailed section (§7).
+> §7 (Meta Lead Ads) is still blocked on Meta App Review. The **Recent additions** block below captures the
+> month of work after the original 2026-08-21 handoff — read it first for what changed.
+
+---
+
+## 0. Recent additions (2026-08 → 2026-09-19)
+
+Everything in §§1–7 still holds structurally; these are the deltas since the original handoff.
+
+- **Two more lead sources went LIVE** beyond Meta: **99acres** (push, secret-in-URL per-tenant token) and
+  **Google Sheet lead sync** (pull, one platform service account reads tenant-shared sheets; ingests Meta
+  rows a tenant routes through a Sheet to sidestep the Meta gate). Both deployed and working in prod.
+- **Callyzer call-tracking** (4th integration, per-tenant PULL): `ExternalCall` sync, a Calls page, a
+  Performance tab (per-employee call stats), a fold of call activity into the HR scorecard (Callyzer-orgs
+  only), and caller→user mapping. **Committed & pushed, but NOT yet deployed.**
+- **Finance vertical (Phases 1–3)** added to `app/finance/` alongside the sold-triggered
+  SalesOrder/Commission engine: expenses (draft→submit→approve→pay), vendors + bills/payments, manual income,
+  a per-customer demand ledger (contracts→demands→receipts), payroll, budgets, bank/cash + reconciliation,
+  PDF docs. Business mode (`FinanceBusinessMode`) set at signup. **Pushed, not yet deployed.**
+- **Real-estate/finance batch**: `Project.demand_schedule` (auto-generates `PaymentSchedule` installments on
+  booking = % of unit price on the builder's dates), multiple unit types per tower, Customer Receivables with
+  project filter + customer + generated/pending/overdue KPIs, vendor POC, vendor-payment KPIs; plus editable
+  per-customer demands. **Pushed (batch) / uncommitted (editable demands), not yet deployed.**
+- **Mobile-first redesign** (compact leads list, click-to-call/WhatsApp, app-wide overflow fixes), a
+  consolidated Leads filter panel, repeated follow-ups + reschedule/cancel site visits, a duplicate-lead
+  Fresh/Assigned chip, site-visit calendar scoped to the assigned rep, and a hardened forgiving CSV importer.
+- **Two production bugs found & fixed this month**: (1) `bulk_reassign` skipped the reporting-cache
+  invalidation + realtime broadcast → dashboards showed stale per-user/org lead counts for ~5 min (fixed,
+  uncommitted); (2) a frontend deploy crashed already-open tabs via stale hashed chunks + SPA fallback (fixed
+  with auto-reload, uncommitted).
+
+**⚠️ Deploy reality:** because the GitHub→Cloud Build CD trigger is broken, the **prod backend is well behind
+`origin/main`** — Finance, Callyzer, and the real-estate/finance batch are all pushed but **un-deployed**
+(current tenant migration head on origin is **t043**; prod is older). A manual `gcloud run deploy` from
+`backend/` applies the pending migrations. This is why some committed features 500 or are missing in prod.
+For a fuller, always-loaded status see the `.claude` memory files (backend-deploy-ops, reporting-cache,
+callyzer, realestate-finance, google-sheets, frontend-deploy-chunks, local-dev-stack).
 
 ---
 
@@ -153,10 +188,12 @@ Modal, FormField, Toast…), `layout/*` (AppLayout, Sidebar, Topbar, MobileBotto
   (`MetaData(schema="tenant")`). Cross-schema FKs resolved via public stub tables.
 - **Enums** single-source in `app/database/enums.py` (all StrEnum).
 - **TWO Alembic chains** (key deployment nuance):
-  - **Public** — `migrations/` + `alembic.ini` (`target_metadata=Base.metadata`). Head `20260817_0111`
-    (…meta_page_routes 0110, provider_user_id 0111). **Run at container boot** by `docker-entrypoint.sh`.
+  - **Public** — `migrations/` + `alembic.ini` (`target_metadata=Base.metadata`). Head `20260903_0114`
+    (finance_business_mode + finance enums; earlier: meta_page_routes 0110, provider_user_id 0111).
+    **Run at container boot** by `docker-entrypoint.sh`.
   - **Tenant** — `migrations_tenant/` + `alembic_tenant.ini` (`target_metadata=TenantBase.metadata`). Head
-    `20260805_t030` (meta_connections oauth cols). `env.py` supports single-schema (provisioning) and batch
+    **`20260917_t043`** (real-estate/finance batch — 43 tenant migrations total; recent chain: finance
+    t033–t038, callyzer t040–t042, batch t043). `env.py` supports single-schema (provisioning) and batch
     (all schemas) modes via `TARGET_SCHEMA`. **Applied in-app** by `upgrade_all_tenant_schemas()` at
     lifespan startup + at provision time. Both env files import all vertical model packages.
 - **Provisioning** — `app/services/tenant_provisioner.py`: validate schema name → `CREATE SCHEMA` (own
@@ -172,8 +209,11 @@ Modal, FormField, Toast…), `layout/*` (AppLayout, Sidebar, Topbar, MobileBotto
   `REDIS_URL`, `CORS_ORIGINS`, `CRON_SECRET`, `META_ENC_KEYS`, `META_APP_*`, `APP_BASE_URL`, platform-admin
   bootstrap, SMTP/Resend, S3.
 - **Frontend** `frontend/wrangler.jsonc` + `worker/index.js` — Worker serves `./dist` (SPA fallback) and
-  runs the cron `scheduled` handler → POSTs backend `/cron/*` with `X-Cron-Key`. Crons (UTC): `30 3`
-  (09:00 IST) = poll + reminders + follow-ups + token-refresh; `30 15` (21:00 IST) = poll only. Build =
+  runs the cron `scheduled` handler → POSTs backend `/cron/*` with `X-Cron-Key`. Crons (UTC) are now **4×/
+  day**: `30 3` / `15 11` / `0 12` / `30 15` (09:00 / 16:45 / 17:30 / 21:00 IST). All four run the lead
+  pulls (Meta poll + 99acres reconcile + Google-Sheet sync + Callyzer sync); the 09:00 one ALSO runs
+  reminders + follow-ups + Meta token-refresh + nightly maintenance (customer-health, HR scorecards,
+  retention archival). The old every-4-min keep-alive was removed (Neon free-tier compute). Build =
   `tsc --noEmit && vite build`. **Build-time vars** (must be set in Cloudflare, NOT committed):
   `VITE_API_BASE_URL`, `VITE_FEATURE_META_LEADS_ENABLED`, and the other `VITE_FEATURE_*`.
 - **Handoff flags:** no test/lint/CI in frontend; `VITE_API_BASE_URL` + `VITE_FEATURE_META_LEADS_ENABLED`
@@ -234,8 +274,10 @@ OAuth redirect `…/api/v1/integrations/meta/oauth/callback` · webhook `…/api
 
 ## 8. Current status & roadmap
 
-**Status:** Application is live and feature-complete across all modules above. The Meta integration is
-built + deployed + verified, **blocked only on Meta App Review** for `leads_retrieval`.
+**Status:** Feature-rich and live, but note the **deploy gap** (see §0): a month of committed backend work
+(Finance vertical, Callyzer, real-estate/finance batch) is pushed to `origin/main` but **not yet deployed** to
+Cloud Run, so the prod backend trails the repo — deploy manually to apply migrations up to t043. The Meta
+integration is built + deployed + verified, **blocked only on Meta App Review** for `leads_retrieval`.
 
 **Meta roadmap (to unblock real leads):**
 1. **App Review pack** (long-pole): public Privacy Policy + Data-Deletion pages; `leads_retrieval`
@@ -274,8 +316,8 @@ command works (previously only `python -m pytest` could import `app`).
 
 **Other known deferred items:** realtime multi-worker (needs Redis pub/sub); WhatsApp conversational inbox
 (scoped, deferred). **Open findings not yet fixed** (surfaced during the 2026-08-22 review, listed most severe
-first): cross-tenant lead assignment (`bulk_reassign` does a bare `UPDATE` with no reference check, and
-`UserRepository` has no org filter, so a lead can be assigned to another org's user); 429 responses carry no
+first): ~~cross-tenant lead assignment~~ — **FIXED** (P0, commit 545f35d): `bulk_reassign` now resolves the
+target via `UserRepository.get_in_org(assigned_to_id, current_org)` before the UPDATE; 429 responses carry no
 CORS headers because `CORSMiddleware` is added first and so runs innermost; rate limiting is effectively global
 behind Cloud Run since uvicorn starts without `--proxy-headers`; `EXPOSE_ERROR_DETAIL` and `DOCS_ENABLED`
 default `True` and are not covered by `_reject_insecure_production`; legacy `UserRole.admin` still grants all 24
