@@ -49,7 +49,7 @@ export const leadIndustryOptions: Option<LeadIndustry>[] = asOptions([
 export const leadSourceOptions: Option<string>[] = [
   "Walk-in", "Reference", "Instagram", "Facebook / Meta", "WhatsApp",
   "Google Ads", "Website", "99acres", "MagicBricks", "Housing.com",
-  "Cold call", "Newspaper / Print", "Hoarding", "Other"
+  "AntTech", "Cold call", "Newspaper / Print", "Hoarding", "Other"
 ].map((v) => ({ value: v, label: v }));
 
 // Controlled marketing-campaign list (attribution alongside source). Orgs can

@@ -17,6 +17,7 @@ from app.database.session import get_db_session
 from app.schemas.lead_source import (
     GoogleSheetConnectRequest,
     GoogleSheetConnectResponse,
+    GoogleSheetUpdateRequest,
     LeadSourceConnectionRead,
     LeadSourceConnectRequest,
     LeadSourceConnectResponse,
@@ -93,12 +94,33 @@ async def connect_google_sheet(
     """Verify the service account can read the sheet (it must be shared with the SA email), then
     store the connection. The poll cron then ingests rows on a schedule."""
     conn = await GoogleSheetService(session).connect(
-        sheet_id=payload.sheet_id, label=payload.label, actor_id=current_user.id
+        sheet_id=payload.sheet_id,
+        label=payload.label,
+        source=payload.source,
+        sheet_format=payload.sheet_format,
+        actor_id=current_user.id,
     )
     return GoogleSheetConnectResponse(
         connection=LeadSourceConnectionRead.model_validate(conn),
         service_account_email=get_settings().google_sa_email,
     )
+
+
+@router.patch("/google-sheets/{connection_id}", response_model=LeadSourceConnectionRead)
+async def update_google_sheet(
+    connection_id: UUID,
+    payload: GoogleSheetUpdateRequest,
+    current_user=Depends(require_permissions(PermissionCode.ORG_MANAGE)),
+    session: AsyncSession = Depends(get_db_session),
+):
+    """Set/change an existing connection's lead source + sheet format in place (no reconnect)."""
+    conn = await GoogleSheetService(session).update_connection(
+        connection_id,
+        source=payload.source,
+        sheet_format=payload.sheet_format,
+        actor_id=current_user.id,
+    )
+    return LeadSourceConnectionRead.model_validate(conn)
 
 
 @router.get("/google-sheets", response_model=list[LeadSourceConnectionRead])

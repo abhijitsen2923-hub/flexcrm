@@ -101,6 +101,9 @@ export interface LeadSourceConnection {
   last_lead_at: string | null;
   is_active: boolean;
   created_at: string;
+  // google-sheets connections only: the declared lead source + row format.
+  source?: string | null;
+  sheet_format?: string | null;
 }
 
 // Returned once on connect: the per-account webhook URL + token are shown a single time
@@ -145,10 +148,26 @@ export const googleSheetsService = {
     const { data } = await apiClient.get<LeadSourceConnection[]>("/integrations/google-sheets");
     return data;
   },
-  async connect(sheetId: string, label: string | null): Promise<GoogleSheetConnectResult> {
+  async connect(
+    sheetId: string,
+    label: string | null,
+    source: string | null,
+    sheetFormat: string | null,
+  ): Promise<GoogleSheetConnectResult> {
     const { data } = await apiClient.post<GoogleSheetConnectResult>(
       "/integrations/google-sheets/connect",
-      { sheet_id: sheetId, label },
+      { sheet_id: sheetId, label, source, sheet_format: sheetFormat },
+    );
+    return data;
+  },
+  async update(
+    id: string,
+    source: string | null,
+    sheetFormat: string | null,
+  ): Promise<LeadSourceConnection> {
+    const { data } = await apiClient.patch<LeadSourceConnection>(
+      `/integrations/google-sheets/${id}`,
+      { source, sheet_format: sheetFormat },
     );
     return data;
   },

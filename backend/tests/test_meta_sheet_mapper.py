@@ -22,7 +22,7 @@ def test_meta_row_maps_core_fields_and_uses_leadgen_id():
     assert fields["contact_name"] == "Test User"
     assert fields["contact_phone"] == "+918765430300"
     assert fields["contact_email"] == "t@x.com"
-    assert fields["source"] == "facebook"
+    assert fields["source"] == "Facebook / Meta"
     assert fields["preferred_location"] == "Vadodara"
     assert fields["interest"] == "3 BHK"
     assert fields["source_created_at"] == datetime(2026, 8, 27, 11, 7, 30, tzinfo=timezone.utc)
@@ -30,7 +30,7 @@ def test_meta_row_maps_core_fields_and_uses_leadgen_id():
 
 def test_instagram_platform_sets_source():
     _eid, fields = map_sheet_row({"full_name": "A", "phone_number": "9876543210", "platform": "instagram"})
-    assert fields["source"] == "instagram"
+    assert fields["source"] == "Instagram"
 
 
 def test_first_last_name_fallback():

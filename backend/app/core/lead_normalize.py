@@ -21,7 +21,7 @@ import re
 SOURCE_LABELS: tuple[str, ...] = (
     "Walk-in", "Reference", "Instagram", "Facebook / Meta", "WhatsApp",
     "Google Ads", "Website", "99acres", "MagicBricks", "Housing.com",
-    "Cold call", "Newspaper / Print", "Hoarding", "Other",
+    "AntTech", "Cold call", "Newspaper / Print", "Hoarding", "Other",
 )
 PROPERTY_INTEREST_LABELS: tuple[str, ...] = (
     "1 BHK", "2 BHK", "3 BHK", "4 BHK", "5 BHK+", "Studio", "Penthouse",

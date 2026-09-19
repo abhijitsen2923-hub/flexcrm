@@ -14,7 +14,13 @@ from uuid import UUID
 from sqlalchemy import select
 
 from app.core.exceptions import NotFoundError, ValidationError
-from app.core.google_sheets import SheetAccessError, SheetNotConfigured, read_rows, verify_access
+from app.core.google_sheets import (
+    SheetAccessError,
+    SheetNotConfigured,
+    read_rows,
+    read_rows_positional,
+    verify_access,
+)
 from app.core.logging import get_logger
 from app.core.tenancy import bypass, current_org
 from app.database.enums import LeadIndustry
@@ -28,6 +34,39 @@ from app.services.users import UserService
 logger = get_logger(__name__)
 
 _PROVIDER = "google_sheets"
+
+# Per-connection controls live in the (otherwise unused-for-sheets) `field_map` JSON column:
+#   {"source": "<lead source label>", "format": "anttech_positional"}
+# `source` overrides the platform-derived source on ingest; `format` selects the row reader.
+# Access is isolated behind these helpers so switching to a first-class column later is a one-liner.
+_FORMAT_STANDARD = "standard"
+_FORMAT_ANTTECH = "anttech_positional"
+_VALID_FORMATS = (_FORMAT_STANDARD, _FORMAT_ANTTECH)
+
+
+def _conn_format(field_map: dict | None) -> str:
+    fmt = (field_map or {}).get("format")
+    return fmt if fmt in _VALID_FORMATS else _FORMAT_STANDARD
+
+
+def _conn_source_override(field_map: dict | None) -> str | None:
+    val = (field_map or {}).get("source")
+    return val.strip() if isinstance(val, str) and val.strip() else None
+
+
+def _build_control(source: str | None, sheet_format: str | None) -> dict | None:
+    """Assemble the field_map control dict; returns None when both are at their defaults (so an
+    unconfigured connection stays field_map=None → today's standard behaviour)."""
+    fmt = (sheet_format or "").strip() or _FORMAT_STANDARD
+    if fmt not in _VALID_FORMATS:
+        raise ValidationError("Unknown sheet format.")
+    control: dict = {}
+    src = (source or "").strip()
+    if src:
+        control["source"] = src
+    if fmt != _FORMAT_STANDARD:
+        control["format"] = fmt
+    return control or None
 
 
 class GoogleSheetService(ServiceBase):
@@ -46,9 +85,19 @@ class GoogleSheetService(ServiceBase):
 
     # --- tenant-facing ------------------------------------------------------
 
-    async def connect(self, *, sheet_id: str, label: str | None, actor_id: UUID) -> LeadSourceConnection:
+    async def connect(
+        self,
+        *,
+        sheet_id: str,
+        label: str | None,
+        source: str | None = None,
+        sheet_format: str | None = None,
+        actor_id: UUID,
+    ) -> LeadSourceConnection:
         """Verify the SA can read the sheet, then store the connection (sheet id in
-        external_account_id). Raises ValidationError with a tenant-friendly message on failure."""
+        external_account_id). `source` (optional) becomes the ingested leads' Lead.source (overriding the
+        platform-derived value); `sheet_format` selects the row reader (standard header vs the header-less
+        agency/positional layout). Raises ValidationError with a tenant-friendly message on failure."""
         sheet_id = (sheet_id or "").strip()
         if not sheet_id:
             raise ValidationError("A Google Sheet ID is required.")
@@ -58,8 +107,9 @@ class GoogleSheetService(ServiceBase):
         industry = org.business_type
         if industry is None:
             raise ValidationError("This organization has no business type set; cannot connect.")
+        control = _build_control(source, sheet_format)
         try:
-            verify_access(sheet_id)
+            verify_access(sheet_id, fmt=_conn_format(control))
         except SheetNotConfigured as exc:
             raise ValidationError("Google Sheets is not configured on the server yet — contact support.") from exc
         except SheetAccessError as exc:
@@ -74,6 +124,7 @@ class GoogleSheetService(ServiceBase):
             external_account_id=sheet_id,
             label=label,
             default_industry=industry.value,
+            field_map=control,
             integration_user_id=integration_user.id,
             status="ok",
             is_active=True,
@@ -81,6 +132,40 @@ class GoogleSheetService(ServiceBase):
             updated_by_id=actor_id,
         )
         self.session.add(conn)
+        await self.commit()
+        return conn
+
+    async def update_connection(
+        self,
+        connection_id: UUID,
+        *,
+        source: str | None,
+        sheet_format: str | None,
+        actor_id: UUID,
+    ) -> LeadSourceConnection:
+        """Set/change the source + format on an EXISTING connection in place (no disconnect+reconnect), so
+        sheets already attached can be tagged. Re-verifies read access under the (possibly new) format."""
+        conn = (
+            await self.session.execute(
+                select(LeadSourceConnection).where(
+                    LeadSourceConnection.id == connection_id,
+                    LeadSourceConnection.provider == _PROVIDER,
+                    LeadSourceConnection.is_deleted.is_(False),
+                )
+            )
+        ).scalar_one_or_none()
+        if conn is None:
+            raise NotFoundError("Connection not found.")
+        control = _build_control(source, sheet_format)
+        if conn.external_account_id:
+            try:
+                verify_access(conn.external_account_id, fmt=_conn_format(control))
+            except SheetNotConfigured as exc:
+                raise ValidationError("Google Sheets is not configured on the server yet — contact support.") from exc
+            except SheetAccessError as exc:
+                raise ValidationError(str(exc)) from exc
+        conn.field_map = control
+        conn.updated_by_id = actor_id
         await self.commit()
         return conn
 
@@ -126,10 +211,13 @@ class GoogleSheetService(ServiceBase):
         sheet_id = conn.external_account_id
         default_industry = conn.default_industry
         integration_user_id = conn.integration_user_id
+        conn_field_map = conn.field_map
         if not sheet_id:
             return stats
+        reader = read_rows_positional if _conn_format(conn_field_map) == _FORMAT_ANTTECH else read_rows
+        source_override = _conn_source_override(conn_field_map)
         try:
-            rows = read_rows(sheet_id)
+            rows = reader(sheet_id)
         except SheetNotConfigured:
             return stats  # feature not configured on the server; nothing to do
         except SheetAccessError as exc:
@@ -149,6 +237,8 @@ class GoogleSheetService(ServiceBase):
         for row in rows:
             stats["rows"] += 1
             external_id, fields = map_sheet_row(row)
+            if source_override:
+                fields["source"] = source_override  # connection-declared source (e.g. "AntTech")
             if not external_id or not (fields.get("contact_phone") or fields.get("contact_email")):
                 stats["ignored"] += 1
                 continue

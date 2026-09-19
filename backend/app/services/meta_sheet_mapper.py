@@ -72,7 +72,9 @@ def map_sheet_row(row: dict) -> tuple[str, dict]:
     email = _get(row, *_EMAIL_KEYS) or None
 
     platform = _get(row, *_PLATFORM_KEYS).lower()
-    source = "instagram" if ("instagram" in platform or platform == "ig") else "facebook"
+    # Emit the CANONICAL source labels (see core.lead_normalize.SOURCE_LABELS) so the ingested lead's
+    # source matches the Leads source filter — a bare "facebook"/"instagram" would not.
+    source = "Instagram" if ("instagram" in platform or platform == "ig") else "Facebook / Meta"
     campaign = _get(row, *_CAMPAIGN_KEYS)
 
     fields: dict = {

@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 
-import { Badge, Button, LoadingBlock, Modal, TextField, useToast } from "../../components";
+import { Badge, Button, LoadingBlock, Modal, SelectField, TextField, useToast } from "../../components";
 import { mergeModules } from "../../config/features";
+import { leadSourceOptions } from "../../utils/options";
 import { useOrgModules } from "../../context/OrgContext";
 import { callyzerService, type CallyzerConnection } from "../../services/callyzer";
 import {
@@ -28,6 +29,12 @@ const STATUS_LABEL: Record<string, string> = {
   needs_reauth: "Reconnect needed",
   error: "Error",
 };
+// Google-Sheet connect options: a "Source" (empty = derive from the sheet's fb/ig platform) + a row format.
+const SHEET_SOURCE_OPTIONS = [{ value: "", label: "Auto (from platform)" }, ...leadSourceOptions];
+const SHEET_FORMAT_OPTIONS = [
+  { value: "standard", label: "Standard Meta export (header row)" },
+  { value: "anttech_positional", label: "Agency sheet — no header row" },
+];
 const REASON_HELP: Record<string, string> = {
   invalid_token:
     "The token is invalid or expired — generate a fresh never-expiring System-User token and paste it again.",
@@ -94,8 +101,15 @@ export default function IntegrationsPage() {
   const [sheetSaEmail, setSheetSaEmail] = useState<string | null>(null);
   const [sheetId, setSheetId] = useState("");
   const [sheetLabel, setSheetLabel] = useState("");
+  const [sheetSource, setSheetSource] = useState("");
+  const [sheetFormat, setSheetFormat] = useState("standard");
   const [sheetBusy, setSheetBusy] = useState(false);
   const [sheetError, setSheetError] = useState<string | null>(null);
+  // Inline "set source/format on an existing connection" editor.
+  const [editSheetId, setEditSheetId] = useState<string | null>(null);
+  const [editSource, setEditSource] = useState("");
+  const [editFormat, setEditFormat] = useState("standard");
+  const [editBusy, setEditBusy] = useState(false);
 
   // Callyzer (call tracking) — one connection per tenant (encrypted API token).
   const [callyzerConns, setCallyzerConns] = useState<CallyzerConnection[]>([]);
@@ -327,15 +341,37 @@ export default function IntegrationsPage() {
     setSheetBusy(true);
     setSheetError(null);
     try {
-      await googleSheetsService.connect(id, sheetLabel.trim() || null);
+      await googleSheetsService.connect(id, sheetLabel.trim() || null, sheetSource || null, sheetFormat);
       setSheetId("");
       setSheetLabel("");
+      setSheetSource("");
+      setSheetFormat("standard");
       toast.success("Connected", "Google Sheet connected — leads will sync automatically.");
       await refreshSheets();
     } catch (err) {
       setSheetError(extractErrorMessage(err));
     } finally {
       setSheetBusy(false);
+    }
+  }
+
+  function startEditSheet(conn: LeadSourceConnection) {
+    setEditSheetId(conn.id);
+    setEditSource(conn.source ?? "");
+    setEditFormat(conn.sheet_format ?? "standard");
+  }
+
+  async function saveEditSheet(conn: LeadSourceConnection) {
+    setEditBusy(true);
+    try {
+      await googleSheetsService.update(conn.id, editSource || null, editFormat);
+      setEditSheetId(null);
+      toast.success("Saved", "Connection source updated.");
+      await refreshSheets();
+    } catch (err) {
+      toast.error("Couldn't update", extractErrorMessage(err));
+    } finally {
+      setEditBusy(false);
     }
   }
 
@@ -591,20 +627,54 @@ export default function IntegrationsPage() {
         ) : sheetConns.length > 0 ? (
           <div className="stack" style={{ gap: "0.5rem", marginTop: "0.5rem" }}>
             {sheetConns.map((c) => (
-              <div key={c.id} className="row row--between" style={{ alignItems: "center", padding: "0.5rem 0", borderTop: "1px solid var(--color-border)" }}>
-                <div className="stack" style={{ gap: "0.15rem" }}>
-                  <strong>{c.label ?? c.external_account_id ?? "Google Sheet"}</strong>
-                  <span className="text-xs muted">
-                    {c.external_account_id ? `Sheet ${c.external_account_id}` : "No sheet id"}
-                    {" · "}
-                    {c.last_lead_at ? `Last lead ${formatDateTime(c.last_lead_at)}` : "No leads yet"}
-                    {c.status_detail ? ` · ${c.status_detail}` : ""}
-                  </span>
+              <div key={c.id} className="stack" style={{ gap: "0.4rem", padding: "0.5rem 0", borderTop: "1px solid var(--color-border)" }}>
+                <div className="row row--between" style={{ alignItems: "center" }}>
+                  <div className="stack" style={{ gap: "0.15rem" }}>
+                    <strong>{c.label ?? c.external_account_id ?? "Google Sheet"}</strong>
+                    <span className="text-xs muted">
+                      {c.external_account_id ? `Sheet ${c.external_account_id}` : "No sheet id"}
+                      {" · "}
+                      {c.last_lead_at ? `Last lead ${formatDateTime(c.last_lead_at)}` : "No leads yet"}
+                      {c.source ? ` · Source ${c.source}` : ""}
+                      {c.sheet_format === "anttech_positional" ? " · Agency format" : ""}
+                      {c.status_detail ? ` · ${c.status_detail}` : ""}
+                    </span>
+                  </div>
+                  <div className="row" style={{ gap: "0.5rem", alignItems: "center" }}>
+                    <Badge tone={STATUS_TONE[c.status] ?? "neutral"}>{STATUS_LABEL[c.status] ?? c.status}</Badge>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => (editSheetId === c.id ? setEditSheetId(null) : startEditSheet(c))}
+                    >
+                      {editSheetId === c.id ? "Close" : "Edit source"}
+                    </Button>
+                    <Button size="sm" variant="ghost" onClick={() => void disconnectSheet(c)}>Disconnect</Button>
+                  </div>
                 </div>
-                <div className="row" style={{ gap: "0.5rem", alignItems: "center" }}>
-                  <Badge tone={STATUS_TONE[c.status] ?? "neutral"}>{STATUS_LABEL[c.status] ?? c.status}</Badge>
-                  <Button size="sm" variant="ghost" onClick={() => void disconnectSheet(c)}>Disconnect</Button>
-                </div>
+                {editSheetId === c.id && (
+                  <div className="row" style={{ gap: "0.5rem", alignItems: "flex-end", flexWrap: "wrap" }}>
+                    <div style={{ minWidth: 180 }}>
+                      <SelectField
+                        id={`edit-source-${c.id}`}
+                        label="Source"
+                        value={editSource}
+                        onChange={(e) => setEditSource(e.target.value)}
+                        options={SHEET_SOURCE_OPTIONS}
+                      />
+                    </div>
+                    <div style={{ minWidth: 210 }}>
+                      <SelectField
+                        id={`edit-format-${c.id}`}
+                        label="Sheet format"
+                        value={editFormat}
+                        onChange={(e) => setEditFormat(e.target.value)}
+                        options={SHEET_FORMAT_OPTIONS}
+                      />
+                    </div>
+                    <Button size="sm" loading={editBusy} onClick={() => void saveEditSheet(c)}>Save</Button>
+                  </div>
+                )}
               </div>
             ))}
           </div>
@@ -625,6 +695,20 @@ export default function IntegrationsPage() {
             value={sheetLabel}
             onChange={(e) => setSheetLabel(e.target.value)}
             placeholder="e.g. Meta Leads – Vadodara"
+          />
+          <SelectField
+            id="sheet-source"
+            label="Source (optional)"
+            value={sheetSource}
+            onChange={(e) => setSheetSource(e.target.value)}
+            options={SHEET_SOURCE_OPTIONS}
+          />
+          <SelectField
+            id="sheet-format"
+            label="Sheet format"
+            value={sheetFormat}
+            onChange={(e) => setSheetFormat(e.target.value)}
+            options={SHEET_FORMAT_OPTIONS}
           />
           {sheetError && (
             <p className="text-sm" style={{ color: "var(--color-danger)" }}>{sheetError}</p>
