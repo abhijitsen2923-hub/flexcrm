@@ -1,5 +1,7 @@
 import { Component, type ErrorInfo, type PropsWithChildren, type ReactNode } from "react";
 
+import { isChunkLoadError, reloadOnceForChunkError } from "../utils/chunkReload";
+
 
 interface ErrorBoundaryProps extends PropsWithChildren {
   fallback?: (error: Error, reset: () => void) => ReactNode;
@@ -18,12 +20,23 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
   }
 
   componentDidCatch(error: Error, info: ErrorInfo): void {
+    // A stale-chunk error after a deploy: try to recover with a one-time guarded
+    // reload rather than stranding the user on the error screen. (The lazy-import
+    // wrapper and the vite:preloadError listener usually catch this first; this
+    // is the backstop for a chunk error that reaches render.)
+    if (isChunkLoadError(error)) {
+      reloadOnceForChunkError(error);
+    }
     // eslint-disable-next-line no-console
     console.error("[ErrorBoundary]", error, info.componentStack);
   }
 
   reset = (): void => {
     this.setState({ error: null });
+  };
+
+  reload = (): void => {
+    window.location.reload();
   };
 
   render(): ReactNode {
@@ -35,6 +48,16 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
     if (this.props.fallback) {
       return this.props.fallback(error, this.reset);
     }
+
+    // A stale-chunk error means a new build shipped while this tab was open;
+    // componentDidCatch has already asked for a one-time reload, so show a calm
+    // "updating" message rather than a scary crash for the brief moment before
+    // the reload lands (or if the loop guard held it back).
+    const chunkError = isChunkLoadError(error);
+    const heading = chunkError ? "Updating to the latest version…" : "Something went wrong.";
+    const message = chunkError
+      ? "A new version of the app was just released. Reloading to update — nothing you were typing is lost."
+      : "The application hit an unexpected error and could not continue rendering.";
 
     return (
       <div
@@ -51,11 +74,9 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
           background: "#f9fafb"
         }}
       >
-        <h1 style={{ fontSize: "1.5rem", marginBottom: "0.5rem" }}>Something went wrong.</h1>
-        <p style={{ marginBottom: "1.5rem", color: "#4b5563" }}>
-          The application hit an unexpected error and could not continue rendering.
-        </p>
-        {import.meta.env.DEV && (
+        <h1 style={{ fontSize: "1.5rem", marginBottom: "0.5rem" }}>{heading}</h1>
+        <p style={{ marginBottom: "1.5rem", color: "#4b5563" }}>{message}</p>
+        {import.meta.env.DEV && !chunkError && (
           <pre
             style={{
               maxWidth: "32rem",
@@ -73,7 +94,7 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
         )}
         <button
           type="button"
-          onClick={this.reset}
+          onClick={this.reload}
           style={{
             marginTop: "1.5rem",
             padding: "0.5rem 1rem",
@@ -84,7 +105,7 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
             cursor: "pointer"
           }}
         >
-          Try again
+          {chunkError ? "Reload now" : "Try again"}
         </button>
       </div>
     );

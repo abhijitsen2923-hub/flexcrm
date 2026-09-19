@@ -1,5 +1,7 @@
-import { lazy, Suspense } from "react";
+import { Suspense } from "react";
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
+
+import { lazyWithReload } from "./utils/lazyWithReload";
 
 import {
   AppLayout,
@@ -28,50 +30,50 @@ import UsersPage from "./pages/UsersPage";
 
 // Auth screens + feature-flagged modules stay lazy — they're rarely loaded
 // or hidden by default, so the code-split saves the initial bundle.
-const LoginPage = lazy(() => import("./pages/auth/LoginPage"));
-const RegisterPage = lazy(() => import("./pages/auth/RegisterPage"));
-const DealsPage = lazy(() => import("./pages/DealsPage"));
-const TasksPage = lazy(() => import("./pages/TasksPage"));
-const ActivitiesPage = lazy(() => import("./pages/ActivitiesPage"));
-const FinancePage = lazy(() => import("./pages/FinancePage"));
-const ExpensesPage = lazy(() => import("./pages/finance/ExpensesPage"));
-const VendorsPage = lazy(() => import("./pages/finance/VendorsPage"));
-const VendorPaymentsPage = lazy(() => import("./pages/finance/VendorPaymentsPage"));
-const FinanceSettingsPage = lazy(() => import("./pages/finance/FinanceSettingsPage"));
-const IncomePage = lazy(() => import("./pages/finance/IncomePage"));
-const FinanceDashboardPage = lazy(() => import("./pages/finance/FinanceDashboardPage"));
-const CustomerReceivablesPage = lazy(() => import("./pages/finance/CustomerReceivablesPage"));
-const CustomerDemandsPage = lazy(() => import("./pages/finance/CustomerDemandsPage"));
-const ReportsPage = lazy(() => import("./pages/finance/ReportsPage"));
-const PayrollPage = lazy(() => import("./pages/finance/PayrollPage"));
-const BudgetsPage = lazy(() => import("./pages/finance/BudgetsPage"));
-const BankPage = lazy(() => import("./pages/finance/BankPage"));
-const HRPage = lazy(() => import("./pages/HRPage"));
+const LoginPage = lazyWithReload(() => import("./pages/auth/LoginPage"));
+const RegisterPage = lazyWithReload(() => import("./pages/auth/RegisterPage"));
+const DealsPage = lazyWithReload(() => import("./pages/DealsPage"));
+const TasksPage = lazyWithReload(() => import("./pages/TasksPage"));
+const ActivitiesPage = lazyWithReload(() => import("./pages/ActivitiesPage"));
+const FinancePage = lazyWithReload(() => import("./pages/FinancePage"));
+const ExpensesPage = lazyWithReload(() => import("./pages/finance/ExpensesPage"));
+const VendorsPage = lazyWithReload(() => import("./pages/finance/VendorsPage"));
+const VendorPaymentsPage = lazyWithReload(() => import("./pages/finance/VendorPaymentsPage"));
+const FinanceSettingsPage = lazyWithReload(() => import("./pages/finance/FinanceSettingsPage"));
+const IncomePage = lazyWithReload(() => import("./pages/finance/IncomePage"));
+const FinanceDashboardPage = lazyWithReload(() => import("./pages/finance/FinanceDashboardPage"));
+const CustomerReceivablesPage = lazyWithReload(() => import("./pages/finance/CustomerReceivablesPage"));
+const CustomerDemandsPage = lazyWithReload(() => import("./pages/finance/CustomerDemandsPage"));
+const ReportsPage = lazyWithReload(() => import("./pages/finance/ReportsPage"));
+const PayrollPage = lazyWithReload(() => import("./pages/finance/PayrollPage"));
+const BudgetsPage = lazyWithReload(() => import("./pages/finance/BudgetsPage"));
+const BankPage = lazyWithReload(() => import("./pages/finance/BankPage"));
+const HRPage = lazyWithReload(() => import("./pages/HRPage"));
 // Real-estate modules
-const InventoryPage = lazy(() => import("./pages/inventory/InventoryPage"));
-const ProjectsPage = lazy(() => import("./pages/inventory/ProjectsPage"));
-const SiteVisitsPage = lazy(() => import("./pages/site-visits/SiteVisitsPage"));
-const BookingsPage = lazy(() => import("./pages/bookings/BookingsPage"));
-const IntegrationsPage = lazy(() => import("./pages/integrations/IntegrationsPage"));
-const CallsPage = lazy(() => import("./pages/calls/CallsPage"));
+const InventoryPage = lazyWithReload(() => import("./pages/inventory/InventoryPage"));
+const ProjectsPage = lazyWithReload(() => import("./pages/inventory/ProjectsPage"));
+const SiteVisitsPage = lazyWithReload(() => import("./pages/site-visits/SiteVisitsPage"));
+const BookingsPage = lazyWithReload(() => import("./pages/bookings/BookingsPage"));
+const IntegrationsPage = lazyWithReload(() => import("./pages/integrations/IntegrationsPage"));
+const CallsPage = lazyWithReload(() => import("./pages/calls/CallsPage"));
 // Registration & possession trackers
-const RegistrationTrackerPage = lazy(() => import("./pages/trackers/RegistrationTrackerPage"));
-const PossessionTrackerPage = lazy(() => import("./pages/trackers/PossessionTrackerPage"));
+const RegistrationTrackerPage = lazyWithReload(() => import("./pages/trackers/RegistrationTrackerPage"));
+const PossessionTrackerPage = lazyWithReload(() => import("./pages/trackers/PossessionTrackerPage"));
 // Customer portal (PWA)
-const CustomerLayout = lazy(() => import("./portals/customer/CustomerLayout").then((m) => ({ default: m.CustomerLayout })));
-const PaymentStatusPage = lazy(() => import("./portals/customer/pages/PaymentStatusPage"));
-const DocumentDownloadsPage = lazy(() => import("./portals/customer/pages/DocumentDownloadsPage"));
-const ServiceRequestsPage = lazy(() => import("./portals/customer/pages/ServiceRequestsPage"));
-const ReferralSubmitPage = lazy(() => import("./portals/customer/pages/ReferralSubmitPage"));
+const CustomerLayout = lazyWithReload(() => import("./portals/customer/CustomerLayout").then((m) => ({ default: m.CustomerLayout })));
+const PaymentStatusPage = lazyWithReload(() => import("./portals/customer/pages/PaymentStatusPage"));
+const DocumentDownloadsPage = lazyWithReload(() => import("./portals/customer/pages/DocumentDownloadsPage"));
+const ServiceRequestsPage = lazyWithReload(() => import("./portals/customer/pages/ServiceRequestsPage"));
+const ReferralSubmitPage = lazyWithReload(() => import("./portals/customer/pages/ReferralSubmitPage"));
 // Channel-partner portal
-const PartnerLayout = lazy(() => import("./portals/partner/PartnerLayout").then((m) => ({ default: m.PartnerLayout })));
-const PartnerDashboardPage = lazy(() => import("./portals/partner/pages/PartnerDashboardPage"));
-const PartnerLeadFormPage = lazy(() => import("./portals/partner/pages/PartnerLeadFormPage"));
-const PartnerLeadTrackerPage = lazy(() => import("./portals/partner/pages/PartnerLeadTrackerPage"));
-const PartnerCommissionsPage = lazy(() => import("./portals/partner/pages/PartnerCommissionsPage"));
+const PartnerLayout = lazyWithReload(() => import("./portals/partner/PartnerLayout").then((m) => ({ default: m.PartnerLayout })));
+const PartnerDashboardPage = lazyWithReload(() => import("./portals/partner/pages/PartnerDashboardPage"));
+const PartnerLeadFormPage = lazyWithReload(() => import("./portals/partner/pages/PartnerLeadFormPage"));
+const PartnerLeadTrackerPage = lazyWithReload(() => import("./portals/partner/pages/PartnerLeadTrackerPage"));
+const PartnerCommissionsPage = lazyWithReload(() => import("./portals/partner/pages/PartnerCommissionsPage"));
 // Staff channel-partner management
-const ChannelPartnersPage = lazy(() => import("./pages/channel-partners/ChannelPartnersPage"));
-const NotFoundPage = lazy(() => import("./pages/NotFoundPage"));
+const ChannelPartnersPage = lazyWithReload(() => import("./pages/channel-partners/ChannelPartnersPage"));
+const NotFoundPage = lazyWithReload(() => import("./pages/NotFoundPage"));
 
 
 export function App() {
