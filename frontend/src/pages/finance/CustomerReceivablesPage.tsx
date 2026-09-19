@@ -109,10 +109,10 @@ export default function CustomerReceivablesPage() {
     setSaving(true);
     try {
       if (form.mode === "edit" && form.scheduleId) {
-        await financeService.updateDemand(form.bookingId, form.scheduleId, body);
+        await financeService.updateBookingDemand(form.bookingId, form.scheduleId, body);
         toast.success("Demand updated");
       } else {
-        await financeService.addDemand(form.bookingId, body);
+        await financeService.addBookingDemand(form.bookingId, body);
         toast.success("Demand added");
       }
       setForm(null);
@@ -133,7 +133,7 @@ export default function CustomerReceivablesPage() {
       return;
     }
     try {
-      await financeService.deleteDemand(r.booking_id, r.payment_schedule_id);
+      await financeService.deleteBookingDemand(r.booking_id, r.payment_schedule_id);
       toast.success("Demand deleted");
       setRefreshTick((t) => t + 1);
     } catch (e) {

@@ -111,16 +111,17 @@ export const financeService = {
     const { data } = await apiClient.get<CollectionEntry[]>(`/bookings/collection-ledger${qs(params)}`);
     return data;
   },
-  // Per-row edit of the project-generated customer demands (PaymentSchedule rows).
-  async addDemand(bookingId: string, body: DemandInput) {
+  // Per-row edit of the project-generated customer demands (booking PaymentSchedule rows).
+  // Named *BookingDemand to avoid colliding with the finance CustomerDemand methods below.
+  async addBookingDemand(bookingId: string, body: DemandInput) {
     const { data } = await apiClient.post(`/bookings/${bookingId}/payment-schedules`, body);
     return data;
   },
-  async updateDemand(bookingId: string, scheduleId: string, patch: Partial<DemandInput>) {
+  async updateBookingDemand(bookingId: string, scheduleId: string, patch: Partial<DemandInput>) {
     const { data } = await apiClient.patch(`/bookings/${bookingId}/payment-schedules/${scheduleId}`, patch);
     return data;
   },
-  async deleteDemand(bookingId: string, scheduleId: string): Promise<void> {
+  async deleteBookingDemand(bookingId: string, scheduleId: string): Promise<void> {
     await apiClient.delete(`/bookings/${bookingId}/payment-schedules/${scheduleId}`);
   },
 
