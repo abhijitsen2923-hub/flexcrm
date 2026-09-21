@@ -32,6 +32,7 @@ const STATUS_LABEL: Record<string, string> = {
 // Google-Sheet connect options: a "Source" (empty = derive from the sheet's fb/ig platform) + a row format.
 const SHEET_SOURCE_OPTIONS = [{ value: "", label: "Auto (from platform)" }, ...leadSourceOptions];
 const SHEET_FORMAT_OPTIONS = [
+  { value: "", label: "Choose format…" },
   { value: "standard", label: "Standard Meta export (header row)" },
   { value: "anttech_positional", label: "Agency sheet — no header row" },
 ];
@@ -102,7 +103,7 @@ export default function IntegrationsPage() {
   const [sheetId, setSheetId] = useState("");
   const [sheetLabel, setSheetLabel] = useState("");
   const [sheetSource, setSheetSource] = useState("");
-  const [sheetFormat, setSheetFormat] = useState("standard");
+  const [sheetFormat, setSheetFormat] = useState("");
   const [sheetBusy, setSheetBusy] = useState(false);
   const [sheetError, setSheetError] = useState<string | null>(null);
   // Inline "set source/format on an existing connection" editor.
@@ -345,7 +346,7 @@ export default function IntegrationsPage() {
       setSheetId("");
       setSheetLabel("");
       setSheetSource("");
-      setSheetFormat("standard");
+      setSheetFormat("");
       toast.success("Connected", "Google Sheet connected — leads will sync automatically.");
       await refreshSheets();
     } catch (err) {
