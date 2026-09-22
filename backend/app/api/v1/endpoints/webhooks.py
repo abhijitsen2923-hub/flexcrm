@@ -211,3 +211,79 @@ async def receive_99acres(token: str, request: Request, background: BackgroundTa
     # ACK now; map + ingest after the response is sent.
     background.add_task(_process_99acres_delivery, delivery_id, organization_id, schema_name)
     return {"status": "accepted", "lead_id": payload.get("lead_id") or payload.get("leadId")}
+
+
+# --- Google Ads Lead Form webhook -----------------------------------------------------------------
+_MAX_GOOGLE_ADS_BODY = 256 * 1024  # 256 KB — a lead-form payload is tiny
+
+
+async def _process_google_ads_delivery(delivery_id: UUID, organization_id: UUID, schema_name: str) -> None:
+    """Background task (after the 200): map + ingest one stored Google Ads delivery. Own session;
+    process_delivery handles its own commit + error isolation and never raises."""
+    async with db_manager.session_factory() as session:
+        try:
+            set_scope(session, organization_id)
+            await set_tenant_schema(session, schema_name)
+            await LeadSourceService(session).process_delivery(delivery_id, organization_id=organization_id)
+        except Exception:  # noqa: BLE001 — never surface; cron reconciles
+            logger.warning("google_ads delivery processing failed for %s", delivery_id, exc_info=True)
+
+
+@router.post("/google-ads")
+async def receive_google_ads(request: Request, background: BackgroundTasks):
+    """Receive one Google Ads Lead Form submission. The Webhook URL is FIXED (same for every tenant);
+    the per-tenant secret is the "Key" Google echoes in the body as `google_key`, which identifies +
+    authenticates the tenant. Persist the raw body, ACK 200, then process asynchronously.
+    401 = missing key; 404 = unknown/inactive key; 413 = body too large; 422 = malformed body / missing
+    lead_id+user_column_data. `is_test` submissions are acknowledged (200) without creating a lead.
+
+    Because the secret lives in the BODY (not the URL), we cap + parse the body BEFORE resolving the
+    tenant; the size cap still bounds the work an unauthenticated caller can force."""
+    # 1) Cap + read + parse the body (the secret lives inside it).
+    content_length = request.headers.get("content-length")
+    if content_length and content_length.isdigit() and int(content_length) > _MAX_GOOGLE_ADS_BODY:
+        raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="Body too large.")
+    raw = await request.body()
+    if len(raw) > _MAX_GOOGLE_ADS_BODY:
+        raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="Body too large.")
+    try:
+        payload = json.loads(raw) if raw else None
+    except ValueError:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Malformed JSON body.")
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Body must be a JSON object.")
+
+    # 2) The Key (google_key) is the credential — resolve it to a tenant.
+    google_key = str(payload.get("google_key") or "").strip()
+    if not google_key:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing google_key.")
+    async with db_manager.session_factory() as auth_session:
+        route = await LeadSourceService(auth_session).resolve_route(google_key, provider="google_ads")
+        if route is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Unknown or inactive key.")
+        organization_id = route.organization_id
+        schema_name = route.schema_name
+        token_hash = route.token_hash
+
+    # 3) Google's "Send test data" — acknowledge without creating a lead.
+    if payload.get("is_test"):
+        return {"status": "test"}
+
+    # 4) Persist first (own commit) so a later fault can't lose the lead, then a light validation.
+    async with db_manager.session_factory() as session:
+        svc = LeadSourceService(session)
+        set_scope(session, organization_id)
+        await set_tenant_schema(session, schema_name)
+        delivery_id = await svc.persist_delivery(token_hash, payload, provider="google_ads")
+
+        if not payload.get("lead_id") or not payload.get("user_column_data"):
+            await svc.mark_delivery(
+                delivery_id, status="ignored", error="Missing lead_id or user_column_data."
+            )
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Missing lead_id or user_column_data.",
+            )
+
+    background.add_task(_process_google_ads_delivery, delivery_id, organization_id, schema_name)
+    return {"status": "accepted", "lead_id": payload.get("lead_id")}

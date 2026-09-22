@@ -41,6 +41,7 @@ const MODULE_LABELS: Record<ModuleKey, string> = {
   portal_99acres: "99acres Lead Ads",
   sheet_leads: "Google Sheet Leads",
   callyzer: "Callyzer (call tracking)",
+  google_ads: "Google Ads Lead Form",
 };
 
 const CORE_MODULES: ModuleKey[] = ["deals", "tasks", "activities"];
@@ -50,7 +51,7 @@ const RE_MODULES: ModuleKey[] = ["inventory", "bookings", "site_visits", "projec
 // independent per-tenant toggles (both share one Meta connection, gated by
 // platform). 99acres is a separate push-webhook lead source. RE-only today;
 // drop the RE gate when a vertical-agnostic integration is added.
-const INTEGRATIONS_MODULES: ModuleKey[] = ["meta_facebook", "meta_instagram", "portal_99acres", "sheet_leads", "callyzer"];
+const INTEGRATIONS_MODULES: ModuleKey[] = ["meta_facebook", "meta_instagram", "portal_99acres", "sheet_leads", "callyzer", "google_ads"];
 
 const INDUSTRY_LABEL: Record<Industry, string> = {
   education: "Education",
@@ -75,6 +76,7 @@ function defaultsForIndustry(industry: Industry): Record<ModuleKey, boolean> {
     portal_99acres: false,
     sheet_leads: false,
     callyzer: false,
+    google_ads: false,
   };
 }
 

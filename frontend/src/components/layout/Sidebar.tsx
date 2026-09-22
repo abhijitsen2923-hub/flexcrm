@@ -135,7 +135,7 @@ const NAV: ReadonlyArray<NavEntry> = [
   },
 
   // Cross-cutting — flat at the bottom.
-  { type: "item", item: { to: "/integrations", label: "Integrations", icon: Plug, requires: ["ORG_MANAGE"], moduleKeys: ["meta_facebook", "meta_instagram", "portal_99acres", "sheet_leads", "callyzer"] } },
+  { type: "item", item: { to: "/integrations", label: "Integrations", icon: Plug, requires: ["ORG_MANAGE"], moduleKeys: ["meta_facebook", "meta_instagram", "portal_99acres", "sheet_leads", "callyzer", "google_ads"] } },
   { type: "item", item: { to: "/analytics", label: "Analytics", icon: BarChart3, requires: ["ANALYTICS_VIEW"] } },
   { type: "item", item: { to: "/users", label: "Users", icon: Users, requires: ["USER_VIEW"] } }
 ];

@@ -156,3 +156,88 @@ def map_99acres_lead(payload: dict) -> tuple[str, dict]:
         phone, _get(payload, "ReceivedDate", "received_date"), _get(payload, "ProductCode", "product_code")
     )
     return external_id, fields
+
+
+# --- Google Ads Lead Form (webhook push) ------------------------------------------------------------
+# Google posts {lead_id, user_column_data:[{column_id, column_name, string_value}], campaign_id, form_id,
+# gcl_id, adgroup_id, creative_id, google_key, is_test, ...}. Standard column ids are UPPER_SNAKE; custom
+# questions carry an arbitrary column_id + the question text in column_name. No timestamp is sent.
+_GADS_STD_IDS: frozenset[str] = frozenset({
+    "FULL_NAME", "FIRST_NAME", "LAST_NAME", "EMAIL", "WORK_EMAIL", "PHONE_NUMBER", "WORK_PHONE",
+    "POSTAL_CODE", "STREET_ADDRESS", "CITY", "REGION", "COUNTRY", "COMPANY_NAME", "JOB_TITLE",
+})
+_GADS_ATTRIBUTION: tuple[tuple[str, str], ...] = (
+    ("campaign_id", "campaign id"),
+    ("form_id", "form id"),
+    ("gcl_id", "gclid"),
+    ("adgroup_id", "ad group id"),
+    ("creative_id", "creative id"),
+)
+
+
+def _gads_columns(payload: dict) -> tuple[dict[str, str], list[tuple[str, str]]]:
+    """Parse Google's `user_column_data` → ({UPPER column_id: value}, [(label, value) for CUSTOM
+    (non-standard) questions]). Empty/malformed entries are skipped."""
+    by_id: dict[str, str] = {}
+    customs: list[tuple[str, str]] = []
+    for col in payload.get("user_column_data") or []:
+        if not isinstance(col, dict):
+            continue
+        cid = str(col.get("column_id") or "").strip()
+        val = str(col.get("string_value") or "").strip()
+        if not val:
+            continue
+        cid_u = cid.upper()
+        if cid_u:
+            by_id[cid_u] = val
+        if cid_u not in _GADS_STD_IDS:
+            label = str(col.get("column_name") or cid or "answer").strip()
+            customs.append((label, val))
+    return by_id, customs
+
+
+def map_google_ads_lead(payload: dict) -> tuple[str, dict]:
+    """Return (external_id, crm_fields) for one Google Ads Lead Form webhook body."""
+    cols, customs = _gads_columns(payload)
+
+    name = cols.get("FULL_NAME") or " ".join(
+        p for p in (cols.get("FIRST_NAME"), cols.get("LAST_NAME")) if p
+    ).strip()
+    phone = normalize_phone(cols.get("PHONE_NUMBER") or cols.get("WORK_PHONE"))
+    email = (cols.get("EMAIL") or cols.get("WORK_EMAIL")) or None
+
+    fields: dict = {
+        "contact_name": name or None,
+        "contact_phone": phone,
+        "contact_email": email,
+        "source": "Google Ads",
+        "title": name or "Google Ads Lead",
+    }
+    company = cols.get("COMPANY_NAME")
+    if company:
+        fields["company_name"] = company
+    preferred_location = ", ".join(
+        p for p in (cols.get("CITY"), cols.get("REGION"), cols.get("POSTAL_CODE")) if p
+    ) or None
+    if preferred_location:
+        fields["preferred_location"] = preferred_location
+
+    # Notes: custom-question answers (by their question label), then Google Ads attribution ids.
+    notes: list[str] = [f"{label}: {val}" for label, val in customs]
+    attribution = [
+        f"{label}: {payload.get(key)}"
+        for key, label in _GADS_ATTRIBUTION
+        if payload.get(key) not in (None, "")
+    ]
+    if attribution:
+        notes.append("— Google Ads —")
+        notes.extend(attribution)
+    if notes:
+        fields["notes"] = "\n".join(notes)
+
+    # external_id: Google always sends a lead_id; fingerprint fallback (no timestamp is sent).
+    lead_id = str(payload.get("lead_id") or payload.get("leadId") or "").strip()
+    external_id = lead_id or _fingerprint(
+        phone, str(payload.get("form_id") or ""), str(payload.get("campaign_id") or "")
+    )
+    return external_id, fields

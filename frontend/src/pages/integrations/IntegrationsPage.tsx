@@ -63,6 +63,7 @@ export default function IntegrationsPage() {
   const showMeta = modules.meta_facebook || modules.meta_instagram;
   const show99acres = modules.portal_99acres;
   const showSheets = modules.sheet_leads;
+  const showGoogleAds = modules.google_ads;
   const showCallyzer = modules.callyzer;
   // FB & IG share one connection; the poll ingests only platforms enabled for
   // this workspace (per-tenant admin toggles). Show which are active.
@@ -96,6 +97,15 @@ export default function IntegrationsPage() {
   const [lsBusy, setLsBusy] = useState(false);
   const [lsResult, setLsResult] = useState<LeadSourceConnectResult | null>(null);
   const [lsCopied, setLsCopied] = useState(false);
+  // Google Ads Lead Form (push-webhook) connections.
+  const [gaConns, setGaConns] = useState<LeadSourceConnection[]>([]);
+  const [gaLoading, setGaLoading] = useState(true);
+  const [gaModalOpen, setGaModalOpen] = useState(false);
+  const [gaLabel, setGaLabel] = useState("");
+  const [gaBusy, setGaBusy] = useState(false);
+  const [gaResult, setGaResult] = useState<LeadSourceConnectResult | null>(null);
+  const [gaUrlCopied, setGaUrlCopied] = useState(false);
+  const [gaKeyCopied, setGaKeyCopied] = useState(false);
   // Google Sheet lead sync state.
   const [sheetConns, setSheetConns] = useState<LeadSourceConnection[]>([]);
   const [sheetLoading, setSheetLoading] = useState(true);
@@ -133,6 +143,7 @@ export default function IntegrationsPage() {
   useEffect(() => {
     void refresh();
     void refreshLeadSources();
+    void refreshGoogleAds();
     void refreshSheets();
     void refreshCallyzer();
   }, []);
@@ -314,6 +325,66 @@ export default function IntegrationsPage() {
       await leadSourceService.disconnect99acres(conn.id);
       toast.success("Disconnected", conn.label ?? conn.external_account_id ?? "99acres connection");
       await refreshLeadSources();
+    } catch (err) {
+      toast.error("Disconnect failed", extractErrorMessage(err));
+    }
+  }
+
+  // --- Google Ads Lead Form ---
+  async function refreshGoogleAds() {
+    setGaLoading(true);
+    try {
+      setGaConns(await leadSourceService.listGoogleAds());
+    } catch {
+      /* leave the list as-is */
+    } finally {
+      setGaLoading(false);
+    }
+  }
+
+  function openConnectGoogleAds() {
+    setGaLabel("");
+    setGaResult(null);
+    setGaUrlCopied(false);
+    setGaKeyCopied(false);
+    setGaModalOpen(true);
+  }
+
+  function closeConnectGoogleAds() {
+    if (gaBusy) return;
+    setGaModalOpen(false);
+    setGaResult(null);
+  }
+
+  async function submitConnectGoogleAds() {
+    setGaBusy(true);
+    try {
+      const result = await leadSourceService.connectGoogleAds(gaLabel.trim() || null);
+      setGaResult(result); // reveal the fixed URL + the one-time Key
+      await refreshGoogleAds();
+    } catch (err) {
+      toast.error("Could not create connection", extractErrorMessage(err));
+    } finally {
+      setGaBusy(false);
+    }
+  }
+
+  async function copyGaValue(value: string, which: "url" | "key") {
+    try {
+      await navigator.clipboard.writeText(value);
+      if (which === "url") setGaUrlCopied(true);
+      else setGaKeyCopied(true);
+      toast.success("Copied", which === "url" ? "Webhook URL copied." : "Key copied.");
+    } catch {
+      toast.error("Copy failed", "Select the value and copy it manually.");
+    }
+  }
+
+  async function disconnectGoogleAds(conn: LeadSourceConnection) {
+    try {
+      await leadSourceService.disconnectGoogleAds(conn.id);
+      toast.success("Disconnected", conn.label ?? "Google Ads connection");
+      await refreshGoogleAds();
     } catch (err) {
       toast.error("Disconnect failed", extractErrorMessage(err));
     }
@@ -607,6 +678,45 @@ export default function IntegrationsPage() {
         )}
         <div className="row" style={{ marginTop: "0.75rem" }}>
           <Button onClick={openConnect99acres}>Connect 99acres</Button>
+        </div>
+      </div>
+      )}
+
+      {showGoogleAds && (
+      <div className="card" style={{ padding: "1rem 1.25rem" }}>
+        <div className="row row--between" style={{ alignItems: "center", marginBottom: "0.35rem" }}>
+          <strong>Google Ads Lead Form</strong>
+          <Button size="sm" variant="ghost" onClick={() => void refreshGoogleAds()}>Refresh</Button>
+        </div>
+        <p className="muted text-sm">
+          Generate a Webhook URL + Key, paste them into Google Ads → <em>Export leads → Webhook integration</em>,
+          and every lead-form submission pushes straight into your pipeline, tagged <strong>Google Ads</strong>.
+        </p>
+        {gaLoading ? (
+          <LoadingBlock />
+        ) : gaConns.length > 0 ? (
+          <div className="stack" style={{ gap: "0.5rem", marginTop: "0.5rem" }}>
+            {gaConns.map((c) => (
+              <div key={c.id} className="row row--between" style={{ alignItems: "center", padding: "0.5rem 0", borderTop: "1px solid var(--color-border)" }}>
+                <div className="stack" style={{ gap: "0.15rem" }}>
+                  <strong>{c.label ?? "Google Ads connection"}</strong>
+                  <span className="text-xs muted">
+                    {c.last_lead_at ? `Last lead ${formatDateTime(c.last_lead_at)}` : "No leads yet"}
+                    {c.status_detail ? ` · ${c.status_detail}` : ""}
+                  </span>
+                </div>
+                <div className="row" style={{ gap: "0.5rem", alignItems: "center" }}>
+                  <Badge tone={STATUS_TONE[c.status] ?? "neutral"}>{STATUS_LABEL[c.status] ?? c.status}</Badge>
+                  <Button size="sm" variant="ghost" onClick={() => void disconnectGoogleAds(c)}>Disconnect</Button>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="muted text-sm" style={{ marginTop: "0.35rem" }}>No Google Ads connections yet.</p>
+        )}
+        <div className="row" style={{ marginTop: "0.75rem" }}>
+          <Button onClick={openConnectGoogleAds}>Connect Google Ads</Button>
         </div>
       </div>
       )}
@@ -905,6 +1015,79 @@ export default function IntegrationsPage() {
               value={lsLabel}
               onChange={(e) => setLsLabel(e.target.value)}
               placeholder="e.g. Vriddhi Landmart – 99acres"
+            />
+          </div>
+        )}
+      </Modal>
+
+      {/* Google Ads connect modal */}
+      <Modal
+        open={gaModalOpen}
+        title={gaResult ? "Your Google Ads webhook details" : "Connect Google Ads"}
+        onClose={closeConnectGoogleAds}
+        footer={
+          gaResult ? (
+            <Button onClick={closeConnectGoogleAds}>Done</Button>
+          ) : (
+            <>
+              <Button variant="ghost" disabled={gaBusy} onClick={closeConnectGoogleAds}>Cancel</Button>
+              <Button loading={gaBusy} disabled={gaBusy} onClick={() => void submitConnectGoogleAds()}>
+                Generate URL &amp; Key
+              </Button>
+            </>
+          )
+        }
+      >
+        {gaResult ? (
+          <div className="stack" style={{ gap: "0.6rem" }}>
+            <div className="error-banner text-sm">
+              ⚠️ Copy the Key now — it&apos;s shown only once and is the credential. Keep it private.
+            </div>
+            <label className="stack" style={{ gap: "0.25rem" }}>
+              <span className="text-xs muted">Webhook URL — paste into Google Ads&apos; &quot;Webhook URL&quot; field</span>
+              <input
+                readOnly
+                value={gaResult.webhook_url}
+                onFocus={(e) => e.currentTarget.select()}
+                style={{ width: "100%", fontFamily: "monospace", fontSize: "0.78rem", padding: "0.5rem" }}
+              />
+            </label>
+            <div className="row">
+              <Button size="sm" onClick={() => void copyGaValue(gaResult.webhook_url, "url")}>
+                {gaUrlCopied ? "Copied ✓" : "Copy URL"}
+              </Button>
+            </div>
+            <label className="stack" style={{ gap: "0.25rem" }}>
+              <span className="text-xs muted">Key — paste into Google Ads&apos; separate &quot;Key&quot; field</span>
+              <input
+                readOnly
+                value={gaResult.token}
+                onFocus={(e) => e.currentTarget.select()}
+                style={{ width: "100%", fontFamily: "monospace", fontSize: "0.78rem", padding: "0.5rem" }}
+              />
+            </label>
+            <div className="row">
+              <Button size="sm" onClick={() => void copyGaValue(gaResult.token, "key")}>
+                {gaKeyCopied ? "Copied ✓" : "Copy Key"}
+              </Button>
+            </div>
+            <p className="text-xs muted">
+              In Google Ads → Export leads → Webhook integration, paste the URL and the Key into their separate
+              fields and Save (you can Send test data to verify). To revoke, disconnect — you&apos;ll get a fresh Key.
+            </p>
+          </div>
+        ) : (
+          <div className="stack" style={{ gap: "0.5rem" }}>
+            <p className="text-sm muted">
+              We&apos;ll generate a fixed Webhook URL and a private Key for this Google Ads account. Google Ads
+              needs BOTH (in separate fields).
+            </p>
+            <TextField
+              id="ga-label"
+              label="Label (optional)"
+              value={gaLabel}
+              onChange={(e) => setGaLabel(e.target.value)}
+              placeholder="e.g. BG Group – Google Ads"
             />
           </div>
         )}

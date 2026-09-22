@@ -26,6 +26,7 @@ const ALL_OFF: Record<ModuleKey, boolean> = {
   portal_99acres: false,
   sheet_leads: false,
   callyzer: false,
+  google_ads: false,
 };
 
 interface OrgContextValue {

@@ -128,6 +128,20 @@ export const leadSourceService = {
   async disconnect99acres(id: string): Promise<void> {
     await apiClient.delete(`/integrations/99acres/${id}`);
   },
+  // Google Ads Lead Form (push webhook). connect returns the FIXED webhook_url + a one-time Key (token).
+  async listGoogleAds(): Promise<LeadSourceConnection[]> {
+    const { data } = await apiClient.get<LeadSourceConnection[]>("/integrations/google-ads");
+    return data;
+  },
+  async connectGoogleAds(label: string | null): Promise<LeadSourceConnectResult> {
+    const { data } = await apiClient.post<LeadSourceConnectResult>("/integrations/google-ads/connect", {
+      label,
+    });
+    return data;
+  },
+  async disconnectGoogleAds(id: string): Promise<void> {
+    await apiClient.delete(`/integrations/google-ads/${id}`);
+  },
 };
 
 // Google Sheet lead sync (pull). The tenant shares their sheet (Viewer) with the platform

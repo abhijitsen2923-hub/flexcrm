@@ -29,10 +29,17 @@ from app.models.lead_source_route import LeadSourceRoute
 from app.models.organization import Organization
 from app.services.base import ServiceBase
 from app.services.lead_ingest import LeadIngestService
-from app.services.lead_source_mapper import map_99acres_lead
+from app.services.lead_source_mapper import map_99acres_lead, map_google_ads_lead
 from app.services.users import UserService
 
 _PROVIDER = "99acres"
+
+# Per-provider payload mappers. process_delivery dispatches by the STORED delivery.provider so the shared
+# reconcile cron (which drains every provider's deliveries through process_delivery) maps each correctly.
+_MAPPERS = {
+    "99acres": map_99acres_lead,
+    "google_ads": map_google_ads_lead,
+}
 
 
 class LeadSourceService(ServiceBase):
@@ -55,10 +62,13 @@ class LeadSourceService(ServiceBase):
 
     # --- tenant-facing ------------------------------------------------------
 
-    async def create_connection(self, *, label: str | None, actor_id: UUID) -> tuple[LeadSourceConnection, str]:
-        """Mint a connection: generate a secret URL token, store its hash on the tenant
-        connection + the public route, and return (connection, plaintext_token). The token is
-        shown to the admin ONCE — only its hash is persisted."""
+    async def create_connection(
+        self, *, provider: str = _PROVIDER, label: str | None, actor_id: UUID
+    ) -> tuple[LeadSourceConnection, str]:
+        """Mint a connection for `provider`: generate a secret token, store its hash on the tenant
+        connection + the public route, and return (connection, plaintext_token). The token is shown to
+        the admin ONCE — only its hash is persisted. For 99acres the token rides the webhook URL; for
+        google_ads it is the "Key" the tenant pastes into Google Ads (sent back in the body)."""
         org = await self._org()
         industry = org.business_type
         if industry is None:
@@ -70,7 +80,7 @@ class LeadSourceService(ServiceBase):
         token_hash = self._hash_token(token)
 
         conn = LeadSourceConnection(
-            provider=_PROVIDER,
+            provider=provider,
             token_hash=token_hash,
             label=label,
             default_industry=industry.value,
@@ -85,7 +95,7 @@ class LeadSourceService(ServiceBase):
         # (409) rather than a raw pre-commit error (mirrors MetaConnectionService._register_page_route).
         self.session.add(
             LeadSourceRoute(
-                provider=_PROVIDER,
+                provider=provider,
                 token_hash=token_hash,
                 organization_id=org.id,
                 schema_name=org.schema_name,
@@ -95,12 +105,12 @@ class LeadSourceService(ServiceBase):
         await self.commit()
         return conn, token
 
-    async def list_connections(self) -> list[LeadSourceConnection]:
+    async def list_connections(self, *, provider: str = _PROVIDER) -> list[LeadSourceConnection]:
         rows = (
             await self.session.execute(
                 select(LeadSourceConnection)
                 .where(
-                    LeadSourceConnection.provider == _PROVIDER,
+                    LeadSourceConnection.provider == provider,
                     LeadSourceConnection.is_deleted.is_(False),
                 )
                 .order_by(LeadSourceConnection.created_at.desc())
@@ -135,36 +145,37 @@ class LeadSourceService(ServiceBase):
 
     # --- webhook side -------------------------------------------------------
 
-    async def resolve_route(self, token: str) -> LeadSourceRoute | None:
-        """Hash the URL token and resolve the active public route (org + schema). Public table —
-        safe to read before any tenant schema is active."""
+    async def resolve_route(self, token: str, *, provider: str = _PROVIDER) -> LeadSourceRoute | None:
+        """Hash the secret (99acres: URL token; google_ads: the body `google_key`) and resolve the
+        active public route (org + schema). Public table — safe to read before any tenant schema is
+        active."""
         token_hash = self._hash_token(token)
         with bypass(self.session):
             return (
                 await self.session.execute(
                     select(LeadSourceRoute).where(
-                        LeadSourceRoute.provider == _PROVIDER,
+                        LeadSourceRoute.provider == provider,
                         LeadSourceRoute.token_hash == token_hash,
                         LeadSourceRoute.is_active.is_(True),
                     )
                 )
             ).scalar_one_or_none()
 
-    async def persist_delivery(self, token_hash: str, payload: dict) -> UUID:
+    async def persist_delivery(self, token_hash: str, payload: dict, *, provider: str = _PROVIDER) -> UUID:
         """Durably store the raw body BEFORE processing (own commit). Runs after the caller has
         set the tenant schema. Takes the resolved token_hash (not the route object, which may be
         detached from an earlier session). Returns the delivery id to process after the ACK."""
         conn = (
             await self.session.execute(
                 select(LeadSourceConnection).where(
-                    LeadSourceConnection.provider == _PROVIDER,
+                    LeadSourceConnection.provider == provider,
                     LeadSourceConnection.token_hash == token_hash,
                     LeadSourceConnection.is_deleted.is_(False),
                 )
             )
         ).scalar_one_or_none()
         delivery = LeadSourceDelivery(
-            provider=_PROVIDER,
+            provider=provider,
             connection_id=(conn.id if conn else None),
             payload=payload,
             status="received",
@@ -202,7 +213,8 @@ class LeadSourceService(ServiceBase):
             return "already"
 
         try:
-            external_id, fields = map_99acres_lead(delivery.payload)
+            mapper = _MAPPERS.get(delivery.provider, map_99acres_lead)
+            external_id, fields = mapper(delivery.payload)
             if not external_id or not (fields.get("contact_phone") or fields.get("contact_email")):
                 delivery.status = "ignored"
                 delivery.error = "No usable contact (phone/email) or external id."
@@ -233,7 +245,7 @@ class LeadSourceService(ServiceBase):
                 organization_id=organization_id,
                 actor_id=actor_id,
                 industry=industry,
-                source_provider=_PROVIDER,
+                source_provider=delivery.provider,
                 external_id=external_id,
                 fields=fields,
             )

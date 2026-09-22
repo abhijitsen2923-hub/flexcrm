@@ -71,6 +71,53 @@ async def disconnect_99acres(
     return {"status": "disconnected"}
 
 
+# --- Google Ads Lead Form (webhook push) ----------------------------------
+
+
+def _google_ads_webhook_url(request: Request) -> str:
+    """The FIXED Google Ads webhook URL (same for every tenant — the per-tenant secret is the Key,
+    sent by Google in the body). Forces https (Cloud Run may present http without --proxy-headers)."""
+    prefix = get_settings().api_v1_prefix
+    return f"https://{request.url.netloc}{prefix}/webhooks/google-ads"
+
+
+@router.post("/google-ads/connect", response_model=LeadSourceConnectResponse, status_code=status.HTTP_201_CREATED)
+async def connect_google_ads(
+    request: Request,
+    payload: LeadSourceConnectRequest,
+    current_user=Depends(require_permissions(PermissionCode.ORG_MANAGE)),
+    session: AsyncSession = Depends(get_db_session),
+):
+    """Mint a Google Ads Lead Form connection. Returns the FIXED webhook URL + a one-time Key (`token`)
+    the tenant pastes into Google Ads' SEPARATE URL + Key fields. Only the Key's hash is stored."""
+    conn, token = await LeadSourceService(session).create_connection(
+        provider="google_ads", label=payload.label, actor_id=current_user.id
+    )
+    return LeadSourceConnectResponse(
+        connection=LeadSourceConnectionRead.model_validate(conn),
+        webhook_url=_google_ads_webhook_url(request),
+        token=token,
+    )
+
+
+@router.get("/google-ads", response_model=list[LeadSourceConnectionRead])
+async def list_google_ads_connections(
+    current_user=Depends(require_permissions(PermissionCode.ORG_MANAGE)),
+    session: AsyncSession = Depends(get_db_session),
+):
+    return await LeadSourceService(session).list_connections(provider="google_ads")
+
+
+@router.delete("/google-ads/{connection_id}")
+async def disconnect_google_ads(
+    connection_id: UUID,
+    current_user=Depends(require_permissions(PermissionCode.ORG_MANAGE)),
+    session: AsyncSession = Depends(get_db_session),
+):
+    await LeadSourceService(session).disconnect(connection_id, actor_id=current_user.id)
+    return {"status": "disconnected"}
+
+
 # --- Google Sheets (pull) lead source -------------------------------------
 
 @router.get("/google-sheets/service-account")
