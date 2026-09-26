@@ -27,7 +27,9 @@ logger = get_logger(__name__)
 async def dispatch_google_sheet_sync(session) -> dict[str, int]:
     """Poll + ingest across every org that has the module on + an active sheet connection. Shared by
     the CLI and the HTTP cron; does NOT own the engine lifecycle."""
-    counts = {"orgs": 0, "connections": 0, "rows": 0, "created": 0, "duplicate": 0, "ignored": 0}
+    counts = {
+        "orgs": 0, "connections": 0, "rows": 0, "created": 0, "duplicate": 0, "ignored": 0, "relabelled": 0,
+    }
 
     with bypass(session):
         orgs = (
@@ -71,7 +73,7 @@ async def dispatch_google_sheet_sync(session) -> dict[str, int]:
                     continue
                 counts["connections"] += 1
                 stats = await service.sync_connection(conn, organization_id=org_id)
-                for k in ("rows", "created", "duplicate", "ignored"):
+                for k in ("rows", "created", "duplicate", "ignored", "relabelled"):
                     counts[k] += stats.get(k, 0)
         except Exception:
             await session.rollback()
@@ -95,7 +97,7 @@ def main() -> None:
     print(
         f"google_sheet_sync: orgs={counts['orgs']} connections={counts['connections']} "
         f"rows={counts['rows']} created={counts['created']} duplicate={counts['duplicate']} "
-        f"ignored={counts['ignored']}"
+        f"ignored={counts['ignored']} relabelled={counts['relabelled']}"
     )
 
 

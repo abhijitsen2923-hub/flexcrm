@@ -85,6 +85,10 @@ _META_FIXED_TOKENS: tuple[str, ...] = (
 # Trailing data fields (their per-tab order varies). Everything from col0 through the LAST of these is
 # left-column data; `lead_status` is NOT left-column data (it's an outlier just before the header block).
 _META_TAIL_DATA: frozenset[str] = frozenset({"full_name", "phone", "street_address", "email"})
+# Row-dict key carrying the worksheet (tab) title. Agencies split one Meta campaign into per-product tabs
+# ("3.5 Lakh Plot", "4.5 Lakh Plot Lead", …), so the tab — not Meta's campaign_name — is the real campaign;
+# consumed by meta_sheet_mapper.map_sheet_row(campaign_from_tab=True).
+SHEET_TAB_KEY = "sheet_tab"
 
 
 def _norm(cell: object) -> str:
@@ -122,14 +126,16 @@ def _data_schema(schema: list[str]) -> list[str]:
     return schema[: last + 1] if last >= 0 else schema
 
 
-def _parse_positional_values(values: list[list]) -> list[dict]:
+def _parse_positional_values(values: list[list], *, tab: str | None = None) -> list[dict]:
     """Rebuild header→value dicts from a positional (header-less) Meta export grid. Pure + testable: no
-    gspread/network. Returns [] when the tab doesn't match the format (no detectable header block)."""
+    gspread/network. Returns [] when the tab doesn't match the format (no detectable header block).
+    A non-blank `tab` title is stamped on every row under SHEET_TAB_KEY."""
     schema = _detect_meta_schema(values)
     if not schema:
         return []
     names = _data_schema(schema)
     width = len(names)
+    tab_title = _norm(tab)
     out: list[dict] = []
     for row in values:
         if not row:
@@ -147,13 +153,16 @@ def _parse_positional_values(values: list[list]) -> list[dict]:
                 d["id"] = c
             elif head == "p:":
                 d["phone"] = c
+        if tab_title:
+            d[SHEET_TAB_KEY] = tab_title
         out.append(d)
     return out
 
 
 def read_rows_positional(sheet_id: str) -> list[dict]:
     """Like read_rows, but for agency sheets with NO header row (data positional in the left columns,
-    field-name block shifted far right). Reads each tab via get_all_values() → _parse_positional_values."""
+    field-name block shifted far right). Reads each tab via get_all_values() → _parse_positional_values,
+    tagging each row with its tab title (SHEET_TAB_KEY)."""
     gc = _client()
     try:
         worksheets = gc.open_by_key(sheet_id).worksheets()
@@ -166,16 +175,15 @@ def read_rows_positional(sheet_id: str) -> list[dict]:
         ) from exc
     rows: list[dict] = []
     for ws in worksheets:
+        title = _norm(getattr(ws, "title", ""))
         try:
-            parsed = _parse_positional_values(ws.get_all_values())
+            parsed = _parse_positional_values(ws.get_all_values(), tab=title)
             if not parsed:
-                logger.warning(
-                    "google_sheets: positional format not detected in worksheet %r", getattr(ws, "title", "?")
-                )
+                logger.warning("google_sheets: positional format not detected in worksheet %r", title or "?")
             rows.extend(parsed)
         except Exception:  # noqa: BLE001 — skip a tab we can't parse; keep the others
             logger.warning(
-                "google_sheets: positional parse failed for worksheet %r", getattr(ws, "title", "?"), exc_info=True
+                "google_sheets: positional parse failed for worksheet %r", title or "?", exc_info=True
             )
             continue
     return rows

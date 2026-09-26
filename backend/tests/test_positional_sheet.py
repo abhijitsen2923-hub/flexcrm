@@ -3,8 +3,18 @@
 Mirrors the real Vriddhica sheet's structure: lead data positional in the LEFT columns in Meta's fixed
 order, a wide empty gap, a trailing `lead_status` value, then the field-name header block shifted far RIGHT.
 """
-from app.core.google_sheets import _data_schema, _detect_meta_schema, _parse_positional_values
+from app.core import google_sheets
+from app.core.google_sheets import (
+    SHEET_TAB_KEY,
+    _data_schema,
+    _detect_meta_schema,
+    _parse_positional_values,
+    read_rows_positional,
+)
 from app.services.meta_sheet_mapper import map_sheet_row
+
+# The real Vriddhica sheet: 3.5 L / 4.5 L / 6.5 L / Pan India tabs all carry ONE Meta campaign (#46).
+_COMBINED = "Vriddhica 3.5 lakh and 4.5 lakh Leads campaign"
 
 # Header block as it appears (misplaced) far to the right of each row.
 _HEADER = [
@@ -74,3 +84,77 @@ def test_parsed_row_flows_through_map_sheet_row():
     assert fields["contact_phone"] == "+919876543210"
     assert fields["contact_email"] == "t@x.com"
     assert fields["source"] == "Instagram"  # platform 'ig' → canonical label
+
+
+# ---- Sheet tab → campaign (#46) ------------------------------------------------------------------
+
+def _left(lead_id: str = "l:1", campaign: str = _COMBINED) -> list[str]:
+    return [lead_id, "2026-09-18T03:03:50-05:00", "ag:1", "Ad", "as:1", "AdSet", "c:52510326734875", campaign,
+            "f:1", "Form", "false", "fb", "3pm", "Test User", "p:9876543210", "St", "t@x.com"]
+
+
+def test_parse_positional_attaches_tab_title():
+    d = _parse_positional_values([_row(_left())], tab=" 3.5 Lakh Plot ")[0]
+    assert d[SHEET_TAB_KEY] == "3.5 Lakh Plot"
+
+
+def test_parse_positional_without_tab_has_no_tab_key():
+    assert SHEET_TAB_KEY not in _parse_positional_values([_row(_left())])[0]
+
+
+def test_parse_positional_blank_tab_is_ignored():
+    assert SHEET_TAB_KEY not in _parse_positional_values([_row(_left())], tab="   ")[0]
+
+
+class _FakeWorksheet:
+    def __init__(self, title: str, values: list[list[str]]):
+        self.title = title
+        self._values = values
+
+    def get_all_values(self) -> list[list[str]]:
+        return self._values
+
+
+class _FakeClient:
+    def __init__(self, worksheets: list[_FakeWorksheet]):
+        self._worksheets = worksheets
+
+    def open_by_key(self, _sheet_id: str) -> "_FakeClient":
+        return self
+
+    def worksheets(self) -> list[_FakeWorksheet]:
+        return self._worksheets
+
+
+def test_read_rows_positional_tags_each_row_with_its_tab(monkeypatch):
+    fake = _FakeClient([
+        _FakeWorksheet("3.5 Lakh Plot", [_row(_left("l:1"))]),
+        _FakeWorksheet("4.5 Lakh Plot Lead", [_row(_left("l:2")), _row(_left("l:3"))]),
+    ])
+    monkeypatch.setattr(google_sheets, "_client", lambda: fake)
+    rows = read_rows_positional("sheet-id")
+    assert [(r["id"], r[SHEET_TAB_KEY]) for r in rows] == [
+        ("l:1", "3.5 Lakh Plot"),
+        ("l:2", "4.5 Lakh Plot Lead"),
+        ("l:3", "4.5 Lakh Plot Lead"),
+    ]
+
+
+def test_agency_campaign_is_the_tab_and_meta_names_stay_in_notes():
+    d = _parse_positional_values([_row(_left())], tab="3.5 Lakh Plot")[0]
+    _eid, fields = map_sheet_row(d, campaign_from_tab=True)
+    assert fields["campaign"] == "3.5 Lakh Plot"
+    assert fields["title"] == "3.5 Lakh Plot — Test User"
+    notes = fields["notes"]
+    assert "sheet tab: 3.5 Lakh Plot" in notes
+    assert f"campaign: {_COMBINED}" in notes
+    assert "sheet_tab:" not in notes  # attribution line, never an "extra field"
+
+
+def test_one_meta_campaign_splits_by_tab():
+    grid = [_row(_left())]
+    campaigns = {
+        map_sheet_row(_parse_positional_values(grid, tab=tab)[0], campaign_from_tab=True)[1]["campaign"]
+        for tab in ("3.5 Lakh Plot", "4.5 Lakh Plot Lead")
+    }
+    assert campaigns == {"3.5 Lakh Plot", "4.5 Lakh Plot Lead"}

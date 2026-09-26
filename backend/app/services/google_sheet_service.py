@@ -5,13 +5,16 @@ The Sheet is the source, the CRM the destination. A single platform-owned servic
 ID (in `external_account_id`). Rows follow the Meta lead pattern → `meta_sheet_mapper.map_sheet_row` →
 `LeadIngestService.ingest_lead` (idempotent on external_id, so re-polling the whole sheet is safe). No
 token / no public route — this is a PULL provider, unlike the 99acres push connector.
+
+Re-polling also self-heals already-ingested leads whose campaign/title still hold what an older mapping
+stored (e.g. Meta's combined campaign name before AntTech sheets used the tab) — see `_relabel_existing`.
 """
 from __future__ import annotations
 
 from datetime import UTC, datetime
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 
 from app.core.exceptions import NotFoundError, ValidationError
 from app.core.google_sheets import (
@@ -24,11 +27,13 @@ from app.core.google_sheets import (
 from app.core.logging import get_logger
 from app.core.tenancy import bypass, current_org
 from app.database.enums import LeadIndustry
+from app.models.lead import Lead
 from app.models.lead_source_connection import LeadSourceConnection
 from app.models.organization import Organization
 from app.services.base import ServiceBase
 from app.services.lead_ingest import LeadIngestService
-from app.services.meta_sheet_mapper import map_sheet_row
+from app.services.meta_sheet_mapper import map_sheet_row, relabel_changes
+from app.services.realtime import realtime_manager
 from app.services.users import UserService
 
 logger = get_logger(__name__)
@@ -203,8 +208,9 @@ class GoogleSheetService(ServiceBase):
 
     async def sync_connection(self, conn: LeadSourceConnection, *, organization_id: UUID) -> dict[str, int]:
         """Read the sheet + ingest each row. Idempotent (ingest dedupes on external_id), so a full
-        re-read is safe. Never raises — one bad row/sheet can't abort the poll."""
-        stats = {"rows": 0, "created": 0, "duplicate": 0, "ignored": 0}
+        re-read is safe; a duplicate row also self-heals its lead's stale campaign/title (`relabelled`).
+        Never raises — one bad row/sheet can't abort the poll."""
+        stats = {"rows": 0, "created": 0, "duplicate": 0, "ignored": 0, "relabelled": 0}
         # Snapshot scalars up-front: ingest commits/rolls back per row and can EXPIRE the ORM `conn`,
         # so using plain values avoids a MissingGreenlet lazy-load mid-loop (mirrors meta_lead_sync).
         conn_id = conn.id
@@ -214,7 +220,9 @@ class GoogleSheetService(ServiceBase):
         conn_field_map = conn.field_map
         if not sheet_id:
             return stats
-        reader = read_rows_positional if _conn_format(conn_field_map) == _FORMAT_ANTTECH else read_rows
+        # Agency (AntTech) sheets split one Meta campaign into per-product tabs → the tab is the campaign.
+        campaign_from_tab = _conn_format(conn_field_map) == _FORMAT_ANTTECH
+        reader = read_rows_positional if campaign_from_tab else read_rows
         source_override = _conn_source_override(conn_field_map)
         try:
             rows = reader(sheet_id)
@@ -234,16 +242,17 @@ class GoogleSheetService(ServiceBase):
             ).id
 
         created_any = False
+        seen: set[str] = set()
         for row in rows:
             stats["rows"] += 1
-            external_id, fields = map_sheet_row(row)
+            external_id, fields = map_sheet_row(row, campaign_from_tab=campaign_from_tab)
             if source_override:
                 fields["source"] = source_override  # connection-declared source (e.g. "AntTech")
             if not external_id or not (fields.get("contact_phone") or fields.get("contact_email")):
                 stats["ignored"] += 1
                 continue
             try:
-                _lead, created = await self.ingest.ingest_lead(
+                lead, created = await self.ingest.ingest_lead(
                     organization_id=organization_id,
                     actor_id=actor_id,
                     industry=industry,
@@ -256,14 +265,62 @@ class GoogleSheetService(ServiceBase):
                 logger.warning("google_sheet row ingest failed (org %s)", organization_id, exc_info=True)
                 stats["ignored"] += 1
                 continue
+            # Only a lead's FIRST row in sheet order may relabel it (the same row that would create it),
+            # so a leadgen id repeated across tabs can't flip-flop its campaign between syncs.
+            first_sighting = external_id not in seen
+            seen.add(external_id)
             if created:
                 stats["created"] += 1
                 created_any = True
             else:
                 stats["duplicate"] += 1
+                if first_sighting and lead is not None and await self._relabel_existing(
+                    lead, row, fields, actor_id=actor_id
+                ):
+                    stats["relabelled"] += 1
+
+        if stats["relabelled"]:
+            logger.info(
+                "google_sheet relabelled %d lead(s) (org %s, connection %s)",
+                stats["relabelled"], organization_id, conn_id,
+            )
+            await self.invalidate_reporting_cache()
+            # One combined event (like bulk_reassign) so open Leads lists + the Campaign filter refresh.
+            # No request context in the cron, so pass org_id explicitly or the event is dropped.
+            await realtime_manager.broadcast(
+                {"event": "lead.updated", "payload": {"count": stats["relabelled"], "reason": "sheet_relabel"}},
+                org_id=organization_id,
+            )
 
         await self._set_status(conn_id, "ok", None, touch_lead=created_any)
         return stats
+
+    async def _relabel_existing(self, lead: Lead, row: dict, fields: dict, *, actor_id: UUID) -> bool:
+        """Self-heal an already-ingested lead's campaign/title to the current mapping of its row — only
+        while they still hold what an older sync stored (see meta_sheet_mapper.relabel_changes). A guarded
+        compare-and-set, so a rep's concurrent edit wins. Returns True if it wrote; never raises."""
+        # Plain snapshot: `lead` was just loaded by ingest's lookup; a later rollback would expire it.
+        lead_id, cur_campaign, cur_title = lead.id, lead.campaign, lead.title
+        if lead.is_deleted:
+            return False
+        changes = relabel_changes(row, fields, current_campaign=cur_campaign, current_title=cur_title)
+        if not changes:
+            return False
+        where = [Lead.id == lead_id, Lead.is_deleted.is_(False)]
+        if "campaign" in changes:
+            where.append(Lead.campaign.is_(None) if cur_campaign is None else Lead.campaign == cur_campaign)
+        if "title" in changes:
+            where.append(Lead.title == cur_title)
+        try:
+            result = await self.session.execute(
+                update(Lead).where(*where).values(**changes, updated_by_id=actor_id)
+            )
+            await self.commit()
+        except Exception:  # noqa: BLE001 — one failed relabel must not abort the sheet
+            await self.session.rollback()
+            logger.warning("google_sheet relabel failed (lead %s)", lead_id, exc_info=True)
+            return False
+        return bool(result.rowcount)
 
     async def _set_status(self, conn_id: UUID, status: str, detail: str | None, *, touch_lead: bool = False) -> None:
         conn = (

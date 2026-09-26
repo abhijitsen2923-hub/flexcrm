@@ -2,6 +2,13 @@
 """One-off backfill: populate leads.campaign for Meta-sheet-imported leads whose
 campaign name currently lives only in the notes blob.
 
+Note (#46): the Google Sheet sync now self-heals ingested leads' campaigns on
+every poll (GoogleSheetService._relabel_existing) — AntTech tab campaigns and
+Meta's "You don't have enough permission…" text. It does NOT fill campaigns left
+NULL by the notes-only era below; only this script does. This script has no
+placeholder filter, so a run may copy that text back from old notes — the next
+sync clears it again.
+
 Context
     Before the meta_sheet_mapper fix, sheet-imported leads got their campaign name
     written only into notes ("campaign: <name>"), not the dedicated `campaign`

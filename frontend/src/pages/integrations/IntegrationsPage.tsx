@@ -36,6 +36,8 @@ const SHEET_FORMAT_OPTIONS = [
   { value: "standard", label: "Standard Meta export (header row)" },
   { value: "anttech_positional", label: "Agency sheet — no header row" },
 ];
+// Agency sheets split one Meta campaign into per-product tabs, so the sync files each lead under its tab.
+const AGENCY_FORMAT_HINT = "Each lead's Campaign is the sheet tab it came from (Meta campaign/ad names go to notes).";
 const REASON_HELP: Record<string, string> = {
   invalid_token:
     "The token is invalid or expired — generate a fresh never-expiring System-User token and paste it again.",
@@ -781,6 +783,7 @@ export default function IntegrationsPage() {
                         value={editFormat}
                         onChange={(e) => setEditFormat(e.target.value)}
                         options={SHEET_FORMAT_OPTIONS}
+                        hint={editFormat === "anttech_positional" ? AGENCY_FORMAT_HINT : undefined}
                       />
                     </div>
                     <Button size="sm" loading={editBusy} onClick={() => void saveEditSheet(c)}>Save</Button>
@@ -820,6 +823,7 @@ export default function IntegrationsPage() {
             value={sheetFormat}
             onChange={(e) => setSheetFormat(e.target.value)}
             options={SHEET_FORMAT_OPTIONS}
+            hint={sheetFormat === "anttech_positional" ? AGENCY_FORMAT_HINT : undefined}
           />
           {sheetError && (
             <p className="text-sm" style={{ color: "var(--color-danger)" }}>{sheetError}</p>
