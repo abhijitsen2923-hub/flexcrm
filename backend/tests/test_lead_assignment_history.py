@@ -95,6 +95,53 @@ async def test_single_reassign_logs_real_changes_only_and_leaves_stage_history_a
 
 
 @pytest.mark.asyncio
+async def test_concurrent_reassign_records_the_owner_it_actually_replaced(
+    client, auth_headers, sales_headers, monkeypatch
+):
+    """Two managers change the owner at once: M1's PUT (A → B) has already loaded the lead when M2's bulk
+    reassign (A → C) commits. M1's history row must read C → B — the owner it really replaced — not a
+    stale A → B that would break the chain."""
+    from app.services.leads import LeadService
+
+    admin_id = await _user_id(client, auth_headers, "admin@example.com")
+    counselor_id = await _user_id(client, auth_headers, "sales@example.com")
+    third = await client.post(
+        "/api/v1/users",
+        headers=auth_headers,
+        json={"first_name": "Tara", "last_name": "Third", "email": "third@example.com",
+              "password": "StrongPass123", "phone": "+1555000003", "role": "counselor", "status": "active"},
+    )
+    assert third.status_code == 201, third.text
+    third_id = await _user_id(client, auth_headers, "third@example.com")
+    lead_id = await _create_lead(client, auth_headers, "+919900300051", owner_id=admin_id)
+
+    original = LeadService._ensure_references
+    raced = False
+
+    async def racing(self, customer_id, assigned_to_id):
+        nonlocal raced
+        if not raced and assigned_to_id is not None and str(assigned_to_id) == counselor_id:
+            raced = True  # M2's bulk reassign lands while M1's request is in flight
+            bulk = await client.post(
+                "/api/v1/leads/bulk-reassign",
+                headers=auth_headers,
+                json={"lead_ids": [lead_id], "assigned_to_id": third_id},
+            )
+            assert bulk.status_code == 200, bulk.text
+        return await original(self, customer_id, assigned_to_id)
+
+    monkeypatch.setattr(LeadService, "_ensure_references", racing)
+    await _reassign(client, auth_headers, lead_id, counselor_id)
+
+    assert raced
+    assert _changes(await _assignments(client, auth_headers, lead_id)) == {
+        ("created", None, admin_id),
+        ("bulk_reassign", admin_id, third_id),
+        ("reassign", third_id, counselor_id),
+    }
+
+
+@pytest.mark.asyncio
 async def test_bulk_reassign_logs_each_leads_previous_owner(client, auth_headers, sales_headers):
     admin_id = await _user_id(client, auth_headers, "admin@example.com")
     counselor_id = await _user_id(client, auth_headers, "sales@example.com")

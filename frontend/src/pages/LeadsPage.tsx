@@ -32,6 +32,7 @@ import { organizationsService } from "../services/organizations";
 import { siteVisitsService } from "../services/site-visits";
 import { usersService } from "../services/users";
 import type { Lead, LeadIndustry, Organization, PipelineStage, User } from "../types";
+import { syncOpenDrawer } from "../components/leads/drawerSync";
 import { localDayRange } from "../utils/dateRange";
 import { extractErrorMessage } from "../utils/errors";
 import { formatCurrency } from "../utils/format";
@@ -632,12 +633,13 @@ export default function LeadsPage() {
   const [drawerKey, setDrawerKey] = useState(0);
 
   useEffect(() => {
-    if (!drawerLead) return;
-    const refreshed = leads.find((lead) => lead.id === drawerLead.id);
-    if (refreshed && refreshed !== drawerLead) {
-      setDrawerLead(refreshed);
-    }
-  }, [leads, drawerLead]);
+    const { replaceWith, reloadHistory } = syncOpenDrawer(leads, drawerLead);
+    if (replaceWith) setDrawerLead(replaceWith);
+    // The open lead left the filtered list (e.g. reassigned out of "Unassigned") — reload its history.
+    else if (reloadHistory) setDrawerKey((k) => k + 1);
+    // Only on a list refresh — reacting to drawerLead too would reload every time a lead is opened.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [leads]);
 
   // --- List columns (spec §3.1) ------------------------------------------
   const columns: DataTableColumn<Lead>[] = [

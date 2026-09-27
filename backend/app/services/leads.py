@@ -71,6 +71,7 @@ class LeadService(ServiceBase):
             await self.session.execute(
                 select(Lead.id, Lead.assigned_to_id)
                 .where(Lead.id.in_(lead_ids), Lead.is_deleted.is_(False))
+                .order_by(Lead.id)  # consistent lock order, so overlapping bulk reassigns can't deadlock
                 .with_for_update()
             )
         ).all()
@@ -411,8 +412,12 @@ class LeadService(ServiceBase):
         update_data.pop("industry", None)
         await self._ensure_references(update_data.get("customer_id"), update_data.get("assigned_to_id"))
         update_data["updated_by_id"] = actor_id
-        previous_owner_id = lead.assigned_to_id  # captured before the update overwrites it
         if "assigned_to_id" in update_data:
+            # Re-read the CURRENT owner under a row lock (held until commit): the lead loaded above can be
+            # stale if someone else reassigned it meanwhile, which would log the wrong "from".
+            previous_owner_id = await self.session.scalar(
+                select(Lead.assigned_to_id).where(Lead.id == lead.id).with_for_update()
+            )
             self.assignment_service.record(
                 lead_id=lead.id,
                 from_user_id=previous_owner_id,

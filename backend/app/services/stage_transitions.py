@@ -1,6 +1,8 @@
 from datetime import UTC, datetime
 from uuid import UUID
 
+from sqlalchemy import select
+
 from app.core.exceptions import AuthorizationError, NotFoundError, ValidationError
 from app.core.logging import get_logger
 from app.core.permissions import STAGE_MANAGER_ROLES, can_set_stage
@@ -240,7 +242,11 @@ class StageTransitionService(ServiceBase):
             # Salesperson: an explicit pick wins; else keep the lead's owner; else
             # fall back to the user recording the booking — so the promoted
             # customer always has an owner even for roles that can't pick a user.
-            previous_owner_id = lead.assigned_to_id
+            # Current owner, re-read under a row lock (held until this transition commits) — the lead loaded
+            # above can be stale if someone reassigned it meanwhile, which would log the wrong "from".
+            previous_owner_id = await self.session.scalar(
+                select(Lead.assigned_to_id).where(Lead.id == lead.id).with_for_update()
+            )
             if payload.assigned_to_id is not None:
                 # Org-scoped: the explicit salesperson pick must be a user in this
                 # tenant — `users` is shared, so an unscoped id could point at
