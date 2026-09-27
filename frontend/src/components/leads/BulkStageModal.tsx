@@ -73,6 +73,10 @@ export function BulkStageModal({ open, count, stageName, onClose, onSubmit }: Bu
           <span className="muted">Moving to</span>
           <Badge tone="warning">{stageName}</Badge>
         </div>
+        <p className="muted text-sm">
+          Bulk moves only go forward — leads already past this stage, or closed (Sold or lost), are skipped
+          (change those one at a time).
+        </p>
 
         <TextareaField
           id="bulk-stage-comment"

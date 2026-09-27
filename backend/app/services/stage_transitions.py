@@ -90,7 +90,11 @@ class StageTransitionService(ServiceBase):
         *,
         actor_id: UUID,
         actor_role: UserRole,
+        allow_backward: bool = True,
     ) -> StageTransition:
+        """Move one lead to `payload.to_stage_code`. `allow_backward=False` (bulk moves) rejects, for
+        EVERY role, a move to an earlier active stage and any change to a closed (Sold or lost) lead,
+        except the DNP↔Follow-up toggle — so one bulk action can't restart or reverse a batch's lifecycle."""
         lead = await self.lead_repository.get(lead_id, options=self.lead_repository.default_options)
         if lead is None:
             raise NotFoundError("Lead not found.")
@@ -140,13 +144,28 @@ class StageTransitionService(ServiceBase):
             current_stage.code in DNP_FOLLOWUP_STAGE_CODES
             and target_stage.code in DNP_FOLLOWUP_STAGE_CODES
         )
-        if (
+        is_backward = (
             not is_reopen
             and not is_dnp_followup_toggle
             and target_stage.position < current_stage.position
             and target_stage.category == PipelineStageCategory.active
-            and actor_role not in STAGE_MANAGER_ROLES
-        ):
+        )
+        # Bulk moves are forward-only, even for managers, and never touch a CLOSED lead: a batch reset
+        # (e.g. everything back to New Enquiry next to a bulk owner change) or a bulk reopen would silently
+        # restart each lead's cycle, and moving Sold leads to a lost stage would reverse won deals (and their
+        # brokerage). Those stay deliberate single-lead actions. Exception: the DNP↔Follow-up toggle, a
+        # routine daily action (education/travel "Did Not Pick" is closed-lost, real estate's is active).
+        if not allow_backward and not is_dnp_followup_toggle:
+            if current_stage.category != PipelineStageCategory.active:
+                raise ValidationError(
+                    "Closed lead (Sold or lost) — bulk moves never change it; update it on the lead itself."
+                )
+            if is_backward:
+                raise ValidationError(
+                    f"Already past '{target_stage.name}' — bulk moves never move a lead backward; "
+                    "change it on the lead itself."
+                )
+        if is_backward and actor_role not in STAGE_MANAGER_ROLES:
             raise AuthorizationError("Only managers can move a lead backward in the pipeline.")
 
         # Travel-only gate: if leaving `visa_documentation_pending`, every
@@ -325,10 +344,12 @@ class StageTransitionService(ServiceBase):
         enforce_owner_id: UUID | None = None,
     ) -> dict:
         """Move each lead to `to_stage_code` via the normal single-lead path, so
-        every rule and side effect (comment, role/backward gates, Sold/Booked
-        promotions, realtime, history) applies identically. Per-lead failures are
-        collected — one rejected lead (e.g. a backward move a rep can't make, or a
-        stage that doesn't exist for that lead's industry) never aborts the rest.
+        every rule and side effect (comment, role gates, Sold/Booked promotions,
+        realtime, history) applies identically — except that bulk moves are
+        FORWARD-ONLY for every role: a lead already past the target, or a closed (Sold
+        or lost) lead, is skipped — backward moves, reopens and reversing a sale stay
+        deliberate single-lead actions (the DNP↔Follow-up toggle is still allowed).
+        Per-lead failures are collected — one rejected lead never aborts the rest.
         `enforce_owner_id`, when set (front-line reps), restricts moves to the
         caller's own leads — the same anti-poaching scope as the single endpoint.
         Returns {updated, failed, errors}."""
@@ -357,6 +378,7 @@ class StageTransitionService(ServiceBase):
                     ),
                     actor_id=actor_id,
                     actor_role=actor_role,
+                    allow_backward=False,
                 )
                 updated += 1
             except (ValidationError, AuthorizationError, NotFoundError) as exc:

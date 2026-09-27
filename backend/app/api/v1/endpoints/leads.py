@@ -153,9 +153,11 @@ async def bulk_transition_leads(
     session: AsyncSession = Depends(get_db_session),
 ):
     """Move many selected leads to one stage in a single action. Each lead goes
-    through the normal transition (mandatory comment, role/backward gates, side
-    effects); rejected leads are reported, not fatal. Front-line reps are scoped
-    to their own leads, same as the single-transition endpoint."""
+    through the normal transition (mandatory comment, role gates, side effects),
+    but bulk moves are forward-only: leads already past the target, and closed
+    (Sold or lost) leads, are reported, not moved (the DNP↔Follow-up toggle still
+    applies). Rejected leads are reported, not fatal. Front-line reps are scoped to
+    their own leads, same as the single-transition endpoint."""
     enforce = current_user.id if current_user.role in ASSIGNED_ONLY_LEAD_ROLES else None
     result = await StageTransitionService(session).bulk_transition(
         payload.lead_ids,
