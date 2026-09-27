@@ -8,14 +8,19 @@ import type { PartnerOption } from "../../services/channelPartners";
 import type { Lead, PipelineStage, User } from "../../types";
 import type { Booking, PaymentMode } from "../../types/realestate";
 import { extractErrorMessage } from "../../utils/errors";
+import {
+  FIELD_ELEMENT_IDS,
+  MIN_COMMENT_LENGTH,
+  firstInvalidField,
+  validateTransition,
+  type TransitionField,
+} from "./stageTransitionValidation";
 
 
 // Sentinel salesperson value for an owner's-reference sale — nobody earns an
 // incentive (neither an internal salesperson nor a channel partner).
 const OWNER_REFERENCE = "__owner_reference__";
 
-
-const MIN_COMMENT_LENGTH = 10;
 // Real-estate stage that schedules a site visit on the calendar.
 const SITE_VISIT_STAGE = "site_visit_confirmed";
 // Real-estate "Booked / Token" (position 7): capture the property + token and
@@ -98,10 +103,13 @@ export function StageTransitionModal({
   const [existingBooking, setExistingBooking] = useState<Booking | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Field errors stay hidden until the user first taps Save.
+  const [showErrors, setShowErrors] = useState(false);
 
   // Reset form whenever the modal opens onto a new transition.
   useEffect(() => {
     if (open) {
+      setShowErrors(false);
       setComment("");
       setNextAction("");
       setSiteProjectIds([]);
@@ -147,21 +155,52 @@ export function StageTransitionModal({
   );
 
   const trimmedLength = useMemo(() => comment.trim().length, [comment]);
-  const siteVisitReady = !isSiteVisitStage || (siteProjectIds.length > 0 && Boolean(siteDateTime));
   // Salesperson is only required when there ARE users to pick from. Booking roles
   // without USER_VIEW (e.g. crm_team) get an empty list — they book with the owner
   // defaulted server-side (their own id) rather than being blocked.
-  const salespersonReady = assignableUsers.length === 0 || Boolean(salespersonId);
-  const bookedReady =
-    !isBookedStage ||
-    Boolean((existingBooking || unitId) && Number(tokenAmount) > 0 && tokenMode && salespersonReady);
-  const canSubmit = Boolean(
-    lead && targetStage && trimmedLength >= MIN_COMMENT_LENGTH && siteVisitReady && bookedReady && !submitting
+  const errors = useMemo(
+    () =>
+      validateTransition({
+        comment,
+        isSiteVisitStage,
+        siteProjectIds,
+        siteDateTime,
+        isBookedStage,
+        hasExistingBooking: Boolean(existingBooking),
+        unitId,
+        availableUnitCount: availableUnits.length,
+        salespersonId,
+        assignableUserCount: assignableUsers.length,
+        tokenAmount,
+        tokenMode,
+        tokenDate,
+      }),
+    [comment, isSiteVisitStage, siteProjectIds, siteDateTime, isBookedStage, existingBooking, unitId,
+      availableUnits.length, salespersonId, assignableUsers.length, tokenAmount, tokenMode, tokenDate]
   );
+  const hasErrors = firstInvalidField(errors) !== null;
+  const fieldError = (field: TransitionField) => (showErrors ? errors[field] : undefined);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!canSubmit || !targetStage) return;
+    if (!lead || !targetStage || submitting) return;
+    // Save stays tappable: instead of a silently disabled button, reveal what's missing and bring the
+    // first missing field into view (on a phone it's usually scrolled off-screen above).
+    const firstInvalid = firstInvalidField(errors);
+    if (firstInvalid) {
+      setShowErrors(true);
+      document.getElementById(FIELD_ELEMENT_IDS[firstInvalid])?.scrollIntoView({ behavior: "smooth", block: "center" });
+      return;
+    }
+    // Safety net for native constraints our rules don't model (noValidate turns off the automatic check),
+    // e.g. a half-typed optional "Next action date & time" — show the browser's message on that field.
+    const form = event.currentTarget;
+    if (!form.checkValidity()) {
+      const invalid = form.querySelector<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>(":invalid");
+      invalid?.scrollIntoView({ behavior: "smooth", block: "center" });
+      invalid?.reportValidity();
+      return;
+    }
     setSubmitting(true);
     setError(null);
     try {
@@ -215,13 +254,14 @@ export function StageTransitionModal({
           <Button variant="secondary" onClick={onClose} disabled={submitting}>
             Cancel
           </Button>
-          <Button type="submit" form="stage-transition-form" disabled={!canSubmit} loading={submitting}>
+          <Button type="submit" form="stage-transition-form" disabled={!lead || !targetStage || submitting} loading={submitting}>
             Save transition
           </Button>
         </>
       }
     >
-      <form id="stage-transition-form" className="form" onSubmit={handleSubmit}>
+      {/* noValidate: our own checks (validateTransition) decide, highlight and scroll — not the browser's. */}
+      <form id="stage-transition-form" className="form" onSubmit={handleSubmit} noValidate>
         <div className="row" style={{ gap: "0.5rem", alignItems: "center", flexWrap: "wrap" }}>
           <Badge tone="neutral">{fromStage?.name ?? lead?.stage_code ?? "—"}</Badge>
           <span className="muted">→</span>
@@ -238,6 +278,7 @@ export function StageTransitionModal({
           rows={4}
           required
           placeholder="e.g. Call back after 3 PM — interested in 2BHK, budget 80L"
+          error={fieldError("comment")}
           hint={
             trimmedLength < MIN_COMMENT_LENGTH
               ? `${MIN_COMMENT_LENGTH - trimmedLength} more characters required`
@@ -256,7 +297,7 @@ export function StageTransitionModal({
 
         {isSiteVisitStage && (
           <div className="stack" style={{ gap: "0.6rem" }}>
-            <div className="stack" style={{ gap: "0.35rem" }}>
+            <div id={FIELD_ELEMENT_IDS.siteProjects} className="stack" style={{ gap: "0.35rem" }}>
               <span className="muted text-sm">Sites (projects) — select one or more</span>
               {projects.length === 0 ? (
                 <span className="muted text-sm">No projects yet — add one in Inventory first.</span>
@@ -297,6 +338,7 @@ export function StageTransitionModal({
                   ? `${siteProjectIds.length} site visit${siteProjectIds.length === 1 ? "" : "s"} will be booked (one per site) at the date & time below.`
                   : "One visit is booked per selected site at the date & time below."}
               </span>
+              {fieldError("siteProjects") && <div className="field__error">{fieldError("siteProjects")}</div>}
             </div>
             <TextField
               id="sv-datetime"
@@ -305,6 +347,7 @@ export function StageTransitionModal({
               value={siteDateTime}
               onChange={(event) => setSiteDateTime(event.target.value)}
               required
+              error={fieldError("siteDateTime")}
             />
           </div>
         )}
@@ -339,6 +382,7 @@ export function StageTransitionModal({
                     ...availableUnits.map((u) => ({ value: u.id, label: u.label }))
                   ]}
                   hint="Booking this unit reserves it and creates a booking."
+                  error={fieldError("unit")}
                 />
               )}
               {assignableUsers.length > 0 ? (
@@ -357,6 +401,7 @@ export function StageTransitionModal({
                       ? "Owner's reference — nobody earns an incentive on this sale."
                       : "Sets the lead's owner and the new customer's owner."
                   }
+                  error={fieldError("salesperson")}
                 />
               ) : (
                 <TextField
@@ -393,6 +438,7 @@ export function StageTransitionModal({
                 value={tokenAmount}
                 onChange={(event) => setTokenAmount(event.target.value)}
                 required
+                error={fieldError("tokenAmount")}
               />
               <SelectField
                 id="bk-mode"
@@ -400,6 +446,7 @@ export function StageTransitionModal({
                 value={tokenMode}
                 onChange={(event) => setTokenMode(event.target.value as PaymentMode)}
                 options={PAYMENT_MODES}
+                error={fieldError("tokenMode")}
               />
               <TextField
                 id="bk-date"
@@ -408,6 +455,7 @@ export function StageTransitionModal({
                 value={tokenDate}
                 onChange={(event) => setTokenDate(event.target.value)}
                 required
+                error={fieldError("tokenDate")}
               />
               <TextField
                 id="bk-reference"
@@ -420,6 +468,9 @@ export function StageTransitionModal({
           </>
         )}
 
+        {showErrors && hasErrors && (
+          <div className="error-banner">Fill in the highlighted fields to save this move.</div>
+        )}
         {error && <div className="error-banner">{error}</div>}
       </form>
     </Modal>
