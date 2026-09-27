@@ -198,6 +198,11 @@ class LeadService(ServiceBase):
             extra_filters.append(Lead.stage_changed_at >= filters.stage_changed_from)
         if filters.stage_changed_to is not None:
             extra_filters.append(Lead.stage_changed_at < filters.stage_changed_to)
+        # Lead-date range (when the lead came in) — ANDed with every other filter.
+        if filters.created_from is not None:
+            extra_filters.append(Lead.created_at >= filters.created_from)
+        if filters.created_to is not None:
+            extra_filters.append(Lead.created_at < filters.created_to)
         # Unassigned (triage) filter — IS NULL can't be expressed by the generic
         # equality/IN builder, so it goes through extra_filters (applied to both the
         # row query and the count, keeping pagination totals correct).

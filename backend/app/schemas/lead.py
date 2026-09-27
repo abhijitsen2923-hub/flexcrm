@@ -230,3 +230,8 @@ class LeadFilterParams(SearchSortParams):
     # `stage_changed_from <= stage_changed_at < stage_changed_to`.
     stage_changed_from: datetime | None = None
     stage_changed_to: datetime | None = None
+    # "Lead date": when the lead came in — its Created time, which for ingested Meta / Sheet / 99acres
+    # leads is the source's enquiry time. Local-day UTC boundaries, half-open like the others:
+    # `created_from <= created_at < created_to`.
+    created_from: datetime | None = None
+    created_to: datetime | None = None

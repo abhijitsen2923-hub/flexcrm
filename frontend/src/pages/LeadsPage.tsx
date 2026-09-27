@@ -32,6 +32,7 @@ import { organizationsService } from "../services/organizations";
 import { siteVisitsService } from "../services/site-visits";
 import { usersService } from "../services/users";
 import type { Lead, LeadIndustry, Organization, PipelineStage, User } from "../types";
+import { localDayRange } from "../utils/dateRange";
 import { extractErrorMessage } from "../utils/errors";
 import { formatCurrency } from "../utils/format";
 import { OTHER_OPTION, industryInterestLabel, leadCampaignOptions, leadIndustryOptions, leadSourceOptions, pipelineCategoryTone, propertyInterestOptions, propertyTypeOptions, salutationOptions, titleCase } from "../utils/options";
@@ -130,6 +131,9 @@ export default function LeadsPage() {
   const [nextActionOn, setNextActionOn] = useState<string>("");   // YYYY-MM-DD "due on" filter
   const [stageChangedFrom, setStageChangedFrom] = useState<string>(""); // YYYY-MM-DD range start
   const [stageChangedTo, setStageChangedTo] = useState<string>("");     // YYYY-MM-DD range end
+  // "Lead date": when the lead came in (its Created / enquiry date) — YYYY-MM-DD range.
+  const [leadDateFrom, setLeadDateFrom] = useState<string>("");
+  const [leadDateTo, setLeadDateTo] = useState<string>("");
   const [ownerFilter, setOwnerFilter] = useState<string>("");
   const [sourceFilter, setSourceFilter] = useState<string>("");
   const [campaignFilter, setCampaignFilter] = useState<string>("");
@@ -194,39 +198,24 @@ export default function LeadsPage() {
   }, [org?.business_type]);
 
   const query = useMemo(() => {
-    // Turn the picked day into the user's LOCAL-day UTC boundaries so "due that day"
-    // respects the browser timezone (the app's users are IST). `YYYY-MM-DDT00:00:00`
-    // parses as local midnight; toISOString() gives the UTC instant.
-    let next_action_from: string | undefined;
-    let next_action_to: string | undefined;
-    if (nextActionOn) {
-      const start = new Date(`${nextActionOn}T00:00:00`);
-      const end = new Date(`${nextActionOn}T00:00:00`);
-      end.setDate(end.getDate() + 1);
-      next_action_from = start.toISOString();
-      next_action_to = end.toISOString();
-    }
-    // Stage-changed From–To range → half-open local-day UTC boundaries. Each bound
-    // is independent, so a From-only or To-only range works as an open interval.
-    const stage_changed_from = stageChangedFrom
-      ? new Date(`${stageChangedFrom}T00:00:00`).toISOString()
-      : undefined;
-    let stage_changed_to: string | undefined;
-    if (stageChangedTo) {
-      const end = new Date(`${stageChangedTo}T00:00:00`);
-      end.setDate(end.getDate() + 1); // make the To day inclusive
-      stage_changed_to = end.toISOString();
-    }
+    // Picked days → the user's LOCAL-day UTC boundaries (half-open, To day inclusive) so every date
+    // filter respects the browser timezone (the app's users are IST). Each bound is independent, so a
+    // From-only or To-only range works as an open interval.
+    const nextAction = localDayRange(nextActionOn, nextActionOn); // "due on" = one whole local day
+    const stageChanged = localDayRange(stageChangedFrom, stageChangedTo);
+    const leadDate = localDayRange(leadDateFrom, leadDateTo);
     return {
       page,
       page_size: pageSize,
       industry: industryFilter || undefined,
       // Comma-joined so the backend can `stage_code IN (...)` — a single stage still works.
       stage_code: stageFilter.length ? stageFilter.join(",") : undefined,
-      next_action_from,
-      next_action_to,
-      stage_changed_from,
-      stage_changed_to,
+      next_action_from: nextAction.from,
+      next_action_to: nextAction.to,
+      stage_changed_from: stageChanged.from,
+      stage_changed_to: stageChanged.to,
+      created_from: leadDate.from,
+      created_to: leadDate.to,
       source: sourceFilter || undefined,
       campaign: campaignFilter || undefined,
       // "__unassigned__" is a sentinel (an empty string would be stripped by
@@ -235,7 +224,7 @@ export default function LeadsPage() {
       unassigned: ownerFilter === "__unassigned__" ? true : undefined,
       search: search || undefined
     };
-  }, [page, pageSize, industryFilter, stageFilter, nextActionOn, stageChangedFrom, stageChangedTo, sourceFilter, campaignFilter, ownerFilter, search]);
+  }, [page, pageSize, industryFilter, stageFilter, nextActionOn, stageChangedFrom, stageChangedTo, leadDateFrom, leadDateTo, sourceFilter, campaignFilter, ownerFilter, search]);
 
   function toggleStage(code: string) {
     setStageFilter((prev) => (prev.includes(code) ? prev.filter((c) => c !== code) : [...prev, code]));
@@ -252,6 +241,8 @@ export default function LeadsPage() {
     setNextActionOn("");
     setStageChangedFrom("");
     setStageChangedTo("");
+    setLeadDateFrom("");
+    setLeadDateTo("");
     if (!user?.business_type) setIndustryFilter("");
     setSelectedIds(new Set());
     setBulkStageCode("");
@@ -339,6 +330,8 @@ export default function LeadsPage() {
     (nextActionOn ? 1 : 0) +
     (stageChangedFrom ? 1 : 0) +
     (stageChangedTo ? 1 : 0) +
+    (leadDateFrom ? 1 : 0) +
+    (leadDateTo ? 1 : 0) +
     (!user?.business_type && industryFilter ? 1 : 0);
 
   // --- Create lead modal -------------------------------------------------
@@ -985,15 +978,21 @@ export default function LeadsPage() {
                 <X size={12} aria-hidden="true" />
               </button>
             )}
+            {(leadDateFrom || leadDateTo) && (
+              <button type="button" className="active-filter" onClick={() => { setLeadDateFrom(""); setLeadDateTo(""); setPage(1); }}>
+                Lead date: {leadDateFrom || "…"} – {leadDateTo || "…"}
+                <X size={12} aria-hidden="true" />
+              </button>
+            )}
             {nextActionOn && (
               <button type="button" className="active-filter" onClick={() => { setNextActionOn(""); setPage(1); }}>
-                Next action: {nextActionOn}
+                Follow-up due: {nextActionOn}
                 <X size={12} aria-hidden="true" />
               </button>
             )}
             {(stageChangedFrom || stageChangedTo) && (
               <button type="button" className="active-filter" onClick={() => { setStageChangedFrom(""); setStageChangedTo(""); setPage(1); }}>
-                Stage changed: {stageChangedFrom || "…"} – {stageChangedTo || "…"}
+                Last stage change: {stageChangedFrom || "…"} – {stageChangedTo || "…"}
                 <X size={12} aria-hidden="true" />
               </button>
             )}
@@ -1192,6 +1191,28 @@ export default function LeadsPage() {
           }
         >
           <div className="mobile-filters">
+            <div className="mobile-filters__field">
+              <span className="mobile-filters__label">Lead date (From – To)</span>
+              <div className="row" style={{ gap: "0.5rem" }}>
+                <input
+                  className="input"
+                  type="date"
+                  value={leadDateFrom}
+                  onChange={(event) => { setLeadDateFrom(event.target.value); setPage(1); }}
+                  aria-label="Lead date from"
+                  style={{ flex: 1 }}
+                />
+                <input
+                  className="input"
+                  type="date"
+                  value={leadDateTo}
+                  onChange={(event) => { setLeadDateTo(event.target.value); setPage(1); }}
+                  aria-label="Lead date to"
+                  style={{ flex: 1 }}
+                />
+              </div>
+              <span className="muted text-xs">When the lead came in (its Created date).</span>
+            </div>
             {!user?.business_type && (
               <label className="mobile-filters__field">
                 <span className="mobile-filters__label">Industry</span>
@@ -1275,7 +1296,7 @@ export default function LeadsPage() {
               </label>
             )}
             <label className="mobile-filters__field">
-              <span className="mobile-filters__label">Next action due on</span>
+              <span className="mobile-filters__label">Follow-up due on</span>
               <input
                 className="input"
                 type="date"
@@ -1285,7 +1306,7 @@ export default function LeadsPage() {
               />
             </label>
             <div className="mobile-filters__field">
-              <span className="mobile-filters__label">Stage changed (From – To)</span>
+              <span className="mobile-filters__label">Last stage change (From – To)</span>
               <div className="row" style={{ gap: "0.5rem" }}>
                 <input
                   className="input"

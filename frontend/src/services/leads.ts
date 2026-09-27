@@ -30,6 +30,9 @@ export interface LeadListQuery extends PaginationQuery, SearchSortQuery {
   // Local-day UTC boundaries for a From–To range on the lead's latest stage change.
   stage_changed_from?: string;
   stage_changed_to?: string;
+  // Local-day UTC boundaries for a From–To range on when the lead came in (its Created / enquiry date).
+  created_from?: string;
+  created_to?: string;
 }
 
 export interface LeadCreatePayload {
