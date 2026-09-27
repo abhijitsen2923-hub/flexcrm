@@ -29,6 +29,7 @@ A multi-tenant (schema-per-tenant) full-stack CRM with role-based access, JWT au
 
 ---
 
+
 ## Quickstart — Docker (recommended)
 
 Prereqs: Docker Desktop (or Docker Engine + Compose v2).
@@ -145,6 +146,10 @@ The tests use the ASGI transport (no live server) and spin up an isolated sqlite
 ---
 
 ## Architecture cheat sheet
+
+![FlexCRM architecture: staff users reach the React web app (routes, auth context, staff and portal pages), which calls the FastAPI CRM endpoints; CRM services and repositories read and write tenant data, serve the real-estate, finance, HR and customer-portal verticals, publish realtime updates, use the Redis cache, store documents in S3-compatible storage, and ingest leads from external services](docs/images/architecture-diagram.png)
+
+Every request through the backend follows this path:
 
 ```
 Request
