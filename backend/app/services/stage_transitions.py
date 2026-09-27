@@ -16,6 +16,7 @@ from app.repositories.users import UserRepository
 from app.schemas.stage_transition import MIN_COMMENT_LENGTH, StageTransitionCreate
 from app.services.base import ServiceBase
 from app.services.customer_promotion import CustomerPromotionService
+from app.services.lead_assignments import LeadAssignmentService
 from app.services.lead_documents import LeadDocumentService
 from app.services.notifications import NotificationService
 from app.services.realtime import realtime_manager
@@ -239,6 +240,7 @@ class StageTransitionService(ServiceBase):
             # Salesperson: an explicit pick wins; else keep the lead's owner; else
             # fall back to the user recording the booking — so the promoted
             # customer always has an owner even for roles that can't pick a user.
+            previous_owner_id = lead.assigned_to_id
             if payload.assigned_to_id is not None:
                 # Org-scoped: the explicit salesperson pick must be a user in this
                 # tenant — `users` is shared, so an unscoped id could point at
@@ -251,6 +253,14 @@ class StageTransitionService(ServiceBase):
                 lead.assigned_to_id = payload.assigned_to_id
             elif lead.assigned_to_id is None:
                 lead.assigned_to_id = actor_id
+            # A changed salesperson is an owner change — log it (committed with this transition).
+            LeadAssignmentService(self.session).record(
+                lead_id=lead.id,
+                from_user_id=previous_owner_id,
+                to_user_id=lead.assigned_to_id,
+                actor_id=actor_id,
+                source="booking",
+            )
             # Channel-partner attribution + incentive exemption travel with the
             # booked move, independent of the salesperson. A CP pick sets partner_id
             # (only when provided, so it never silently clears one set on the lead

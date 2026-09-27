@@ -318,7 +318,7 @@ class LeadImportService(ServiceBase):
         payload = LeadCreate(**payload_kwargs)
 
         lead = await self.lead_service.create_lead(
-            payload, actor_id=actor_id, actor_business_type=industry
+            payload, actor_id=actor_id, actor_business_type=industry, assignment_source="import"
         )
 
         target_stage = self._resolve_stage(row.get("stage"), stage_lookup, industry, default=initial_code)

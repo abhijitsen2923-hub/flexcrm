@@ -23,9 +23,11 @@ from app.schemas.lead import (
     LeadUpdate,
 )
 from app.schemas.channel_partner import BrokeragePayoutRead
+from app.schemas.lead_assignment import LeadAssignmentEventRead
 from app.schemas.lead_document import LeadDocumentRead, LeadDocumentUpload
 from app.schemas.stage_transition import StageTransitionCreate, StageTransitionRead
 from app.services.channel_partners import ChannelPartnerService
+from app.services.lead_assignments import LeadAssignmentService
 from app.services.lead_documents import LeadDocumentService, get_lead_or_404
 from app.services.lead_import import LeadImportService
 from app.services.leads import LeadService
@@ -246,6 +248,18 @@ async def list_transitions(
 ):
     await _enforce_lead_access(session, lead_id, current_user)
     return await StageTransitionService(session).list_transitions(lead_id)
+
+
+@router.get("/{lead_id}/assignments", response_model=list[LeadAssignmentEventRead])
+async def list_assignments(
+    lead_id: UUID,
+    current_user=Depends(require_permissions(PermissionCode.LEAD_VIEW)),
+    session: AsyncSession = Depends(get_db_session),
+):
+    """The lead's owner-change history (from → to, by whom, how), newest first. Same access rule as
+    the stage history; the drawer merges both into one timeline."""
+    await _enforce_lead_access(session, lead_id, current_user)
+    return await LeadAssignmentService(session).list_for_lead(lead_id)
 
 
 @router.post(

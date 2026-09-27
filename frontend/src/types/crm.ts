@@ -264,6 +264,30 @@ export interface StageTransition {
   performed_by?: UserSummary | null;
 }
 
+/** Lean user reference on history rows — id + name only (either name part may be missing). */
+export interface HistoryActor {
+  id: string;
+  first_name: string | null;
+  last_name: string | null;
+}
+
+/** How a lead's owner changed (backend `ASSIGNMENT_SOURCES`). */
+export type LeadAssignmentSource = "created" | "import" | "reassign" | "bulk_reassign" | "booking";
+
+/** One owner change in a lead's history (GET /leads/{id}/assignments). */
+export interface LeadAssignmentEvent {
+  id: string;
+  lead_id: string;
+  source: LeadAssignmentSource;
+  performed_at: string;
+  from_user_id: string | null;
+  to_user_id: string | null;
+  performed_by_id: string | null;
+  from_user?: HistoryActor | null;
+  to_user?: HistoryActor | null;
+  performed_by?: HistoryActor | null;
+}
+
 export interface LeadCallLog {
   id: string;
   lead_id: string;

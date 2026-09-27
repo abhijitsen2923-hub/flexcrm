@@ -1,5 +1,5 @@
 import { ArrowRight, Mail, MessageCircle, Phone, Sparkles, X } from "lucide-react";
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 
 import { Badge, Button, LoadingBlock, EmptyState, useToast } from "../../components";
@@ -11,7 +11,7 @@ import { usePermissions } from "../../hooks/usePermissions";
 import { callsService, type ExternalCall } from "../../services/callyzer";
 import { leadsService } from "../../services/leads";
 import { siteVisitsService } from "../../services/site-visits";
-import type { Lead, LeadCallLog, PipelineStage, StageTransition } from "../../types";
+import type { Lead, LeadAssignmentEvent, LeadCallLog, PipelineStage, StageTransition } from "../../types";
 import type { SiteVisit } from "../../types/realestate";
 import { mailtoHref, telHref, whatsAppHref } from "../../utils/contactLinks";
 import { extractErrorMessage } from "../../utils/errors";
@@ -19,6 +19,7 @@ import { formatCurrency, formatDate, formatDateTime, formatRelative } from "../.
 import { industryInterestLabel, pipelineCategoryTone, titleCase } from "../../utils/options";
 import { canSetStage } from "../../utils/stageAccess";
 import { LeadBookingsTab } from "./LeadBookingsTab";
+import { actorName, assignmentSourceLabel, buildLeadTimeline } from "./leadHistoryTimeline";
 
 
 // Mirror the stage-transition comment floor so a DNP is captured "like Call".
@@ -64,8 +65,11 @@ export function LeadDrawer({ open, lead, onClose, onTransitionRequest, onLogged,
   const canManageVisits = has("LEAD_MANAGE");
   const [tab, setTab] = useState<TabKey>("overview");
   const [history, setHistory] = useState<StageTransition[]>([]);
+  // Owner changes (from → to), merged into the Stage History timeline.
+  const [ownerEvents, setOwnerEvents] = useState<LeadAssignmentEvent[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyError, setHistoryError] = useState(false);
+  const timeline = useMemo(() => buildLeadTimeline(history, ownerEvents), [history, ownerEvents]);
   const [calls, setCalls] = useState<LeadCallLog[]>([]);
   const [visits, setVisits] = useState<SiteVisit[]>([]);
   const [visitsLoading, setVisitsLoading] = useState(false);
@@ -106,6 +110,7 @@ export function LeadDrawer({ open, lead, onClose, onTransitionRequest, onLogged,
   useEffect(() => {
     if (!open || !lead) {
       setHistory([]);
+      setOwnerEvents([]);
       return;
     }
     let cancelled = false;
@@ -113,8 +118,15 @@ export function LeadDrawer({ open, lead, onClose, onTransitionRequest, onLogged,
     setHistoryError(false);
     void (async () => {
       try {
-        const rows = await leadsService.transitions(lead.id);
-        if (!cancelled) setHistory(rows);
+        const [rows, events] = await Promise.all([
+          leadsService.transitions(lead.id),
+          // Owner history is additive — if it fails, still show the stage history.
+          leadsService.assignments(lead.id).catch(() => [] as LeadAssignmentEvent[]),
+        ]);
+        if (!cancelled) {
+          setHistory(rows);
+          setOwnerEvents(events);
+        }
       } catch {
         if (!cancelled) setHistoryError(true);
       } finally {
@@ -124,7 +136,9 @@ export function LeadDrawer({ open, lead, onClose, onTransitionRequest, onLogged,
     return () => {
       cancelled = true;
     };
-  }, [open, lead?.id, refreshKey]);
+    // updated_at: reload when the lead changes elsewhere (reassigned / moved by someone else) — the
+    // parent swaps in the refreshed lead object, but its id stays the same.
+  }, [open, lead?.id, lead?.updated_at, refreshKey]);
 
   useEffect(() => {
     if (!open || !lead) {
@@ -592,19 +606,42 @@ export function LeadDrawer({ open, lead, onClose, onTransitionRequest, onLogged,
 
           {activeTab === "history" && (
             <div className="stack">
-              {historyLoading && history.length === 0 ? (
+              {historyLoading && timeline.length === 0 ? (
                 <LoadingBlock label="Loading history…" />
               ) : historyError ? (
                 <EmptyState title="Couldn't load stage history" description="Please reopen the lead or try again." />
-              ) : history.length === 0 ? (
+              ) : timeline.length === 0 ? (
                 <EmptyState title="No transitions yet" description="Move this lead to start a history trail." />
               ) : (
                 <ol className="timeline">
-                  {history.map((entry) => {
+                  {timeline.map((item) => {
+                    if (item.kind === "owner") {
+                      const change = item.event;
+                      return (
+                        <li key={item.key} className="timeline__item">
+                          <div className="timeline__head">
+                            <Badge tone="info">Owner</Badge>
+                            <span>{actorName(change.from_user, "Unassigned")}</span>
+                            <ArrowRight size={12} className="muted" />
+                            <strong>{actorName(change.to_user, "Unassigned")}</strong>
+                            <span className="muted text-sm" style={{ marginLeft: "auto" }}>
+                              {formatDateTime(change.performed_at)}
+                            </span>
+                          </div>
+                          <div className="timeline__meta">
+                            <span className="muted text-sm">
+                              {assignmentSourceLabel(change.source)}
+                              {change.performed_by ? ` · by ${actorName(change.performed_by, "a team member")}` : ""}
+                            </span>
+                          </div>
+                        </li>
+                      );
+                    }
+                    const entry = item.transition;
                     const from = entry.from_stage_code ? getStage(lead.industry, entry.from_stage_code) : null;
                     const to = getStage(lead.industry, entry.to_stage_code);
                     return (
-                      <li key={entry.id} className="timeline__item">
+                      <li key={item.key} className="timeline__item">
                         <div className="timeline__head">
                           <Badge tone="neutral">{from ? from.name : "System"}</Badge>
                           <ArrowRight size={12} className="muted" />

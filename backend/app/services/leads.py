@@ -20,6 +20,7 @@ from app.schemas.common import PaginationParams
 from app.schemas.lead import LeadCreate, LeadDuplicate, LeadFilterParams, LeadUpdate
 from app.services.base import ServiceBase
 from app.services.email import EmailService
+from app.services.lead_assignments import LeadAssignmentService
 from app.services.notifications import NotificationService
 from app.services.realtime import realtime_manager
 from app.services.stage_transitions import StageTransitionService
@@ -48,6 +49,7 @@ class LeadService(ServiceBase):
         self.notification_service = NotificationService(session)
         self.email_service = EmailService()
         self.transition_service = StageTransitionService(session)
+        self.assignment_service = LeadAssignmentService(session)
 
     async def bulk_reassign(self, lead_ids: list[UUID], assigned_to_id: UUID, *, actor_id: UUID | None) -> int:
         """Reassign the owner of many leads at once (Manager bulk action).
@@ -63,6 +65,23 @@ class LeadService(ServiceBase):
         assignee = await self.user_repository.get_in_org(assigned_to_id, current_org(self.session))
         if assignee is None:
             raise NotFoundError("Assigned user not found.")
+        # Read each lead's CURRENT owner first (row-locked until commit, so it can't change underneath
+        # us) — the single UPDATE below can't return it — and log every real owner change.
+        previous_owners = (
+            await self.session.execute(
+                select(Lead.id, Lead.assigned_to_id)
+                .where(Lead.id.in_(lead_ids), Lead.is_deleted.is_(False))
+                .with_for_update()
+            )
+        ).all()
+        for changed_lead_id, previous_owner_id in previous_owners:
+            self.assignment_service.record(
+                lead_id=changed_lead_id,
+                from_user_id=previous_owner_id,
+                to_user_id=assigned_to_id,
+                actor_id=actor_id,
+                source="bulk_reassign",
+            )
         result = await self.session.execute(
             update(Lead)
             .where(Lead.id.in_(lead_ids), Lead.is_deleted.is_(False))
@@ -265,6 +284,7 @@ class LeadService(ServiceBase):
         actor_id: UUID,
         actor_business_type: LeadIndustry | None = None,
         background_tasks: BackgroundTasks | None = None,
+        assignment_source: str = "created",
     ):
         # customer_id is optional now: a Lead can be created with just contact
         # details, and a Customer row is materialized later when the lead hits
@@ -342,6 +362,14 @@ class LeadService(ServiceBase):
         await self.transition_service.seed_initial_transition(
             lead=lead, industry=industry, actor_id=actor_id
         )
+        # Initial owner (manual create or CSV upload) starts the lead's assignment history.
+        self.assignment_service.record(
+            lead_id=lead.id,
+            from_user_id=None,
+            to_user_id=payload.assigned_to_id,
+            actor_id=actor_id,
+            source=assignment_source,
+        )
         if payload.assigned_to_id:
             await self._notify_assignee(
                 payload.assigned_to_id, f"Lead assigned: {payload.title}", payload.title, background_tasks
@@ -378,6 +406,15 @@ class LeadService(ServiceBase):
         update_data.pop("industry", None)
         await self._ensure_references(update_data.get("customer_id"), update_data.get("assigned_to_id"))
         update_data["updated_by_id"] = actor_id
+        previous_owner_id = lead.assigned_to_id  # captured before the update overwrites it
+        if "assigned_to_id" in update_data:
+            self.assignment_service.record(
+                lead_id=lead.id,
+                from_user_id=previous_owner_id,
+                to_user_id=update_data["assigned_to_id"],
+                actor_id=actor_id,
+                source="reassign",
+            )
         lead = await self.repository.update(lead, update_data)
         if update_data.get("assigned_to_id"):
             await self._notify_assignee(

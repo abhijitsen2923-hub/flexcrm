@@ -1,6 +1,9 @@
+import axios from "axios";
+
 import type {
   ApiMessageResponse,
   Lead,
+  LeadAssignmentEvent,
   LeadCallLog,
   LeadIndustry,
   LeadListResponse,
@@ -232,6 +235,18 @@ export const leadsService = {
   async transitions(leadId: string): Promise<StageTransition[]> {
     const { data } = await apiClient.get<StageTransition[]>(`/leads/${leadId}/transitions`);
     return data;
+  },
+
+  // Owner-change history (from → to, by whom, how). The frontend deploys before the backend, so a
+  // backend without this endpoint (404) yields [] and the drawer still shows the stage history.
+  async assignments(leadId: string): Promise<LeadAssignmentEvent[]> {
+    try {
+      const { data } = await apiClient.get<LeadAssignmentEvent[]>(`/leads/${leadId}/assignments`);
+      return data;
+    } catch (error) {
+      if (axios.isAxiosError(error) && error.response?.status === 404) return [];
+      throw error;
+    }
   },
 
   async createTransition(leadId: string, payload: StageTransitionPayload): Promise<StageTransition> {
