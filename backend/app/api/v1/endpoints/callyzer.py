@@ -126,7 +126,7 @@ async def list_calls(
     rows = (
         await session.execute(
             stmt.order_by(ExternalCall.call_at.desc().nullslast())
-            .offset(pagination.offset())
+            .offset(pagination.offset)
             .limit(pagination.page_size)
         )
     ).scalars().all()

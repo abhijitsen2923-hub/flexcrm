@@ -62,6 +62,15 @@ def _regexp_replace(value, pattern, replacement, flags=""):
     )
 
 
+def _right(value, count):
+    """SQLite shim for PostgreSQL's ``right(text, n)``: the last ``n`` characters
+    (a negative ``n`` drops the first ``|n|``). The Calls endpoints match a call to a
+    lead on the last 10 digits of its phone with it (``callyzer._lead_key``)."""
+    if value is None or count is None:
+        return None
+    return value[-count:] if count else ""
+
+
 def apply_collapsed_schema_patches(monkeypatch) -> None:
     """Make the app runnable against a single-schema SQLite database.
 
@@ -135,6 +144,7 @@ def _install_sqlite_shims(engine) -> None:
         raw = getattr(driver, "_conn", None)
         if raw is not None:
             raw.create_function("regexp_replace", 4, _regexp_replace)
+            raw.create_function("right", 2, _right)
 
 
 def _rebind(monkeypatch, name: str, original, replacement) -> None:
