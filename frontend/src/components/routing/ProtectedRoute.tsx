@@ -3,6 +3,7 @@ import { Navigate, useLocation } from "react-router-dom";
 
 import { useAuth } from "../../hooks/useAuth";
 import { SessionRestoreScreen } from "./SessionRestoreScreen";
+import { staffAppRedirect } from "./staffAppRedirect";
 
 
 export function ProtectedRoute({ children }: PropsWithChildren) {
@@ -24,13 +25,10 @@ export function ProtectedRoute({ children }: PropsWithChildren) {
     return <Navigate to="/login" replace state={{ from: location }} />;
   }
 
-  // Portal-only roles never see the staff app — bounce them to their portal so a
-  // broker/customer landing on "/" (or any deep link) lands in the right place.
-  if (user.role === "broker") {
-    return <Navigate to="/partner" replace />;
-  }
-  if (user.role === "customer") {
-    return <Navigate to="/customer" replace />;
+  // Portal-only roles go to their portal; platform admins to the admin console.
+  const redirect = staffAppRedirect(user, location.pathname);
+  if (redirect) {
+    return <Navigate to={redirect} replace />;
   }
 
   return <>{children}</>;

@@ -150,6 +150,15 @@ function ModuleGroup({
 
 export function PlatformAdminPage() {
   const { user } = useAuth();
+  // The guard lives in its own component: returning early inside the console, before its hooks, breaks
+  // React's hook order if the flag flips while the page is open ("Rendered fewer hooks than expected").
+  if (!user?.is_platform_admin) {
+    return <Navigate to="/" replace />;
+  }
+  return <PlatformAdminConsole />;
+}
+
+function PlatformAdminConsole() {
   const toast = useToast();
   const [repairing, setRepairing] = useState(false);
   const [repairConfirm, setRepairConfirm] = useState(false);
@@ -162,10 +171,6 @@ export function PlatformAdminPage() {
   const [confirmOrg, setConfirmOrg] = useState<Organization | null>(null);
   const [purgeOrg, setPurgeOrg] = useState<Organization | null>(null);
   const [purgeText, setPurgeText] = useState("");
-
-  if (!user?.is_platform_admin) {
-    return <Navigate to="/" replace />;
-  }
 
   const load = async (archived: boolean) => {
     setLoading(true);
