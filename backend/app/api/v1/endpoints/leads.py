@@ -4,7 +4,7 @@ from fastapi import APIRouter, BackgroundTasks, Body, Depends, File, HTTPExcepti
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import pagination_params, require_permissions
+from app.api.deps import load_effective_permissions, pagination_params, require_permissions
 from app.core.exceptions import ValidationError
 from app.core.lead_csv import build_template_csv
 from app.core.permissions import ASSIGNED_ONLY_LEAD_ROLES, PermissionCode
@@ -27,6 +27,7 @@ from app.schemas.lead_assignment import LeadAssignmentEventRead
 from app.schemas.lead_document import LeadDocumentRead, LeadDocumentUpload
 from app.schemas.stage_transition import StageTransitionCreate, StageTransitionRead
 from app.services.channel_partners import ChannelPartnerService
+from app.services.campaigns import CampaignWritePolicy
 from app.services.lead_assignments import LeadAssignmentService
 from app.services.lead_documents import LeadDocumentService, get_lead_or_404
 from app.services.lead_import import LeadImportService
@@ -35,6 +36,11 @@ from app.services.stage_transitions import StageTransitionService
 
 
 router = APIRouter()
+
+
+async def _can_manage_campaigns(session: AsyncSession, user) -> bool:
+    """Whether the user may add new campaign names (CAMPAIGN_MANAGE — incl. per-user grants and custom roles)."""
+    return PermissionCode.CAMPAIGN_MANAGE in await load_effective_permissions(session, user)
 
 
 async def _enforce_lead_access(session: AsyncSession, lead_id: UUID, user) -> None:
@@ -105,9 +111,8 @@ async def list_lead_campaigns(
     current_user=Depends(require_permissions(PermissionCode.LEAD_VIEW)),
     session: AsyncSession = Depends(get_db_session),
 ):
-    """Distinct campaign values in use across the tenant's leads — populates the
-    list's Campaign filter so custom/imported campaigns (not just the predefined
-    ones) are selectable. Declared before any `/{lead_id}` route so the literal
+    """Campaigns in use on the tenant's leads (one canonical name each) — populates the
+    list's Campaign filter. Declared before any `/{lead_id}` route so the literal
     path wins; tenant-scoped by the session's schema routing. Front-line reps are
     scoped to their own leads (same anti-poaching rule as the list/duplicates)."""
     owner_id = current_user.id if current_user.role in ASSIGNED_ONLY_LEAD_ROLES else None
@@ -125,6 +130,12 @@ async def create_lead(
     # list would immediately hide it from them.
     if current_user.role in ASSIGNED_ONLY_LEAD_ROLES and payload.assigned_to_id is None:
         payload.assigned_to_id = current_user.id
+    # A NEW campaign name may only be added by a campaign manager; others pick from the tenant's list.
+    policy = None
+    if payload.campaign and payload.campaign.strip():
+        policy = CampaignWritePolicy.manual(
+            can_manage=await _can_manage_campaigns(session, current_user), actor_id=current_user.id
+        )
     # Inherit the user's business_type so the New Lead form doesn't need to
     # ask which vertical (chosen once at registration).
     return await LeadService(session).create_lead(
@@ -132,6 +143,7 @@ async def create_lead(
         actor_id=current_user.id,
         actor_business_type=current_user.business_type,
         background_tasks=background_tasks,
+        campaign_policy=policy,
     )
 
 
@@ -191,8 +203,13 @@ async def update_lead(
             "Use POST /leads/{id}/transitions with a mandatory comment."
         )
     payload = LeadUpdate(**raw_body)
+    policy = None
+    if raw_body.get("campaign"):
+        policy = CampaignWritePolicy.manual(
+            can_manage=await _can_manage_campaigns(session, current_user), actor_id=current_user.id
+        )
     return await LeadService(session).update_lead(
-        lead_id, payload, actor_id=current_user.id, background_tasks=background_tasks
+        lead_id, payload, actor_id=current_user.id, background_tasks=background_tasks, campaign_policy=policy
     )
 
 
@@ -331,6 +348,11 @@ async def import_leads_csv(
         actor_role=current_user.role,
         actor_business_type=current_user.business_type,
         skip_duplicates=skip_duplicates,
+        # Rows are never rejected over their campaign: unknown names are added (flagged for review unless a
+        # campaign manager uploaded).
+        campaign_policy=CampaignWritePolicy.imported(
+            can_manage=await _can_manage_campaigns(session, current_user), actor_id=current_user.id
+        ),
     )
     return {
         "created": summary.created,

@@ -31,13 +31,13 @@ from app.core.exceptions import AppException, ValidationError
 from app.core.lead_csv import CsvColumn, import_columns_for
 from app.core.tenancy import current_org
 from app.core.lead_normalize import (
-    normalize_campaign,
     normalize_property_interest,
     normalize_property_type,
     normalize_source,
 )
 from app.database.enums import LeadIndustry, UserRole
 from app.database.pipeline_seed import initial_stage_code
+from app.services.campaigns import CampaignWritePolicy
 from app.models.organization import Organization
 from app.models.pipeline_stage import PipelineStage
 from app.repositories.leads import LeadRepository
@@ -126,6 +126,7 @@ class LeadImportService(ServiceBase):
         actor_role: UserRole,
         actor_business_type: LeadIndustry | None,
         skip_duplicates: bool = False,
+        campaign_policy: CampaignWritePolicy | None = None,
     ) -> ImportSummary:
         try:
             text = file_bytes.decode("utf-8-sig")  # tolerate BOM from Excel exports
@@ -217,20 +218,24 @@ class LeadImportService(ServiceBase):
                     initial_code=initial_code,
                     allowed_currencies=allowed_currencies,
                     stage_lookup=stage_lookup,
+                    campaign_policy=campaign_policy,
                 )
             except ValidationError as exc:
                 summary.errors.append(ImportRowError(row=offset, error=exc.detail))
                 # Roll back any partial state from this row so the next row
                 # starts clean.
                 await self.session.rollback()
+                self.lead_service.forget_campaign_names()
                 continue
             except AppException as exc:
                 summary.errors.append(ImportRowError(row=offset, error=exc.detail))
                 await self.session.rollback()
+                self.lead_service.forget_campaign_names()
                 continue
             except Exception as exc:  # noqa: BLE001 — surface unknown errors per-row, don't kill the batch
                 summary.errors.append(ImportRowError(row=offset, error=f"Unexpected error: {exc}"))
                 await self.session.rollback()
+                self.lead_service.forget_campaign_names()
                 continue
 
             summary.created += 1
@@ -252,6 +257,7 @@ class LeadImportService(ServiceBase):
         initial_code: str,
         allowed_currencies: list[str],
         stage_lookup: dict[str, StageRef],
+        campaign_policy: CampaignWritePolicy | None = None,
     ) -> tuple[UUID, bool]:
         contact_name = (row.get("contact_name") or "").strip()
         if not contact_name:
@@ -294,10 +300,10 @@ class LeadImportService(ServiceBase):
         # Snap free-text CSV values to the controlled dropdown labels so imported
         # rows line up with the UI's Source / Property Interest / Property type
         # selects. Unrecognised values pass through as free text (never rejected).
+        # Campaign is NOT snapped here: create_lead maps it onto the tenant's own
+        # campaign list (case/space variants + remembered old spellings).
         if "source" in payload_kwargs:
             payload_kwargs["source"] = normalize_source(payload_kwargs["source"])
-        if "campaign" in payload_kwargs:
-            payload_kwargs["campaign"] = normalize_campaign(payload_kwargs["campaign"])
         if industry == LeadIndustry.real_estate:
             if "interest" in payload_kwargs:
                 payload_kwargs["interest"] = normalize_property_interest(payload_kwargs["interest"])
@@ -318,7 +324,12 @@ class LeadImportService(ServiceBase):
         payload = LeadCreate(**payload_kwargs)
 
         lead = await self.lead_service.create_lead(
-            payload, actor_id=actor_id, actor_business_type=industry, assignment_source="import"
+            payload,
+            actor_id=actor_id,
+            actor_business_type=industry,
+            assignment_source="import",
+            campaign_policy=campaign_policy
+            or CampaignWritePolicy.imported(can_manage=False, actor_id=actor_id),
         )
 
         target_stage = self._resolve_stage(row.get("stage"), stage_lookup, industry, default=initial_code)

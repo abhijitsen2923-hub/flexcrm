@@ -39,13 +39,14 @@ _COMMON: list[CsvColumn] = [
     ),
     CsvColumn("company_name", "Company / Organization", frozenset({"company", "organization", "org"}), sample=""),
     CsvColumn("source", "Source", frozenset({"lead_source"}), sample="Referral"),
-    # Marketing campaign attribution (alongside Source). Free text; recognised values
-    # snap to the canonical campaign labels so the list's Campaign filter matches.
+    # Marketing campaign attribution (alongside Source). Matched against the workspace's
+    # own campaign list (case/extra spaces ignored). Samples stay blank: there is no
+    # built-in campaign name, and an uploaded template must not invent campaigns.
     CsvColumn(
         "campaign",
         "Campaign",
         frozenset({"utm_campaign", "campaign name", "campaign_name"}),
-        sample="Property Expo",
+        sample="",
     ),
     # Assign the lead's owner (assignee) by their user email. The importer resolves it
     # to a user in your workspace; unknown emails error the row. Blank = unassigned.
@@ -85,17 +86,17 @@ _VERTICAL: dict[LeadIndustry, list[CsvColumn]] = {
 _EXTRA_SAMPLE_ROWS: dict[LeadIndustry, list[dict[str, str]]] = {
     LeadIndustry.education: [
         {"title": "B.Com admission query", "contact_name": "Kavya Reddy", "contact_email": "kavya.reddy@gmail.com",
-         "contact_phone": "+91 96543 21098", "source": "Education Fair", "campaign": "Email Blast", "value": "75000",
+         "contact_phone": "+91 96543 21098", "source": "Education Fair", "value": "75000",
          "probability": "65", "interest": "B.Com - General", "expected_close_date": "01-07-2026"},
     ],
     LeadIndustry.travel: [
         {"title": "Maldives family vacation", "contact_name": "Aman Verma", "contact_email": "aman.verma@yahoo.com",
-         "contact_phone": "+91 90123 45678", "source": "Walk-in", "campaign": "Summer Launch", "value": "250000",
+         "contact_phone": "+91 90123 45678", "source": "Walk-in", "value": "250000",
          "probability": "55", "interest": "Maldives - 5 days", "expected_close_date": "20-07-2026"},
     ],
     LeadIndustry.real_estate: [
         {"title": "3BHK premium enquiry", "contact_name": "Rohit Sharma", "contact_email": "rohit.sharma@gmail.com",
-         "contact_phone": "+91 98300 12345", "source": "Website", "campaign": "Site Visit Drive", "value": "8500000",
+         "contact_phone": "+91 98300 12345", "source": "Website", "value": "8500000",
          "probability": "50", "interest": "3BHK premium", "property_type": "Apartment", "budget_min": "7500000",
          "budget_max": "9000000", "preferred_location": "New Town, Kolkata",
          "possession_preference": "Immediate / Ready to move", "expected_close_date": "10-09-2026"},

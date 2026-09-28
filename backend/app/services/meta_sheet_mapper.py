@@ -22,6 +22,7 @@ from __future__ import annotations
 import hashlib
 import re
 
+from app.core.campaign_names import campaign_key
 from app.core.google_sheets import SHEET_TAB_KEY
 from app.services.lead_source_mapper import normalize_phone, parse_received_date
 
@@ -196,14 +197,16 @@ def relabel_changes(
     """Column changes that bring an ALREADY-ingested lead in line with the current mapping of its row
     (`fields` = map_sheet_row output). A column is rewritten only while it still holds exactly what an
     older sync stored (so any edit that changed it is left alone) or starts with Meta's permission
-    placeholder. {} when nothing should change — the steady state after one relabel (idempotent)."""
+    placeholder. {} when nothing should change — the steady state after one relabel (idempotent).
+    Campaigns compare by `campaign_key` (case / extra spaces ignored): the tenant's campaign list stores one
+    canonical spelling, which may differ from the raw sheet text only in case/spacing."""
     legacy_campaign, legacy_title = legacy_campaign_and_title(row)
     changes: dict[str, str | None] = {}
 
     new_campaign = (fields.get("campaign") or "")[:CAMPAIGN_MAX_LEN] or None
     cur_campaign = current_campaign or None
-    if new_campaign != cur_campaign and (
-        cur_campaign == legacy_campaign or is_meta_permission_placeholder(cur_campaign)
+    if campaign_key(new_campaign) != campaign_key(cur_campaign) and (
+        campaign_key(cur_campaign) == campaign_key(legacy_campaign) or is_meta_permission_placeholder(cur_campaign)
     ):
         changes["campaign"] = new_campaign
 

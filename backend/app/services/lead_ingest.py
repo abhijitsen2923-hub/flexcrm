@@ -18,13 +18,17 @@ from __future__ import annotations
 from uuid import UUID
 
 from sqlalchemy import select
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
+from app.core.campaign_names import clean_display
+from app.core.exceptions import ValidationError
+from app.core.logging import get_logger
 from app.database.enums import LeadIndustry
 from app.database.pipeline_seed import initial_stage_code
 from app.models.lead import Lead
 from app.repositories.leads import LeadRepository
 from app.services.base import ServiceBase
+from app.services.campaigns import CampaignService, CampaignWritePolicy
 from app.services.realtime import realtime_manager
 from app.services.stage_transitions import StageTransitionService
 
@@ -34,6 +38,8 @@ _PROVIDER_FALLBACK_NAME = {
     "whatsapp": "WhatsApp Lead",
 }
 _MAX_LEAD_NUMBER_RETRIES = 5
+
+logger = get_logger(__name__)
 
 
 def _clamp_str_fields(values: dict) -> dict:
@@ -72,6 +78,18 @@ class LeadIngestService(ServiceBase):
             )
         ).scalars().first()
 
+    async def _resolve_campaign(self, raw: object, source_provider: str, actor_id: UUID) -> str | None:
+        """Map the source's campaign onto the tenant's campaign list (a new name is added, flagged for a
+        manager's review). A lead is never lost over its campaign: on any DB trouble the cleaned raw value
+        is kept, exactly as before campaign lists existed."""
+        try:
+            return await CampaignService(self.session).resolve(
+                raw, CampaignWritePolicy.ingest(source_provider, actor_id)
+            )
+        except (SQLAlchemyError, ValidationError):
+            logger.warning("campaign resolution failed during ingest — keeping the raw campaign", exc_info=True)
+            return clean_display(raw)
+
     async def ingest_lead(
         self,
         *,
@@ -93,6 +111,7 @@ class LeadIngestService(ServiceBase):
             source_provider, "New Lead"
         )
         title = (fields.get("title") or "").strip() or f"{fields.get('source') or 'Lead'} — {contact_name}"
+        campaign = await self._resolve_campaign(fields.get("campaign"), source_provider, actor_id)
         base = {
             "industry": industry,
             "stage_code": initial_stage_code(industry.value),
@@ -104,7 +123,7 @@ class LeadIngestService(ServiceBase):
             "value": fields.get("value") or 0,
             "currency": (fields.get("currency") or "INR"),
             "source": fields.get("source"),
-            "campaign": fields.get("campaign"),
+            "campaign": campaign,
             "interest": fields.get("interest"),
             "property_type": fields.get("property_type"),
             "budget_min": fields.get("budget_min"),

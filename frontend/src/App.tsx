@@ -55,6 +55,7 @@ const ProjectsPage = lazyWithReload(() => import("./pages/inventory/ProjectsPage
 const SiteVisitsPage = lazyWithReload(() => import("./pages/site-visits/SiteVisitsPage"));
 const BookingsPage = lazyWithReload(() => import("./pages/bookings/BookingsPage"));
 const IntegrationsPage = lazyWithReload(() => import("./pages/integrations/IntegrationsPage"));
+const CampaignsPage = lazyWithReload(() => import("./pages/campaigns/CampaignsPage"));
 const CallsPage = lazyWithReload(() => import("./pages/calls/CallsPage"));
 // Registration & possession trackers
 const RegistrationTrackerPage = lazyWithReload(() => import("./pages/trackers/RegistrationTrackerPage"));
@@ -122,6 +123,7 @@ export function App() {
                         <Route index element={<DashboardPage />} />
                         <Route path="customers" element={<CustomersPage />} />
                         <Route path="leads" element={<LeadsPage />} />
+                        <Route path="campaigns" element={<CampaignsPage />} />
                         {/* Modules below are gated by `frontend/src/config/features.ts`.
                             When a flag is false the route doesn't mount, so direct URL
                             access falls through to the catch-all NotFoundPage below. */}

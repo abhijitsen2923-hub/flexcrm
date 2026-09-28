@@ -20,6 +20,7 @@ import {
   KeyRound,
   Layers,
   LayoutDashboard,
+  Megaphone,
   Plug,
   Receipt,
   Settings2,
@@ -73,6 +74,7 @@ const NAV: ReadonlyArray<NavEntry> = [
   // Everyday core CRM — always flat at the top.
   { type: "item", item: { to: "/", label: "Dashboard", icon: LayoutDashboard, requires: ["DASHBOARD_VIEW"] } },
   { type: "item", item: { to: "/leads", label: "Leads", icon: Sparkles, requires: ["LEAD_VIEW"] } },
+  { type: "item", item: { to: "/campaigns", label: "Campaigns", icon: Megaphone, requires: ["CAMPAIGN_MANAGE"] } },
   { type: "item", item: { to: "/calls", label: "Calls", icon: PhoneCall, requires: ["LEAD_VIEW"], moduleKey: "callyzer" } },
   { type: "item", item: { to: "/customers", label: "Customers", icon: UserRound, requires: ["CUSTOMER_VIEW"] } },
   { type: "item", item: { to: "/deals", label: "Deals", icon: Briefcase, requires: ["DEAL_VIEW"], moduleKey: "deals" } },

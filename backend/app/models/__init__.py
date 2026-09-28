@@ -1,6 +1,7 @@
 from app.models.activity import Activity
 from app.models.call_agent_mapping import CallAgentMapping
 from app.models.callyzer_connection import CallyzerConnection
+from app.models.campaign import Campaign, CampaignAlias
 from app.models.channel_partner import BrokeragePayout, ChannelPartner
 from app.models.customer import Customer
 from app.models.deal import Deal
@@ -31,6 +32,8 @@ __all__ = [
     "BrokeragePayout",
     "CallAgentMapping",
     "CallyzerConnection",
+    "Campaign",
+    "CampaignAlias",
     "ChannelPartner",
     "Customer",
     "Deal",

@@ -6,6 +6,7 @@ from app.api.v1.endpoints import (
     analytics,
     auth,
     callyzer,
+    campaigns,
     channel_partners,
     cron,
     customer_lifecycle,
@@ -49,6 +50,7 @@ api_router.include_router(customers.router, prefix="/customers", tags=["Customer
 # can call them.
 api_router.include_router(customer_lifecycle.router, prefix="/customers", tags=["Customers"])
 api_router.include_router(leads.router, prefix="/leads", tags=["Leads"])
+api_router.include_router(campaigns.router, prefix="/campaigns", tags=["Campaigns"])
 api_router.include_router(pipeline_stages.router, prefix="/pipeline-stages", tags=["Pipeline Stages"])
 api_router.include_router(deals.router, prefix="/deals", tags=["Deals"])
 api_router.include_router(tasks.router, prefix="/tasks", tags=["Tasks"])

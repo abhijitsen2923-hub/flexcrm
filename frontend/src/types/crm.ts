@@ -34,6 +34,7 @@ export type UserRole =
 export type PermissionCode =
   | "DASHBOARD_VIEW"
   | "LEAD_VIEW" | "LEAD_MANAGE" | "LEAD_IMPORT" | "LEAD_DOCS_MANAGE"
+  | "CAMPAIGN_MANAGE"
   | "CUSTOMER_VIEW" | "CUSTOMER_MANAGE"
   | "DEAL_VIEW" | "DEAL_MANAGE"
   | "TASK_VIEW" | "TASK_MANAGE"

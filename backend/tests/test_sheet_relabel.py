@@ -110,3 +110,14 @@ def test_same_leadgen_id_in_two_tabs_converges():
         campaign, title = changes.get("campaign", campaign), changes.get("title", title)
     assert (campaign, title) == ("3.5 Lakh Plot", "3.5 Lakh Plot — Test User")
     assert _heal(row_b, campaign=campaign, title=title) == {}
+
+
+def test_legacy_campaign_stored_in_another_case_still_heals():
+    # The tenant's campaign list keeps ONE spelling per campaign (case / extra spaces ignored), so an
+    # untouched legacy lead may now hold the combined name in a different case — it must still heal.
+    changes = _heal(_agency_row(), campaign="  " + _COMBINED.upper().replace(" ", "  "), title="VIP buyer")
+    assert changes == {"campaign": "3.5 Lakh Plot"}
+
+
+def test_tab_name_in_another_case_is_not_rewritten():
+    assert _heal(_agency_row(), campaign="3.5 LAKH plot", title="VIP buyer") == {}

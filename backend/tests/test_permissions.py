@@ -17,7 +17,7 @@ async def test_owner_has_full_permission_set(client, auth_headers):
     # Owner gets every PermissionCode. The sentinel here checks for a few of
     # the cross-cutting ones — if defaults change, this list might shrink, but
     # at minimum the owner should have full management codes.
-    for code in ("USER_MANAGE", "FINANCE_REFUND", "ORG_MANAGE", "LEAD_DOCS_MANAGE"):
+    for code in ("USER_MANAGE", "FINANCE_REFUND", "ORG_MANAGE", "LEAD_DOCS_MANAGE", "CAMPAIGN_MANAGE"):
         assert code in body["effective"], f"{code} missing from owner's effective perms"
 
 

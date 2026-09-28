@@ -36,6 +36,10 @@ class PermissionCode(StrEnum):
     LEAD_MANAGE = "LEAD_MANAGE"
     LEAD_IMPORT = "LEAD_IMPORT"
     LEAD_DOCS_MANAGE = "LEAD_DOCS_MANAGE"
+    # Manage the tenant's own campaign list: add new names, merge / rename / clear / deactivate. Reaches the
+    # owner and the manager roles through the "everything except USER/ORG_MANAGE" defaults below; front-line
+    # roles don't get it (they only pick from the list). Deliberately NOT aliased to LEAD_VIEW.
+    CAMPAIGN_MANAGE = "CAMPAIGN_MANAGE"
 
     CUSTOMER_VIEW = "CUSTOMER_VIEW"
     CUSTOMER_MANAGE = "CUSTOMER_MANAGE"

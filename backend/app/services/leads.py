@@ -18,7 +18,9 @@ from app.repositories.leads import LeadRepository
 from app.repositories.users import UserRepository
 from app.schemas.common import PaginationParams
 from app.schemas.lead import LeadCreate, LeadDuplicate, LeadFilterParams, LeadUpdate
+from app.core.campaign_names import campaign_key
 from app.services.base import ServiceBase
+from app.services.campaigns import CampaignService, CampaignWritePolicy
 from app.services.email import EmailService
 from app.services.lead_assignments import LeadAssignmentService
 from app.services.notifications import NotificationService
@@ -44,6 +46,9 @@ class LeadService(ServiceBase):
     def __init__(self, session):
         super().__init__(session)
         self.repository = LeadRepository(session)
+        # Campaign name resolution memo for this service's lifetime (a CSV import reuses one instance for
+        # every row). Cleared by the importer when a row rolls back.
+        self._campaign_names: dict[tuple[str, CampaignWritePolicy], str | None] = {}
         self.customer_repository = CustomerRepository(session)
         self.user_repository = UserRepository(session)
         self.notification_service = NotificationService(session)
@@ -166,10 +171,23 @@ class LeadService(ServiceBase):
         return list(result.scalars().all())
 
     async def list_campaigns(self, owner_id=None) -> list[str]:
-        """Distinct campaign values in use — for the list's Campaign filter, so
-        custom/imported campaigns are selectable alongside the predefined ones.
-        `owner_id` scopes the result to a front-line rep's own leads (BR-2)."""
-        return await self.repository.distinct_campaigns(owner_id=owner_id)
+        """Campaigns in use on the tenant's leads, one canonical name per campaign — for the list's
+        Campaign filter. `owner_id` scopes the result to a front-line rep's own leads (BR-2)."""
+        values = await self.repository.distinct_campaigns(owner_id=owner_id)
+        return await CampaignService(self.session).canonical_names(values)
+
+    async def _resolve_campaign(self, raw: str | None, policy: CampaignWritePolicy) -> str | None:
+        """The tenant's canonical campaign name for `raw` (see CampaignService.resolve), memoised per key."""
+        memo_key = (campaign_key(raw), policy)
+        if not memo_key[0]:
+            return None
+        if memo_key not in self._campaign_names:
+            self._campaign_names[memo_key] = await CampaignService(self.session).resolve(raw, policy)
+        return self._campaign_names[memo_key]
+
+    def forget_campaign_names(self) -> None:
+        """Drop the memo — after a rollback, a campaign it remembers may have been rolled back too."""
+        self._campaign_names.clear()
 
     async def list_leads(
         self,
@@ -216,7 +234,12 @@ class LeadService(ServiceBase):
                 "industry": filters.industry,
                 "stage_code": stage_codes or None,
                 "source": filters.source,
-                "campaign": filters.campaign,
+                # Any spelling of a campaign (case / spaces / merged or renamed old name) finds its leads.
+                "campaign": (
+                    await CampaignService(self.session).filter_values(filters.campaign)
+                    if filters.campaign
+                    else None
+                ),
                 "assigned_to_id": filters.assigned_to_id,
                 "partner_id": filters.partner_id,
             },
@@ -291,6 +314,7 @@ class LeadService(ServiceBase):
         actor_business_type: LeadIndustry | None = None,
         background_tasks: BackgroundTasks | None = None,
         assignment_source: str = "created",
+        campaign_policy: CampaignWritePolicy | None = None,
     ):
         # customer_id is optional now: a Lead can be created with just contact
         # details, and a Customer row is materialized later when the lead hits
@@ -330,6 +354,11 @@ class LeadService(ServiceBase):
                 )
 
         initial_code = initial_stage_code(industry.value)
+        # The tenant's canonical campaign name (after validation, so a rejected lead never adds one). No
+        # policy = strict: an unknown name is rejected unless the caller says the actor may add campaigns.
+        campaign = await self._resolve_campaign(
+            payload.campaign, campaign_policy or CampaignWritePolicy.manual(can_manage=False, actor_id=actor_id)
+        )
         lead_number = await self.repository.next_lead_number()
         lead = await self.repository.create(
             {
@@ -349,7 +378,7 @@ class LeadService(ServiceBase):
                 "probability": payload.probability,
                 "expected_close_date": payload.expected_close_date,
                 "source": payload.source,
-                "campaign": payload.campaign,
+                "campaign": campaign,
                 "interest": payload.interest,
                 "assigned_to_id": payload.assigned_to_id,
                 "partner_id": payload.partner_id,
@@ -403,6 +432,7 @@ class LeadService(ServiceBase):
         *,
         actor_id: UUID,
         background_tasks: BackgroundTasks | None = None,
+        campaign_policy: CampaignWritePolicy | None = None,
     ):
         lead = await self.get_lead(lead_id)
         update_data = payload.model_dump(exclude_unset=True)
@@ -410,6 +440,15 @@ class LeadService(ServiceBase):
         # PUT change it to a mismatched vertical. (stage_code is likewise blocked,
         # at the endpoint.)
         update_data.pop("industry", None)
+        if "campaign" in update_data:
+            if campaign_key(update_data["campaign"]) == campaign_key(lead.campaign):
+                # Same campaign (any spelling) — leave it; an unchanged legacy/inactive value never 422s.
+                update_data.pop("campaign")
+            else:
+                update_data["campaign"] = await self._resolve_campaign(
+                    update_data["campaign"],
+                    campaign_policy or CampaignWritePolicy.manual(can_manage=False, actor_id=actor_id),
+                )
         await self._ensure_references(update_data.get("customer_id"), update_data.get("assigned_to_id"))
         update_data["updated_by_id"] = actor_id
         if "assigned_to_id" in update_data:

@@ -1,5 +1,5 @@
 import { CheckSquare, Download, LayoutGrid, List as ListIcon, Plus, RefreshCw, SlidersHorizontal, Upload, X } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type DragEvent, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type ChangeEvent, type DragEvent, type FormEvent } from "react";
 
 import {
   Badge,
@@ -21,6 +21,7 @@ import { LeadRowList } from "../components/leads/LeadRowList";
 import { StageTransitionModal } from "../components/leads/StageTransitionModal";
 import { usePipelines } from "../context/PipelineContext";
 import { useAuth } from "../hooks/useAuth";
+import { useCampaignOptions } from "../hooks/useCampaignOptions";
 import { useLeads } from "../hooks/useLeads";
 import { useMediaQuery } from "../hooks/useMediaQuery";
 import { usePermissions } from "../hooks/usePermissions";
@@ -33,10 +34,18 @@ import { siteVisitsService } from "../services/site-visits";
 import { usersService } from "../services/users";
 import type { Lead, LeadIndustry, Organization, PipelineStage, User } from "../types";
 import { syncOpenDrawer } from "../components/leads/drawerSync";
+import {
+  NEW_CAMPAIGN_VALUE,
+  buildCampaignFilterOptions,
+  buildCampaignFormOptions,
+  campaignRejectionMessage,
+  cleanCampaignName,
+  findCampaignByKey
+} from "../utils/campaigns";
 import { localDayRange } from "../utils/dateRange";
 import { extractErrorMessage } from "../utils/errors";
 import { formatCurrency } from "../utils/format";
-import { OTHER_OPTION, industryInterestLabel, leadCampaignOptions, leadIndustryOptions, leadSourceOptions, pipelineCategoryTone, propertyInterestOptions, propertyTypeOptions, salutationOptions, titleCase } from "../utils/options";
+import { OTHER_OPTION, industryInterestLabel, leadIndustryOptions, leadSourceOptions, pipelineCategoryTone, propertyInterestOptions, propertyTypeOptions, salutationOptions, titleCase } from "../utils/options";
 import { canSetStage } from "../utils/stageAccess";
 
 
@@ -138,9 +147,6 @@ export default function LeadsPage() {
   const [ownerFilter, setOwnerFilter] = useState<string>("");
   const [sourceFilter, setSourceFilter] = useState<string>("");
   const [campaignFilter, setCampaignFilter] = useState<string>("");
-  // Distinct campaign values actually present on the tenant's leads, so the
-  // Campaign filter can offer custom/imported campaigns — not just predefined.
-  const [campaignChoices, setCampaignChoices] = useState<string[]>([]);
   // Raw search box value + its debounced counterpart (the latter drives the query
   // so typing doesn't fire a request per keystroke).
   const [searchInput, setSearchInput] = useState("");
@@ -259,21 +265,11 @@ export default function LeadsPage() {
   // Assigning a lead owner is an admin/manager capability: it needs to see the
   // team, so gate it on USER_VIEW (owner/admin/manager have it; sales reps don't).
   const canAssign = hasPerm("USER_VIEW");
+  // Campaign managers may add a new campaign name from the form (and see deactivated ones in the filter);
+  // everyone else picks from the workspace's own list.
+  const canManageCampaigns = hasPerm("CAMPAIGN_MANAGE");
+  const campaignLists = useCampaignOptions(canManageCampaigns);
   const toast = useToast();
-
-  // Load the distinct campaigns in use for the filter dropdown. Refreshed on
-  // mount, on any lead.* realtime event, and after a CSV import so a newly
-  // imported campaign becomes selectable right away.
-  const loadCampaigns = useCallback(async () => {
-    try {
-      setCampaignChoices(await leadsService.campaigns());
-    } catch {
-      /* non-fatal: the filter still shows the predefined options */
-    }
-  }, []);
-  useEffect(() => {
-    void loadCampaigns();
-  }, [loadCampaigns]);
 
   // Auto-refresh when any lead.* envelope arrives — covers create, update,
   // stage_changed, deleted. The dependency array is empty in useRealtimeEvent
@@ -282,36 +278,16 @@ export default function LeadsPage() {
     (event) => event.event.startsWith("lead."),
     () => {
       void refresh();
-      void loadCampaigns();
     },
   );
 
-  // Filter options = predefined campaigns + any custom ones actually on leads
-  // (deduped, predefined first). This is what makes imported campaigns filterable.
-  const campaignFilterOptions = useMemo(() => {
-    const seen = new Set<string>();
-    const opts: { value: string; label: string }[] = [];
-    for (const o of leadCampaignOptions) {
-      if (!seen.has(o.value)) {
-        seen.add(o.value);
-        opts.push(o);
-      }
-    }
-    for (const c of campaignChoices) {
-      if (c && !seen.has(c)) {
-        seen.add(c);
-        opts.push({ value: c, label: c });
-      }
-    }
-    // Always keep the currently-selected campaign present, even if it just
-    // dropped out of the distinct set (its last lead was deleted/reassigned), so
-    // the controlled <select> can't desync — showing "All campaigns" while the
-    // filter is still applied.
-    if (campaignFilter && !seen.has(campaignFilter)) {
-      opts.push({ value: campaignFilter, label: campaignFilter });
-    }
-    return opts;
-  }, [campaignChoices, campaignFilter]);
+  // Filter options = the workspace's campaigns + any value actually on visible leads, one entry per
+  // campaign (spellings are unified server-side). The current selection always stays present so the
+  // controlled <select> can't desync — showing "All campaigns" while the filter is still applied.
+  const campaignFilterOptions = useMemo(
+    () => buildCampaignFilterOptions(campaignLists.campaigns, campaignLists.inUse, campaignFilter),
+    [campaignLists.campaigns, campaignLists.inUse, campaignFilter]
+  );
 
   const stageOptionsForFilter = useMemo(() => {
     const source = industryFilter ? byIndustry[industryFilter] : allStages;
@@ -487,6 +463,9 @@ export default function LeadsPage() {
     setDuplicates([]);
     setDupChecked(false);
     setFormOpen(true);
+    // Fresh campaign list for the form: picks up names added elsewhere, and leaves legacy (free-text) mode
+    // in a tab opened mid-deploy.
+    void campaignLists.reload();
   }
 
   // An edit to email/phone means we must re-check before creating.
@@ -553,7 +532,7 @@ export default function LeadsPage() {
         probability: Number(form.probability) || 0,
         expected_close_date: form.expected_close_date || null,
         source: (form.source === OTHER_OPTION ? form.source_other.trim() : form.source) || null,
-        campaign: (form.campaign === OTHER_OPTION ? form.campaign_other.trim() : form.campaign) || null,
+        campaign: (form.campaign === NEW_CAMPAIGN_VALUE ? cleanCampaignName(form.campaign_other) : form.campaign) || null,
         interest: (form.interest === OTHER_OPTION ? form.interest_other.trim() : form.interest.trim()) || null,
         ...(form.industry === "real_estate" ? {
           property_type: (form.property_type === OTHER_OPTION ? form.property_type_other.trim() : form.property_type) || null,
@@ -566,8 +545,14 @@ export default function LeadsPage() {
       });
       toast.success("Lead created", form.title.trim());
       setFormOpen(false);
+      // A manager's new campaign name joins the list right away.
+      if (form.campaign === NEW_CAMPAIGN_VALUE) void campaignLists.reload();
     } catch (submitError) {
-      setFormError(extractErrorMessage(submitError));
+      // The generic 422 text would hide why: show the campaign rejection ("isn't in your campaign list …
+      // did you mean …" / "is inactive") and refresh the list, which may have changed meanwhile.
+      const campaignMessage = campaignRejectionMessage(submitError);
+      if (campaignMessage) void campaignLists.reload();
+      setFormError(campaignMessage ?? extractErrorMessage(submitError));
     } finally {
       setSubmitting(false);
     }
@@ -620,7 +605,7 @@ export default function LeadsPage() {
       );
       await refresh();
       // Surface any newly imported campaign in the filter dropdown immediately.
-      void loadCampaigns();
+      void campaignLists.reload();
     } catch (err) {
       toast.error("Import failed", extractErrorMessage(err));
     } finally {
@@ -1572,15 +1557,30 @@ export default function LeadsPage() {
             label="Campaign"
             value={form.campaign}
             onChange={(event) => setForm({ ...form, campaign: event.target.value })}
-            options={[{ value: "", label: "None" }, ...leadCampaignOptions]}
+            options={buildCampaignFormOptions(campaignLists.campaigns, {
+              // Legacy (backend without campaign lists yet): free text as before, for everyone.
+              allowNew: canManageCampaigns || campaignLists.legacy,
+              legacyNames: campaignLists.legacy ? campaignLists.inUse : [],
+              current: form.campaign
+            })}
+            hint={
+              campaignLists.loaded && !campaignLists.legacy && !canManageCampaigns && campaignLists.campaigns.every((c) => !c.is_active)
+                ? "No campaigns yet — a manager can add them under Campaigns."
+                : undefined
+            }
           />
-          {form.campaign === OTHER_OPTION && (
+          {form.campaign === NEW_CAMPAIGN_VALUE && (
             <TextField
               id="lead-campaign-other"
-              label="Please specify campaign"
+              label="New campaign name"
               value={form.campaign_other}
               onChange={(event) => setForm({ ...form, campaign_other: event.target.value })}
+              maxLength={120}
               required
+              hint={(() => {
+                const existing = findCampaignByKey(campaignLists.campaigns, form.campaign_other);
+                return existing ? `Already in your list as "${existing.name}" — that campaign will be used.` : undefined;
+              })()}
             />
           )}
           {/* Real estate captures a Budget min–max range (above) instead of a

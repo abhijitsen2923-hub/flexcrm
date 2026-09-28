@@ -16,6 +16,7 @@ from uuid import UUID
 
 from sqlalchemy import select, update
 
+from app.core.campaign_names import campaign_key, clean_display
 from app.core.exceptions import NotFoundError, ValidationError
 from app.core.google_sheets import (
     SheetAccessError,
@@ -31,6 +32,7 @@ from app.models.lead import Lead
 from app.models.lead_source_connection import LeadSourceConnection
 from app.models.organization import Organization
 from app.services.base import ServiceBase
+from app.services.campaigns import CampaignService, CampaignWritePolicy
 from app.services.lead_ingest import LeadIngestService
 from app.services.meta_sheet_mapper import map_sheet_row, relabel_changes
 from app.services.realtime import realtime_manager
@@ -243,6 +245,7 @@ class GoogleSheetService(ServiceBase):
 
         created_any = False
         seen: set[str] = set()
+        campaign_names: dict[str, str | None] = {}  # raw sheet campaign → the tenant's canonical name
         for row in rows:
             stats["rows"] += 1
             external_id, fields = map_sheet_row(row, campaign_from_tab=campaign_from_tab)
@@ -275,7 +278,7 @@ class GoogleSheetService(ServiceBase):
             else:
                 stats["duplicate"] += 1
                 if first_sighting and lead is not None and await self._relabel_existing(
-                    lead, row, fields, actor_id=actor_id
+                    lead, row, fields, actor_id=actor_id, campaign_names=campaign_names
                 ):
                     stats["relabelled"] += 1
 
@@ -295,7 +298,9 @@ class GoogleSheetService(ServiceBase):
         await self._set_status(conn_id, "ok", None, touch_lead=created_any)
         return stats
 
-    async def _relabel_existing(self, lead: Lead, row: dict, fields: dict, *, actor_id: UUID) -> bool:
+    async def _relabel_existing(
+        self, lead: Lead, row: dict, fields: dict, *, actor_id: UUID, campaign_names: dict[str, str | None]
+    ) -> bool:
         """Self-heal an already-ingested lead's campaign/title to the current mapping of its row — only
         while they still hold what an older sync stored (see meta_sheet_mapper.relabel_changes). A guarded
         compare-and-set, so a rep's concurrent edit wins. Returns True if it wrote; never raises."""
@@ -304,6 +309,13 @@ class GoogleSheetService(ServiceBase):
         if lead.is_deleted:
             return False
         changes = relabel_changes(row, fields, current_campaign=cur_campaign, current_title=cur_title)
+        if changes.get("campaign") is not None:
+            # Land on the tenant's canonical name (a merged/renamed tab name maps to its campaign).
+            canonical = await self._canonical_campaign(changes["campaign"], actor_id, campaign_names)
+            if campaign_key(canonical) == campaign_key(cur_campaign):
+                del changes["campaign"]
+            else:
+                changes["campaign"] = canonical
         if not changes:
             return False
         where = [Lead.id == lead_id, Lead.is_deleted.is_(False)]
@@ -321,6 +333,20 @@ class GoogleSheetService(ServiceBase):
             logger.warning("google_sheet relabel failed (lead %s)", lead_id, exc_info=True)
             return False
         return bool(result.rowcount)
+
+    async def _canonical_campaign(self, raw: str, actor_id: UUID, cache: dict[str, str | None]) -> str | None:
+        """The tenant's canonical name for a sheet campaign, resolved once per sync. Only called when a lead
+        is actually relabelled, so a campaign a manager removed isn't re-added by rows that change nothing.
+        Falls back to the cleaned sheet text on any error (the relabel still happens)."""
+        if raw not in cache:
+            try:
+                cache[raw] = await CampaignService(self.session).resolve(
+                    raw, CampaignWritePolicy.ingest(_PROVIDER, actor_id)
+                )
+            except Exception:  # noqa: BLE001 — never let the campaign list block a relabel
+                logger.warning("google_sheet campaign resolution failed — using the sheet text", exc_info=True)
+                return clean_display(raw)
+        return cache[raw]
 
     async def _set_status(self, conn_id: UUID, status: str, detail: str | None, *, touch_lead: bool = False) -> None:
         conn = (
