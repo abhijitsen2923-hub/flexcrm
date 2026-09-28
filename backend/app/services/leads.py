@@ -28,6 +28,26 @@ from app.services.realtime import realtime_manager
 from app.services.stage_transitions import StageTransitionService
 from app.utils.query import validate_sort_field
 
+# A search that is just a lead number: optional "#", then 1-9 ASCII digits without a leading zero (a leading
+# zero is a phone fragment; ≤ 9 digits always fits the INTEGER column — a longer value would make Postgres
+# raise instead of falling back to the normal search).
+_LEAD_NUMBER_SEARCH = re.compile(r"#?\s*([1-9][0-9]{0,8})")
+_LEAD_SEARCH_FIELDS = (
+    "title",
+    "interest",
+    "contact_name",
+    "contact_email",
+    "contact_phone",
+    "contact_phone_alt",
+    "lead_number",
+)
+
+
+def lead_number_from_search(term: str | None) -> int | None:
+    """"92422" / "#92422" → 92422; anything else (phone numbers, text, 10+ digits) → None."""
+    match = _LEAD_NUMBER_SEARCH.fullmatch(term.strip()) if term else None
+    return int(match.group(1)) if match else None
+
 
 class LeadService(ServiceBase):
     allowed_sort_fields = {
@@ -227,7 +247,7 @@ class LeadService(ServiceBase):
         # row query and the count, keeping pagination totals correct).
         if filters.unassigned:
             extra_filters.append(Lead.assigned_to_id.is_(None))
-        items, total = await self.repository.list(
+        list_args = dict(
             pagination=pagination,
             filters={
                 "customer_id": filters.customer_id,
@@ -243,23 +263,29 @@ class LeadService(ServiceBase):
                 "assigned_to_id": filters.assigned_to_id,
                 "partner_id": filters.partner_id,
             },
-            extra_filters=extra_filters,
-            search=filters.search,
-            # Free-text search spans title + interest + the contact fields + lead
-            # number (lead_number is Integer — the repo casts to String for ILIKE).
-            search_fields=(
-                "title",
-                "interest",
-                "contact_name",
-                "contact_email",
-                "contact_phone",
-                "contact_phone_alt",
-                "lead_number",
-            ),
             sort_by=sort_by,
             sort_order=filters.sort_order,
             options=self.repository.default_options,
         )
+        # Searching a lead number ("92422" / "#92422") shows THAT lead — not also every lead whose phone
+        # happens to contain those digits. Same filters and rep scoping as the normal search; when no such
+        # lead is visible (none, another rep's, deleted, filtered out) it falls back to the normal search.
+        # Decided on `total`, not this page's items, so page 2 of an exact hit doesn't flip to the fallback.
+        items, total = [], 0
+        lead_number = lead_number_from_search(filters.search)
+        if lead_number is not None:
+            items, total = await self.repository.list(
+                **list_args, extra_filters=[*extra_filters, Lead.lead_number == lead_number]
+            )
+        if not total:
+            items, total = await self.repository.list(
+                **list_args,
+                extra_filters=extra_filters,
+                search=filters.search,
+                # Free-text search spans title + interest + the contact fields + lead
+                # number (lead_number is Integer — the repo casts to String for ILIKE).
+                search_fields=_LEAD_SEARCH_FIELDS,
+            )
         # Flag leads that share an email/phone with another active lead so the
         # UI can show a duplicate ("!") marker. Two aggregate queries, then a
         # transient attribute LeadRead reads via from_attributes.
