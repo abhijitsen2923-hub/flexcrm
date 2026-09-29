@@ -257,17 +257,20 @@ export const leadsService = {
     return data;
   },
 
-  async importCsv(file: File, skipDuplicates = false): Promise<LeadImportResult> {
+  // One chunk of a CSV the browser split up (utils/csvImport.ts): same endpoint, `row_offset` keeps the
+  // server's row numbers matching the sheet.
+  async importCsvChunk(
+    text: string,
+    fileName: string,
+    { skipDuplicates, rowOffset }: { skipDuplicates: boolean; rowOffset: number }
+  ): Promise<LeadImportResult> {
     const formData = new FormData();
-    formData.append("file", file);
+    const name = fileName.toLowerCase().endsWith(".csv") ? fileName : "leads.csv";
+    formData.append("file", new Blob([text], { type: "text/csv" }), name);
     const { data } = await apiClient.post<LeadImportResult>(
-      `/leads/import${buildQueryString({ skip_duplicates: skipDuplicates })}`,
+      `/leads/import${buildQueryString({ skip_duplicates: skipDuplicates, row_offset: rowOffset })}`,
       formData,
-      {
-        // Let axios infer the multipart boundary — overriding the default
-        // `Content-Type: application/json` header set on the client.
-        headers: { "Content-Type": "multipart/form-data" }
-      }
+      { headers: { "Content-Type": "multipart/form-data" } }
     );
     return data;
   },

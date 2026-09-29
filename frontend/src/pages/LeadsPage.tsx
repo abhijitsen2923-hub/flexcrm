@@ -22,13 +22,14 @@ import { StageTransitionModal } from "../components/leads/StageTransitionModal";
 import { usePipelines } from "../context/PipelineContext";
 import { useAuth } from "../hooks/useAuth";
 import { useCampaignOptions } from "../hooks/useCampaignOptions";
+import { leadImportJob, startLeadImport, useLeadImportJob } from "../hooks/useLeadImport";
 import { useLeads } from "../hooks/useLeads";
 import { useMediaQuery } from "../hooks/useMediaQuery";
 import { usePermissions } from "../hooks/usePermissions";
 import { useRealtimeRefresh } from "../realtime";
 import { exportsService } from "../services/exports";
 import { channelPartnersService, type PartnerOption } from "../services/channelPartners";
-import { leadsService, type LeadDuplicate, type LeadImportResult } from "../services/leads";
+import { leadsService, type LeadDuplicate } from "../services/leads";
 import { organizationsService } from "../services/organizations";
 import { siteVisitsService } from "../services/site-visits";
 import { usersService } from "../services/users";
@@ -275,7 +276,8 @@ export default function LeadsPage() {
   // stage_changed, deleted. The dependency array is empty in useRealtimeEvent
   // (it subscribes once), but it always has the latest `refresh` via a ref.
   useRealtimeRefresh(
-    (event) => event.event.startsWith("lead."),
+    // While this tab's CSV import runs, its events are ignored — the list refreshes once when it ends.
+    (event) => event.event.startsWith("lead.") && !leadImportJob.isRunning(),
     () => {
       void refresh();
     },
@@ -571,47 +573,52 @@ export default function LeadsPage() {
   }
 
   // --- CSV import -------------------------------------------------------
+  // The import runs in the background (hooks/useLeadImport): the dialog closes as soon as a file is picked,
+  // and a status card on every page (components/imports/LeadImportStatus) shows progress and the result —
+  // the user can keep working meanwhile.
   const importInputRef = useRef<HTMLInputElement | null>(null);
-  const [importing, setImporting] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
   // Default to skipping duplicates so a re-uploaded sheet only adds fresh leads.
   const [skipDuplicates, setSkipDuplicates] = useState(true);
-  const [importResult, setImportResult] = useState<LeadImportResult | null>(null);
+  const importJob = useLeadImportJob();
+  const importRunning = importJob.status === "running";
 
   function openImportDialog() {
+    if (leadImportJob.isRunning()) {
+      toast.info("An import is already running", "Its progress is shown in the card at the bottom of the screen.");
+      return;
+    }
     setSkipDuplicates(true);
     setImportOpen(true);
   }
 
-  async function handleImportFile(event: ChangeEvent<HTMLInputElement>) {
+  function handleImportFile(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     // Reset the input so picking the same file twice still triggers onChange.
     event.target.value = "";
     if (!file) return;
-    setImporting(true);
-    try {
-      const result = await leadsService.importCsv(file, skipDuplicates);
-      setImportOpen(false);
-      setImportResult(result);
-      const dupNote = skipDuplicates
-        ? (result.skipped > 0 ? `, ${result.skipped} duplicate${result.skipped === 1 ? "" : "s"} skipped` : "")
-        : (result.duplicates.length > 0 ? `, ${result.duplicates.length} duplicate${result.duplicates.length === 1 ? "" : "s"} flagged` : "");
-      toast.success(
-        "Import done",
-        `${result.created} lead${result.created === 1 ? "" : "s"} created` +
-          (result.promoted > 0 ? `, ${result.promoted} promoted to customer` : "") +
-          dupNote +
-          (result.errors.length > 0 ? `, ${result.errors.length} row error${result.errors.length === 1 ? "" : "s"}` : "")
-      );
-      await refresh();
-      // Surface any newly imported campaign in the filter dropdown immediately.
-      void campaignLists.reload();
-    } catch (err) {
-      toast.error("Import failed", extractErrorMessage(err));
-    } finally {
-      setImporting(false);
+    if (!file.name.toLowerCase().endsWith(".csv")) {
+      toast.error("Import failed", "Upload must be a .csv file.");
+      return;
     }
+    setImportOpen(false);
+    void startLeadImport(file, skipDuplicates).then((started) => {
+      if (!started) toast.info("An import is already running", "Wait for it to finish, then upload again.");
+    });
   }
+
+  // When an import finishes, refresh the list once (its events were ignored while it ran) and surface any
+  // newly imported campaign in the filter dropdown.
+  const reloadCampaigns = campaignLists.reload;
+  const lastImportStatus = useRef(importJob.status);
+  useEffect(() => {
+    const was = lastImportStatus.current;
+    lastImportStatus.current = importJob.status;
+    if (was === "running" && importJob.status !== "running") {
+      void refresh();
+      void reloadCampaigns();
+    }
+  }, [importJob.status, refresh, reloadCampaigns]);
 
   // --- Drawer ------------------------------------------------------------
   const [drawerLead, setDrawerLead] = useState<Lead | null>(null);
@@ -867,16 +874,17 @@ export default function LeadsPage() {
                 size="sm"
                 icon={<Upload size={14} />}
                 onClick={openImportDialog}
-                loading={importing}
+                loading={importRunning}
+                title={importRunning ? "An import is running — see the card at the bottom of the screen" : undefined}
               >
-                Upload CSV
+                {importRunning ? "Importing…" : "Upload CSV"}
               </Button>
               <input
                 ref={importInputRef}
                 type="file"
                 accept=".csv,text/csv"
                 style={{ display: "none" }}
-                onChange={(event) => void handleImportFile(event)}
+                onChange={handleImportFile}
               />
             </>
           )}
@@ -1689,11 +1697,7 @@ export default function LeadsPage() {
             <Button variant="secondary" onClick={() => setImportOpen(false)}>
               Cancel
             </Button>
-            <Button
-              icon={<Upload size={14} />}
-              loading={importing}
-              onClick={() => importInputRef.current?.click()}
-            >
+            <Button icon={<Upload size={14} />} onClick={() => importInputRef.current?.click()}>
               Choose CSV file
             </Button>
           </>
@@ -1703,6 +1707,10 @@ export default function LeadsPage() {
           <p className="muted text-sm">
             Upload a CSV matching your business type — use the <strong>Template</strong> button for the
             correct columns. Phone is required; rows missing it are reported as errors.
+          </p>
+          <p className="muted text-sm">
+            The import runs in the background — this window closes and a progress card appears at the bottom of
+            the screen, so you can keep working. Don't close the browser tab until it finishes.
           </p>
           <label style={{ display: "flex", gap: 8, alignItems: "flex-start", cursor: "pointer" }}>
             <input
@@ -1721,98 +1729,6 @@ export default function LeadsPage() {
             </span>
           </label>
         </div>
-      </Modal>
-
-      {/* CSV import result — surfaced when there are duplicates or row errors.
-          A clean import is summarised by the toast and the refreshed list. */}
-      <Modal
-        open={Boolean(importResult && (importResult.errors.length > 0 || importResult.duplicates.length > 0))}
-        onClose={() => setImportResult(null)}
-        title="Import summary"
-        footer={
-          <Button onClick={() => setImportResult(null)}>
-            Close
-          </Button>
-        }
-      >
-        {importResult && (
-          <div className="stack">
-            <div>
-              <strong>{importResult.created}</strong> lead
-              {importResult.created === 1 ? "" : "s"} created
-              {importResult.promoted > 0 && (
-                <> · <strong>{importResult.promoted}</strong> auto-promoted to customer</>
-              )}
-              {importResult.skipped > 0 && (
-                <> · <strong>{importResult.skipped}</strong> duplicate{importResult.skipped === 1 ? "" : "s"} skipped</>
-              )}
-              {importResult.errors.length > 0 && (
-                <> · <strong>{importResult.errors.length}</strong> row error{importResult.errors.length === 1 ? "" : "s"}</>
-              )}
-            </div>
-
-            {importResult.duplicates.length > 0 && (
-              <>
-                <div className="muted text-sm">
-                  {importResult.duplicates.some((d) => d.skipped)
-                    ? "These rows matched an existing lead and were skipped:"
-                    : "These rows matched an existing lead and were imported (flagged with a red “!”):"}
-                </div>
-                <table className="table">
-                  <thead>
-                    <tr>
-                      <th style={{ width: 56, textAlign: "left" }}>Row</th>
-                      <th style={{ textAlign: "left" }}>Contact</th>
-                      <th style={{ textAlign: "left" }}>Matches</th>
-                      <th style={{ width: 90, textAlign: "left" }}>Action</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {importResult.duplicates.map((d) => (
-                      <tr key={`dup-${d.row}`}>
-                        <td>{d.row}</td>
-                        <td>
-                          {d.contact_name ?? "—"}
-                          {(d.contact_email || d.contact_phone) && (
-                            <div className="muted text-xs">
-                              {[d.contact_email, d.contact_phone].filter(Boolean).join(" · ")}
-                            </div>
-                          )}
-                        </td>
-                        <td>{d.matched}</td>
-                        <td>{d.skipped ? "Skipped" : "Imported"}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </>
-            )}
-
-            {importResult.errors.length > 0 && (
-              <>
-                <div className="muted text-sm">
-                  Fix these rows in your sheet and re-upload — already-created leads aren't duplicated.
-                </div>
-                <table className="table">
-                  <thead>
-                    <tr>
-                      <th style={{ width: 56, textAlign: "left" }}>Row</th>
-                      <th style={{ textAlign: "left" }}>Error</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {importResult.errors.map((err) => (
-                      <tr key={`err-${err.row}`}>
-                        <td>{err.row}</td>
-                        <td>{err.error}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </>
-            )}
-          </div>
-        )}
       </Modal>
     </>
   );

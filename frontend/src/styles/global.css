@@ -1092,6 +1092,132 @@ p {
 .toast__title { font-weight: 600; font-size: 0.875rem; }
 .toast__body  { font-size: 0.8rem; color: var(--color-text-muted); margin-top: 0.15rem; }
 
+/* ============================================================ Background import status card */
+
+/* Bottom-right card for a CSV import running in the background (components/imports/LeadImportStatus).
+   Stacking: above the bottom nav (30) and page content, BELOW the leads FAB (35), the phone bulk-action bar
+   (36), the mobile sidebar (39/40) and modals (50) — so it never blocks their controls. */
+.import-status {
+  position: fixed;
+  right: var(--space-4);
+  bottom: var(--space-4);
+  z-index: 34;
+  width: 320px;
+  max-width: calc(100vw - 2 * var(--space-4));
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-strong);
+  border-left-width: 4px;
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-md);
+  padding: var(--space-3) var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+.import-status--running { border-left-color: var(--color-primary); }
+.import-status--success { border-left-color: var(--color-success); }
+.import-status--warning { border-left-color: var(--color-warning); }
+.import-status__head { display: flex; align-items: center; gap: var(--space-2); }
+.import-status__icon { flex: 0 0 auto; width: 16px; height: 16px; }
+.import-status--success .import-status__icon { color: var(--color-success); }
+.import-status--warning .import-status__icon { color: var(--color-warning); }
+.import-status__title { font-weight: 600; font-size: 0.875rem; flex: 1; }
+.import-status__close {
+  border: none;
+  background: transparent;
+  color: var(--color-text);
+  cursor: pointer;
+  min-width: 32px;
+  min-height: 32px;
+  margin: -6px -8px -6px 0;
+  border-radius: var(--radius-sm);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.import-status__close:hover { background: var(--color-surface-muted); }
+.import-status__file {
+  font-size: 0.75rem;
+  color: var(--color-text);
+  opacity: 0.8;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.import-status__bar {
+  height: 6px;
+  border-radius: 999px;
+  background: var(--color-border-strong);
+  overflow: hidden;
+}
+.import-status__bar-fill {
+  height: 100%;
+  background: var(--color-primary);
+  border-radius: 999px;
+  transition: width 0.3s ease;
+}
+.import-status__text { font-size: 0.8rem; color: var(--color-text); }
+.import-status__hint { font-size: 0.75rem; color: var(--color-text); }
+.import-status .btn { align-self: flex-start; }
+
+/* Collapsed ("Hide") while running: a small pill that expands again on click. */
+.import-status-pill {
+  position: fixed;
+  right: var(--space-4);
+  bottom: var(--space-4);
+  z-index: 34;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 40px;
+  padding: 0 var(--space-4);
+  border-radius: 999px;
+  border: 1px solid var(--color-border-strong);
+  border-left: 4px solid var(--color-primary);
+  background: var(--color-surface);
+  color: var(--color-text);
+  box-shadow: var(--shadow-md);
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+/* Room under the page content while the card / pill is up, so it never covers the last controls
+   (e.g. the Leads pagination). */
+body.has-import-card .app-content { padding-bottom: 180px; }
+body.has-import-pill .app-content { padding-bottom: 72px; }
+
+/* Visually hidden, still read by screen readers. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* Phone: above the bottom tab bar, clear of the new-lead FAB on the right. */
+@media (max-width: 639px) {
+  .import-status {
+    left: var(--space-4);
+    right: calc(var(--space-4) + 68px);
+    width: auto;
+    max-width: none;
+    bottom: calc(76px + env(safe-area-inset-bottom));
+  }
+  .import-status-pill {
+    right: calc(var(--space-4) + 68px);
+    bottom: calc(84px + env(safe-area-inset-bottom));
+  }
+  .import-status__close { min-width: 44px; min-height: 44px; margin: -12px -12px -12px 0; }
+  body.has-import-card .app-content { padding-bottom: calc(72px + 170px + env(safe-area-inset-bottom)); }
+  body.has-import-pill .app-content { padding-bottom: calc(72px + 60px + env(safe-area-inset-bottom)); }
+}
+
 /* ============================================================ Empty / loading states */
 
 .empty-state {

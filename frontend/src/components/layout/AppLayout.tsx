@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Outlet, useLocation } from "react-router-dom";
 
+import { LeadImportStatus } from "../imports/LeadImportStatus";
 import { InAppBrowserBanner } from "./InAppBrowserBanner";
 import { MobileBottomNav } from "./MobileBottomNav";
 import { Sidebar } from "./Sidebar";
@@ -46,6 +47,8 @@ export function AppLayout() {
           <Outlet />
         </main>
         <MobileBottomNav onMore={() => setSidebarOpen(true)} />
+        {/* Background CSV import progress/result — visible on every page while the user keeps working. */}
+        <LeadImportStatus />
       </div>
     </div>
   );

@@ -43,6 +43,14 @@ function reloadedRecently(): boolean {
   }
 }
 
+// Set while something must not be interrupted by an automatic reload (a background CSV import): the stale
+// chunk error then surfaces normally, and the user decides (the import's beforeunload guard asks first).
+let reloadBlocker: (() => boolean) | null = null;
+
+export function setReloadBlocker(blocker: (() => boolean) | null): void {
+  reloadBlocker = blocker;
+}
+
 /**
  * Reload the page once to pick up a fresh build, guarded against a loop: at most
  * one reload per RELOAD_COOLDOWN_MS, so a genuinely broken build shows the error
@@ -51,7 +59,7 @@ function reloadedRecently(): boolean {
  * a stale chunk (e.g. Vite's `vite:preloadError` event).
  */
 export function reloadOnce(): boolean {
-  if (reloadedRecently()) {
+  if (reloadedRecently() || reloadBlocker?.()) {
     return false;
   }
   try {

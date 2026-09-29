@@ -69,8 +69,10 @@ export function extractErrorMessage(
       return SERVER_MESSAGE_BY_STATUS[status] ?? fallback;
     }
 
-    // Validation: show a readable field message if we can, else a generic hint.
+    // Validation: a readable field message, or the backend's own sentence (e.g. "CSV must include a
+    // contact_name column…" — our 422s are written for users), else a generic hint.
     if (status === 422) {
+      if (typeof detail === "string" && detail.trim()) return detail;
       return firstValidationMessage(detail) ?? CLIENT_MESSAGE_BY_STATUS[422];
     }
 

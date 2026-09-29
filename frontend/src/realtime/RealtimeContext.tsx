@@ -26,7 +26,6 @@ type Listener = (event: RealtimeEnvelope) => void;
 
 interface RealtimeContextValue {
   status: RealtimeStatus;
-  lastEventId: number | null;
   subscribe: (listener: Listener) => () => void;
 }
 
@@ -110,20 +109,17 @@ function resolveWebsocketUrl(token: string, lastEventId: number | null): string 
 
 export function RealtimeProvider({ children }: PropsWithChildren) {
   const [status, setStatus] = useState<RealtimeStatus>("idle");
-  const [lastEventId, setLastEventId] = useState<number | null>(null);
 
   // Refs keep reconnection logic free of stale closures. State drives renders;
-  // refs drive the connection lifecycle.
+  // refs drive the connection lifecycle. The last event id is a REF, not state: it's only needed to
+  // resume after a reconnect, and as state it re-rendered every page using realtime on EVERY message
+  // (hundreds of re-renders during a CSV import or sheet sync — visible flicker/jank).
   const listenersRef = useRef<Set<Listener>>(new Set());
   const socketRef = useRef<WebSocket | null>(null);
   const reconnectAttemptsRef = useRef(0);
   const reconnectTimerRef = useRef<number | null>(null);
   const closedByUsRef = useRef(false);
   const lastEventIdRef = useRef<number | null>(null);
-
-  useEffect(() => {
-    lastEventIdRef.current = lastEventId;
-  }, [lastEventId]);
 
   const dispatch = useCallback((event: RealtimeEnvelope) => {
     listenersRef.current.forEach((listener) => {
@@ -181,7 +177,6 @@ export function RealtimeProvider({ children }: PropsWithChildren) {
               ? parsed.id
               : lastEventIdRef.current;
           lastEventIdRef.current = next;
-          setLastEventId(next);
         }
         dispatch(parsed);
       } catch {
@@ -232,10 +227,7 @@ export function RealtimeProvider({ children }: PropsWithChildren) {
     };
   }, []);
 
-  const value = useMemo<RealtimeContextValue>(
-    () => ({ status, lastEventId, subscribe }),
-    [status, lastEventId, subscribe]
-  );
+  const value = useMemo<RealtimeContextValue>(() => ({ status, subscribe }), [status, subscribe]);
 
   return <RealtimeContext.Provider value={value}>{children}</RealtimeContext.Provider>;
 }

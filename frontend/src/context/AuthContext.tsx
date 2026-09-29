@@ -9,6 +9,7 @@ import {
 } from "react";
 
 import { clearResourceCache } from "../hooks/resourceCache";
+import { resetLeadImport } from "../hooks/useLeadImport";
 import { authService } from "../services/auth";
 import { proactiveRefresh, SESSION_EXPIRED_EVENT } from "../services/http";
 import { authStorage } from "../services/storage";
@@ -70,6 +71,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
       const sessionInvalid = !authStorage.get() || status === 401 || status === 403;
       if (sessionInvalid) {
         authStorage.clear();
+        resetLeadImport();
         clearResourceCache();
         setUser(null);
         setSession(null);
@@ -105,6 +107,8 @@ export function AuthProvider({ children }: PropsWithChildren) {
   }, []);
 
   const logout = useCallback(async () => {
+    // Stop a running CSV import and forget the last one — nothing of this user may show to the next.
+    resetLeadImport();
     try {
       await authService.logout();
     } finally {
@@ -124,6 +128,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
   useEffect(() => {
     const onExpired = () => {
       authStorage.clear();
+      resetLeadImport();
       clearResourceCache();
       setUser(null);
       setSession(null);
