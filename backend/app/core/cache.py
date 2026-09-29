@@ -48,14 +48,15 @@ class InMemoryCache:
                     self._store.pop(key, None)
 
     async def increment(self, key: str, ttl_seconds: int) -> int:
+        """Fixed window: the expiry is set when the window starts and NOT pushed out by later hits (a
+        sliding expiry never let a steadily-used key reset, so one busy office IP stayed rate-limited)."""
         async with self._lock:
+            now = datetime.now(UTC)
             value = self._store.get(key)
-            counter = 1
-            if value is not None:
-                payload, expires_at = value
-                if not expires_at or expires_at > datetime.now(UTC):
-                    counter = int(payload or 0) + 1
-            expires_at = datetime.now(UTC) + timedelta(seconds=ttl_seconds)
+            if value is not None and value[1] and value[1] > now:
+                counter, expires_at = int(value[0] or 0) + 1, value[1]
+            else:
+                counter, expires_at = 1, now + timedelta(seconds=ttl_seconds)
             self._store[key] = (counter, expires_at)
             return counter
 
@@ -148,11 +149,13 @@ class CacheClient:
         if self._redis is None:
             return await self._fallback.increment(key, ttl_seconds)
         try:
+            # Fixed window: the expiry is set only when the key is created (SET NX), never extended by
+            # later hits — EXPIRE on every hit made a busy key's window slide forever.
             async with self._redis.pipeline(transaction=True) as pipeline:
+                pipeline.set(key, 0, ex=ttl_seconds, nx=True)
                 pipeline.incr(key)
-                pipeline.expire(key, ttl_seconds)
                 result = await pipeline.execute()
-            return int(result[0])
+            return int(result[1])
         except RedisError as exc:
             # Fail open: if we can't reach Redis, don't block the request.
             # Returning 0 keeps the caller under any rate limit.

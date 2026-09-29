@@ -1,8 +1,8 @@
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.cache import cache_client
 from app.core.exceptions import ConflictError
+from app.services.bulk_scope import invalidate_reporting_cache_now, pending_side_effects
 
 
 class ServiceBase:
@@ -20,5 +20,8 @@ class ServiceBase:
             raise
 
     async def invalidate_reporting_cache(self) -> None:
-        await cache_client.delete_pattern("dashboard:")
-        await cache_client.delete_pattern("analytics:")
+        bulk = pending_side_effects()
+        if bulk is not None:
+            bulk.invalidate_cache = True  # wiped once when the bulk write (CSV import) ends
+            return
+        await invalidate_reporting_cache_now()

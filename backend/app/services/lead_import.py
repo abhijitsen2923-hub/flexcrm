@@ -13,6 +13,12 @@ position-1 code, a synthetic transition is fired so:
 Per-row errors don't abort the upload — the response carries counts and a
 list of `(row_number, message)` problems so the user can fix the sheet
 and re-import the failed rows.
+
+Bulk-friendly: realtime events and the reporting-cache wipe are merged into one per request
+(`bulk_side_effects`), duplicates are looked up for the whole request in one query, assignee emails are
+resolved once each, and each assignee gets one summary notification per request. (The browser sends big files
+as 50-row chunks, so that's once per chunk — still instead of once per row.) Row errors are plain sentences (no raw SQL/pydantic
+text). Large files are sent by the browser in chunks (`row_offset` keeps row numbers matching the sheet).
 """
 from __future__ import annotations
 
@@ -24,11 +30,15 @@ from decimal import Decimal, InvalidOperation
 from typing import Any, NamedTuple
 from uuid import UUID
 
+from pydantic import ValidationError as PydanticValidationError
 from sqlalchemy import select
+from sqlalchemy.exc import DBAPIError
 
 from app.core.currencies import DEFAULT_CURRENCY, allowed_currencies_for_org
 from app.core.exceptions import AppException, ValidationError
 from app.core.lead_csv import CsvColumn, import_columns_for
+from app.core.logging import get_logger, request_id_context
+from app.core.permissions import can_set_stage
 from app.core.tenancy import current_org
 from app.core.lead_normalize import (
     normalize_property_interest,
@@ -38,6 +48,7 @@ from app.core.lead_normalize import (
 from app.database.enums import LeadIndustry, UserRole
 from app.database.pipeline_seed import initial_stage_code
 from app.services.campaigns import CampaignWritePolicy
+from app.models.lead import Lead
 from app.models.organization import Organization
 from app.models.pipeline_stage import PipelineStage
 from app.repositories.leads import LeadRepository
@@ -45,8 +56,15 @@ from app.repositories.users import UserRepository
 from app.schemas.lead import LeadCreate
 from app.schemas.stage_transition import StageTransitionCreate
 from app.services.base import ServiceBase
+from app.services.bulk_scope import bulk_side_effects
 from app.services.leads import LeadService
+from app.services.notifications import NotificationService
 from app.services.stage_transitions import StageTransitionService
+
+logger = get_logger(__name__)
+
+_ROW_DB_ERROR = "Couldn't save this row — the database rejected one of its values. Check the row and upload it again."
+_MAX_DUPLICATE_MATCHES = 5
 
 
 def _canon_header(value: str | None) -> str:
@@ -85,6 +103,49 @@ class StageRef(NamedTuple):
 class ImportRowError:
     row: int
     error: str
+
+
+class _RowResult(NamedTuple):
+    lead_number: int
+    promoted: bool
+    assignee_id: UUID | None
+    stage_warning: str | None
+
+
+def _decimal_limit(column_key: str) -> Decimal | None:
+    """Largest magnitude the lead column can store (Numeric(12, 2) → < 10^10), so a too-large Value/Budget is a
+    labelled row error rather than an unexplained database rejection."""
+    column = Lead.__table__.c.get(column_key)
+    precision = getattr(getattr(column, "type", None), "precision", None)
+    scale = getattr(getattr(column, "type", None), "scale", None) or 0
+    return Decimal(10) ** (precision - scale) if precision else None
+
+
+def _is_blank_row(raw: dict) -> bool:
+    """A row with no content in any cell (Excel often saves ",,,,," lines) — skipped, not an error."""
+    for value in raw.values():
+        cells = value if isinstance(value, list) else [value]  # extra cells beyond the header come as a list
+        if any(cell is not None and str(cell).strip() for cell in cells):
+            return False
+    return True
+
+
+def _app_error_text(exc: AppException) -> str:
+    detail = exc.detail
+    if isinstance(detail, list) and detail and isinstance(detail[0], dict):  # field-error list shape
+        return str(detail[0].get("msg") or "This row has an invalid value.")
+    return str(detail)
+
+
+def _pydantic_error_text(exc: PydanticValidationError, headers: dict[str, str]) -> str:
+    """'Email: value is not a valid email address…' — the sheet's column name, not the internal field."""
+    parts = []
+    for error in exc.errors()[:3]:
+        loc = error.get("loc") or ()
+        field_name = str(loc[0]) if loc else ""
+        label = headers.get(field_name) or field_name.replace("_", " ").capitalize() or "Value"
+        parts.append(f"{label}: {error.get('msg') or 'is invalid'}")
+    return "; ".join(parts) or "This row has an invalid value."
 
 
 @dataclass
@@ -127,7 +188,10 @@ class LeadImportService(ServiceBase):
         actor_business_type: LeadIndustry | None,
         skip_duplicates: bool = False,
         campaign_policy: CampaignWritePolicy | None = None,
+        row_offset: int = 0,
     ) -> ImportSummary:
+        """`row_offset`: data rows that came before this part of a file the browser sends in chunks, so
+        reported row numbers still match the sheet."""
         try:
             text = file_bytes.decode("utf-8-sig")  # tolerate BOM from Excel exports
         except UnicodeDecodeError as exc:
@@ -172,10 +236,15 @@ class LeadImportService(ServiceBase):
         initial_code = initial_stage_code(industry.value)
 
         summary = ImportSummary()
+        headers = {col.key: col.header for col in columns}
+        self._assignee_ids: dict[str, UUID | None] = {}
 
         # CSV row numbering starts at 2 (header is row 1) so the user can
         # cross-reference with their spreadsheet.
-        for offset, raw in enumerate(reader, start=2):
+        prepared: list[tuple[int, dict[str, str | None]]] = []
+        for offset, raw in enumerate(reader, start=2 + row_offset):
+            if _is_blank_row(raw):
+                continue
             row = {col.key: self._read_field(raw, header_map.get(col.key)) for col in columns}
             # Combine a split first/last name into contact_name when there's no
             # single name column (last name optional).
@@ -185,22 +254,39 @@ class LeadImportService(ServiceBase):
                 combined = f"{first} {last}".strip()
                 if combined:
                     row["contact_name"] = combined
+            prepared.append((offset, row))
 
-            # Duplicate detection: does this row's email or phone already match
-            # an active lead in this tenant? Record it either way so the caller
-            # can list duplicates; only skip creation when skip_duplicates is on.
-            email_norm = (row.get("contact_email") or "").strip().lower() or None
-            phone_digits = re.sub(r"\D", "", row.get("contact_phone") or "") or None
-            if email_norm or phone_digits:
-                dups = await self.lead_repository.find_duplicates(email_norm, phone_digits)
-                if dups:
+        def _keys(row: dict[str, str | None]) -> tuple[str | None, str | None]:
+            email = (row.get("contact_email") or "").strip().lower() or None
+            phone = re.sub(r"\D", "", row.get("contact_phone") or "") or None
+            return email, phone
+
+        # Duplicate detection for the whole file in one lookup (not a full-table scan per row). Leads created
+        # by earlier rows of this file are added as we go, so in-file duplicates are still caught.
+        all_keys = [_keys(row) for _, row in prepared]
+        known = await self.lead_repository.duplicate_numbers(
+            {email for email, _ in all_keys if email}, {phone for _, phone in all_keys if phone}
+        )
+        assigned: dict[UUID, int] = {}
+
+        # One realtime event + one cache wipe for the whole import (not one per row).
+        async with bulk_side_effects():
+            for offset, row in prepared:
+                email_norm, phone_digits = _keys(row)
+                matched: list[int] = []
+                for key in (f"e:{email_norm}" if email_norm else None, f"p:{phone_digits}" if phone_digits else None):
+                    for number in known.get(key, []) if key else []:
+                        if number not in matched:
+                            matched.append(number)
+                if matched:
+                    matched.sort(reverse=True)
                     summary.duplicates.append(
                         ImportDuplicate(
                             row=offset,
                             contact_name=(row.get("contact_name") or "").strip() or None,
                             contact_email=(row.get("contact_email") or "").strip() or None,
                             contact_phone=(row.get("contact_phone") or "").strip() or None,
-                            matched=", ".join(f"#{d.lead_number}" for d in dups),
+                            matched=", ".join(f"#{n}" for n in matched[:_MAX_DUPLICATE_MATCHES]),
                             skipped=skip_duplicates,
                         )
                     )
@@ -208,41 +294,65 @@ class LeadImportService(ServiceBase):
                         summary.skipped += 1
                         continue
 
-            try:
-                created_lead_id, was_promoted = await self._import_row(
-                    row,
-                    columns=columns,
-                    actor_id=actor_id,
-                    actor_role=actor_role,
-                    industry=industry,
-                    initial_code=initial_code,
-                    allowed_currencies=allowed_currencies,
-                    stage_lookup=stage_lookup,
-                    campaign_policy=campaign_policy,
-                )
-            except ValidationError as exc:
-                summary.errors.append(ImportRowError(row=offset, error=exc.detail))
-                # Roll back any partial state from this row so the next row
-                # starts clean.
-                await self.session.rollback()
-                self.lead_service.forget_campaign_names()
-                continue
-            except AppException as exc:
-                summary.errors.append(ImportRowError(row=offset, error=exc.detail))
-                await self.session.rollback()
-                self.lead_service.forget_campaign_names()
-                continue
-            except Exception as exc:  # noqa: BLE001 — surface unknown errors per-row, don't kill the batch
-                summary.errors.append(ImportRowError(row=offset, error=f"Unexpected error: {exc}"))
-                await self.session.rollback()
-                self.lead_service.forget_campaign_names()
-                continue
+                error: str | None = None
+                try:
+                    result = await self._import_row(
+                        row,
+                        columns=columns,
+                        actor_id=actor_id,
+                        actor_role=actor_role,
+                        industry=industry,
+                        initial_code=initial_code,
+                        allowed_currencies=allowed_currencies,
+                        stage_lookup=stage_lookup,
+                        campaign_policy=campaign_policy,
+                    )
+                except AppException as exc:  # incl. our ValidationError — messages written for users
+                    error = _app_error_text(exc)
+                except PydanticValidationError as exc:
+                    error = _pydantic_error_text(exc, headers)
+                except DBAPIError:
+                    logger.warning("CSV import row %s rejected by the database", offset, exc_info=True)
+                    error = _ROW_DB_ERROR
+                except Exception:  # noqa: BLE001 — surface unknown errors per-row, don't kill the batch
+                    logger.exception("CSV import row %s failed", offset)
+                    error = f"Couldn't import this row (unexpected error, reference {request_id_context.get()})."
+                if error is not None:
+                    summary.errors.append(ImportRowError(row=offset, error=error))
+                    # Roll back any partial state from this row so the next row starts clean.
+                    await self.session.rollback()
+                    self.lead_service.forget_campaign_names()
+                    continue
 
-            summary.created += 1
-            if was_promoted:
-                summary.promoted += 1
+                summary.created += 1
+                if result.promoted:
+                    summary.promoted += 1
+                if result.stage_warning:
+                    summary.errors.append(ImportRowError(row=offset, error=result.stage_warning))
+                if result.assignee_id is not None:
+                    assigned[result.assignee_id] = assigned.get(result.assignee_id, 0) + 1
+                for key in (f"e:{email_norm}" if email_norm else None, f"p:{phone_digits}" if phone_digits else None):
+                    if key:
+                        known.setdefault(key, []).insert(0, result.lead_number)
 
+        await self._notify_assignees(assigned)
         return summary
+
+    async def _notify_assignees(self, assigned: dict[UUID, int]) -> None:
+        """One notification per assignee per request (a chunk, for big files — like bulk reassign), not one per lead."""
+        if not assigned:
+            return
+        try:
+            notifications = NotificationService(self.session)
+            for user_id, count in assigned.items():
+                await notifications.create_notification(
+                    user_id=user_id,
+                    message=f"{count} lead{'s' if count != 1 else ''} assigned to you (CSV import).",
+                )
+            await self.commit()
+        except Exception:  # noqa: BLE001 — the leads are already saved; a missed nudge must not fail the import
+            await self.session.rollback()
+            logger.warning("CSV import: assignee notifications failed", exc_info=True)
 
     # --- per-row work ------------------------------------------------------
 
@@ -258,7 +368,7 @@ class LeadImportService(ServiceBase):
         allowed_currencies: list[str],
         stage_lookup: dict[str, StageRef],
         campaign_policy: CampaignWritePolicy | None = None,
-    ) -> tuple[UUID, bool]:
+    ) -> _RowResult:
         contact_name = (row.get("contact_name") or "").strip()
         if not contact_name:
             raise ValidationError("contact_name is required.")
@@ -289,7 +399,9 @@ class LeadImportService(ServiceBase):
             raw_val = row.get(col.key)
             if col.kind == "decimal":
                 default = Decimal("0") if col.key == "value" else None
-                payload_kwargs[col.key] = self._parse_decimal(raw_val, field=col.header, default=default)
+                payload_kwargs[col.key] = self._parse_decimal(
+                    raw_val, field=col.header, default=default, max_abs=_decimal_limit(col.key)
+                )
             elif col.kind == "int":
                 payload_kwargs[col.key] = self._parse_int(raw_val, field=col.header, default=0, lo=0, hi=100)
             elif col.kind == "date":
@@ -310,18 +422,29 @@ class LeadImportService(ServiceBase):
             if "property_type" in payload_kwargs:
                 payload_kwargs["property_type"] = normalize_property_type(payload_kwargs["property_type"])
 
-        # Resolve the optional assignee by email → a user in this workspace.
+        # Resolve the optional assignee by email → a user in this workspace (once per email per import).
         owner_email = (row.get("owner_email") or "").strip().lower()
         if owner_email:
-            owner = await self.user_repository.get_by_email(owner_email)
-            org_id = current_org(self.session)
-            if owner is None or (org_id is not None and owner.organization_id != org_id):
+            if owner_email not in self._assignee_ids:
+                owner = await self.user_repository.get_by_email(owner_email)
+                org_id = current_org(self.session)
+                valid = owner is not None and (org_id is None or owner.organization_id == org_id)
+                self._assignee_ids[owner_email] = owner.id if valid else None
+            if self._assignee_ids[owner_email] is None:
                 raise ValidationError(
                     f"Assignee email '{owner_email}' does not match a user in your workspace."
                 )
-            payload_kwargs["assigned_to_id"] = owner.id
+            payload_kwargs["assigned_to_id"] = self._assignee_ids[owner_email]
 
         payload = LeadCreate(**payload_kwargs)
+
+        # Check the Stage BEFORE creating the lead, so an unknown or not-allowed stage is a plain row error
+        # instead of a lead that exists while its row is reported as failed.
+        target_stage = self._resolve_stage(row.get("stage"), stage_lookup, industry, default=initial_code)
+        if target_stage.code != initial_code and not can_set_stage(actor_role, target_stage.code):
+            raise ValidationError(
+                f"Stage: your role can't set '{target_stage.name}'. Leave Stage empty, or ask a manager to import this row."
+            )
 
         lead = await self.lead_service.create_lead(
             payload,
@@ -330,27 +453,40 @@ class LeadImportService(ServiceBase):
             assignment_source="import",
             campaign_policy=campaign_policy
             or CampaignWritePolicy.imported(can_manage=False, actor_id=actor_id),
+            notify_assignee=False,  # one summary per assignee at the end of the import
+            reload=False,
         )
+        # Plain values: a rollback below would expire the ORM object.
+        lead_id, lead_number, assignee_id = lead.id, lead.lead_number, lead.assigned_to_id
 
-        target_stage = self._resolve_stage(row.get("stage"), stage_lookup, industry, default=initial_code)
         was_promoted = False
+        stage_warning: str | None = None
         if target_stage.code != initial_code:
             # Move the lead to the requested stage via the regular transition
             # service so all side effects (comment log, realtime broadcast,
             # auto-promotion on Sold) fire identically to manual moves.
-            await self.transition_service.create_transition(
-                lead.id,
-                StageTransitionCreate(
-                    to_stage_code=target_stage.code,
-                    comment=f"Imported from CSV upload — initial stage set to {target_stage.name}.",
-                ),
-                actor_id=actor_id,
-                actor_role=actor_role,
-            )
-            if target_stage.code == "sold":
-                was_promoted = True
+            try:
+                await self.transition_service.create_transition(
+                    lead_id,
+                    StageTransitionCreate(
+                        to_stage_code=target_stage.code,
+                        comment=f"Imported from CSV upload — initial stage set to {target_stage.name}.",
+                    ),
+                    actor_id=actor_id,
+                    actor_role=actor_role,
+                )
+                was_promoted = target_stage.code == "sold"
+            except Exception as exc:  # noqa: BLE001 — the lead is saved; report the stage, don't call it failed
+                await self.session.rollback()
+                reason = _app_error_text(exc) if isinstance(exc, AppException) else "it couldn't be applied"
+                if not isinstance(exc, AppException):
+                    logger.warning("CSV import: stage move failed for lead %s", lead_id, exc_info=True)
+                stage_warning = (
+                    f"Lead #{lead_number} was created at the first stage, but stage '{target_stage.name}' "
+                    f"wasn't set: {reason}"
+                )
 
-        return lead.id, was_promoted
+        return _RowResult(lead_number, was_promoted, assignee_id, stage_warning)
 
     # --- helpers -----------------------------------------------------------
 
@@ -389,13 +525,20 @@ class LeadImportService(ServiceBase):
         text = str(value).strip()
         return text if text else None
 
-    def _parse_decimal(self, value: str | None, *, field: str, default: Decimal | None) -> Decimal | None:
+    def _parse_decimal(
+        self, value: str | None, *, field: str, default: Decimal | None, max_abs: Decimal | None = None
+    ) -> Decimal | None:
         if not value:
             return default
         try:
-            return Decimal(value.replace(",", ""))
+            parsed = Decimal(value.replace(",", ""))
         except (InvalidOperation, ValueError) as exc:
             raise ValidationError(f"{field} '{value}' is not a valid number.") from exc
+        if not parsed.is_finite():
+            raise ValidationError(f"{field} '{value}' is not a valid number.")
+        if max_abs is not None and abs(parsed) >= max_abs:
+            raise ValidationError(f"{field} '{value}' is too large.")
+        return parsed
 
     def _parse_int(self, value: str | None, *, field: str, default: int, lo: int, hi: int) -> int:
         if not value:

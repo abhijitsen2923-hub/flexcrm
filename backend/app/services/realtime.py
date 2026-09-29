@@ -11,6 +11,7 @@ from fastapi import WebSocket
 
 from app.core.config import get_settings
 from app.core.logging import get_logger
+from app.services.bulk_scope import pending_side_effects
 
 logger = get_logger(__name__)
 
@@ -85,6 +86,11 @@ class RealtimeManager:
         org = org_id if org_id is not None else _broadcast_org.get()
         if org is None:
             logger.debug("realtime broadcast dropped (no org context): %s", payload.get("event"))
+            return
+        bulk = pending_side_effects()
+        if bulk is not None:
+            # Inside a bulk write (CSV import): merged into one event per kind when the scope ends.
+            bulk.hold_event(org, payload)
             return
         envelope = self._make_envelope(payload)
         self._org_buffers[org].append(envelope)

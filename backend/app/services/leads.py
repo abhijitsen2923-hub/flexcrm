@@ -341,7 +341,11 @@ class LeadService(ServiceBase):
         background_tasks: BackgroundTasks | None = None,
         assignment_source: str = "created",
         campaign_policy: CampaignWritePolicy | None = None,
+        notify_assignee: bool = True,
+        reload: bool = True,
     ):
+        """`notify_assignee=False` / `reload=False` are for the CSV importer: it sends ONE summary notification
+        per assignee at the end, and doesn't need the eager-loaded copy of every lead it creates."""
         # customer_id is optional now: a Lead can be created with just contact
         # details, and a Customer row is materialized later when the lead hits
         # the Sold stage.
@@ -431,13 +435,14 @@ class LeadService(ServiceBase):
             actor_id=actor_id,
             source=assignment_source,
         )
-        if payload.assigned_to_id:
+        if payload.assigned_to_id and notify_assignee:
             await self._notify_assignee(
                 payload.assigned_to_id, f"Lead assigned: {payload.title}", payload.title, background_tasks
             )
         await self.commit()
         await self.invalidate_reporting_cache()
-        lead = await self.get_lead(lead.id)
+        if reload:
+            lead = await self.get_lead(lead.id)
         await realtime_manager.broadcast(
             {
                 "event": "lead.created",

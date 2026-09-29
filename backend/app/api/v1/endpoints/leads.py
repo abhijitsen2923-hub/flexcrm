@@ -1,6 +1,6 @@
 from uuid import UUID
 
-from fastapi import APIRouter, BackgroundTasks, Body, Depends, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, BackgroundTasks, Body, Depends, File, HTTPException, Query, UploadFile, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -320,6 +320,7 @@ async def download_import_template(
 async def import_leads_csv(
     file: UploadFile = File(..., description="CSV file. UTF-8, header row required."),
     skip_duplicates: bool = False,
+    row_offset: int = Query(default=0, ge=0, le=1_000_000, description="Data rows before this chunk (chunked uploads)"),
     current_user=Depends(require_permissions(PermissionCode.LEAD_IMPORT)),
     session: AsyncSession = Depends(get_db_session),
 ):
@@ -348,6 +349,7 @@ async def import_leads_csv(
         actor_role=current_user.role,
         actor_business_type=current_user.business_type,
         skip_duplicates=skip_duplicates,
+        row_offset=row_offset,
         # Rows are never rejected over their campaign: unknown names are added (flagged for review unless a
         # campaign manager uploaded).
         campaign_policy=CampaignWritePolicy.imported(
