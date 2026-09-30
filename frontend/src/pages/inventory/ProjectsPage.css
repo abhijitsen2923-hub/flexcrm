@@ -83,3 +83,55 @@
   color: var(--color-text-muted);
   font-size: 0.875rem;
 }
+
+/* Project form — Towers & units / Parking (ProjectInventoryEditor). */
+.inv-editor__tower {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  padding: 0.75rem;
+  background: var(--color-surface-muted);
+}
+.inv-editor__spec {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.4rem;
+  padding: 0.6rem;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+}
+.inv-editor__spec > .btn {
+  align-self: flex-start;
+}
+.inv-editor__spec-grid {
+  display: grid;
+  gap: var(--space-3);
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+}
+.inv-editor__more summary {
+  cursor: pointer;
+  color: var(--color-text-muted);
+}
+.inv-editor__more[open] summary {
+  margin-bottom: 0.5rem;
+}
+.inv-editor__adds {
+  color: var(--status-available);
+}
+.inv-editor__parking {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+.inv-editor__parking-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.75rem;
+  min-height: 2.25rem;
+}
+.inv-editor__parking-count {
+  width: 6.5rem;
+}

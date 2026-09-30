@@ -9,6 +9,7 @@ import type {
   UnitStatus,
   UnitType,
 } from "../types/realestate";
+import { inventoryCounts, type TowerCardPayload } from "../utils/projectInventory";
 
 // The API speaks snake_case and returns no computed inventory counts / media.
 // The app models are camelCase with totalUnits/availableUnits/media derived from
@@ -136,7 +137,7 @@ function mapTower(t: ApiTower): Tower {
 
 function mapProject(p: ApiProject): Project {
   const towers = (p.towers ?? []).map(mapTower);
-  const allUnits = towers.flatMap((t) => t.units);
+  const counts = inventoryCounts(towers);
   return {
     id: p.id,
     name: p.name,
@@ -168,8 +169,10 @@ function mapProject(p: ApiProject): Project {
       url: m.url,
       label: m.label,
     })),
-    totalUnits: allUnits.length,
-    availableUnits: allUnits.filter((u) => u.status === "available").length,
+    totalUnits: counts.units,
+    availableUnits: counts.unitsAvailable,
+    totalParking: counts.parking,
+    availableParking: counts.parkingAvailable,
     createdAt: p.created_at,
     updatedAt: p.updated_at,
   };
@@ -235,8 +238,25 @@ export interface ProjectTowerPayload {
   units?: UnitBatchPayload | null; // legacy single-spec (still accepted)
 }
 
+// Parking spots per type (MLP / CP / IP / OP), numbered per type across the whole project (CP01 …).
+export type ParkingCountsPayload = Partial<Record<GarageOption, number>>;
+
 export interface ProjectFullPayload extends ProjectCreatePayload {
   towers: ProjectTowerPayload[];
+  parking?: ParkingCountsPayload;
+}
+
+// Edit project → Save: the page's tower cards (existing ones carry tower_id) + parking counts. The server adds
+// only what's missing — never changes or removes existing units.
+export interface ProjectInventoryPayload {
+  towers: TowerCardPayload[];
+  parking: ParkingCountsPayload;
+}
+
+export interface ProjectInventoryResult {
+  project: Project;
+  created: { towers: number; units: number; parking: number };
+  notes: string[];
 }
 
 export interface ProjectUpdatePayload extends ProjectDetailsPayload {
@@ -307,6 +327,15 @@ export const inventoryService = {
   // Create a project + its towers + each tower's units in one atomic call.
   createProjectFull(payload: ProjectFullPayload): Promise<Project> {
     return apiClient.post<ApiProject>("/inventory/projects/full", payload).then((r) => mapProject(r.data));
+  },
+
+  syncProjectInventory(projectId: string, payload: ProjectInventoryPayload): Promise<ProjectInventoryResult> {
+    return apiClient
+      .post<{ project: ApiProject; created: ProjectInventoryResult["created"]; notes: string[] }>(
+        `/inventory/projects/${projectId}/inventory`,
+        payload
+      )
+      .then((r) => ({ project: mapProject(r.data.project), created: r.data.created, notes: r.data.notes }));
   },
 
   createTower(projectId: string, payload: TowerCreatePayload): Promise<Tower> {

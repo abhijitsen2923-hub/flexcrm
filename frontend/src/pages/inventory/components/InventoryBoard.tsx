@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useRealtimeRefresh } from "../../../realtime";
 import { formatInr } from "../../../utils/format";
 import type { Project, Tower, Unit, UnitStatus, UnitType } from "../../../types/realestate";
+import { PARKING_TYPE_LABEL, groupParkingByType, isParkingBlock } from "../../../utils/projectInventory";
 import { UnitDetailPanel } from "./UnitDetailPanel";
 import "./InventoryBoard.css";
 
@@ -39,15 +40,16 @@ function UnitCell({ unit, onClick }: UnitCellProps) {
 }
 
 interface FloorRowProps {
-  floor: number;
+  label: string;
+  title?: string;
   units: Unit[];
   onUnitClick: (unit: Unit) => void;
 }
 
-function FloorRow({ floor, units, onUnitClick }: FloorRowProps) {
+function FloorRow({ label, title, units, onUnitClick }: FloorRowProps) {
   return (
     <div className="inv-floor">
-      <span className="inv-floor__label">F{floor}</span>
+      <span className="inv-floor__label" title={title}>{label}</span>
       <div className="inv-floor__units">
         {units.map((u) => (
           <UnitCell key={u.id} unit={u} onClick={() => onUnitClick(u)} />
@@ -66,6 +68,34 @@ interface TowerGridProps {
 }
 
 function TowerGrid({ tower, projectName, filterFloor, typeFilter, onUnitClick }: TowerGridProps) {
+  const openUnit = (u: Unit) => onUnitClick({ ...u, towerName: tower.name, projectName });
+  // The project's parking block: one row per parking type (CP, OP …), not per floor.
+  if (isParkingBlock(tower.name)) {
+    const units = tower.units.filter(
+      (u) => (typeFilter === "all" || u.unitType === typeFilter) && (filterFloor == null || u.floor === filterFloor)
+    );
+    if (units.length === 0) return null;
+    const available = units.filter((u) => u.status === "available").length;
+    return (
+      <div className="inv-tower inv-tower--parking">
+        <h3 className="inv-tower__name">
+          {tower.name} <span className="inv-tower__count">{available} / {units.length} available</span>
+        </h3>
+        <div className="inv-tower__floors">
+          {groupParkingByType(units).map((group) => (
+            <FloorRow
+              key={group.label}
+              label={group.label}
+              title={group.label in PARKING_TYPE_LABEL ? PARKING_TYPE_LABEL[group.label as keyof typeof PARKING_TYPE_LABEL] : "Other parking"}
+              units={group.units}
+              onUnitClick={openUnit}
+            />
+          ))}
+        </div>
+      </div>
+    );
+  }
+
   const floorMap = new Map<number, Unit[]>();
   for (const unit of tower.units) {
     if (typeFilter !== "all" && unit.unitType !== typeFilter) continue;
@@ -83,12 +113,7 @@ function TowerGrid({ tower, projectName, filterFloor, typeFilter, onUnitClick }:
       <h3 className="inv-tower__name">{tower.name}</h3>
       <div className="inv-tower__floors">
         {floors.map((floor) => (
-          <FloorRow
-            key={floor}
-            floor={floor}
-            units={floorMap.get(floor)!}
-            onUnitClick={(u) => onUnitClick({ ...u, towerName: tower.name, projectName })}
-          />
+          <FloorRow key={floor} label={`F${floor}`} units={floorMap.get(floor)!} onUnitClick={openUnit} />
         ))}
       </div>
     </div>
@@ -142,8 +167,17 @@ export function InventoryBoard({ projects, onStatusChange, onRefresh, filterFloo
         <section key={project.id} className="inv-project">
           <div className="inv-project__header">
             <h2>{project.name}</h2>
-            <span className="inv-project__meta">{project.availableUnits} / {project.totalUnits} available</span>
+            <span className="inv-project__meta">
+              {project.availableUnits} / {project.totalUnits} units available
+              {project.totalParking > 0 && ` · ${project.availableParking} / ${project.totalParking} parking available`}
+            </span>
           </div>
+          {project.towers.every((t) => t.units.length === 0) && (
+            <p className="inv-project__empty">
+              No units yet — open Projects → Edit this project, enter each tower's flat size and price, and Save to
+              create them.
+            </p>
+          )}
           <div className="inv-project__towers">
             {project.towers.map((tower) => (
               <TowerGrid

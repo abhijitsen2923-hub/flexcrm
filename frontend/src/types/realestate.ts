@@ -71,8 +71,11 @@ export interface Project {
   demandSchedule: { label: string; percent: number; due_date: string }[] | null;
   towers: Tower[];
   media: ProjectMedia[];
+  // Inventory counts: units = everything except parking (flats, shops, godowns); parking counted apart.
   totalUnits: number;
   availableUnits: number;
+  totalParking: number;
+  availableParking: number;
   createdAt: string;
   updatedAt: string;
 }

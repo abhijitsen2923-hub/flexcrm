@@ -24,6 +24,16 @@
   font-weight: 600;
   margin: 0 0 var(--space-3);
 }
+.heatmap-project__meta {
+  font-size: 0.8rem;
+  font-weight: 400;
+  color: var(--color-text-muted);
+}
+.heatmap-project__empty {
+  margin: 0 0 var(--space-3);
+  font-size: 0.85rem;
+  color: var(--color-text-muted);
+}
 .heatmap-project__towers {
   display: flex;
   gap: var(--space-6);

@@ -68,8 +68,14 @@
 
 .inv-project__header {
   display: flex;
+  flex-wrap: wrap;
   align-items: baseline;
   gap: var(--space-3);
+}
+.inv-project__empty {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--color-text-muted);
 }
 .inv-project__header h2 {
   font-size: 1.1rem;
@@ -100,6 +106,17 @@
   text-transform: uppercase;
   letter-spacing: 0.05em;
   margin: 0 0 var(--space-3);
+}
+/* The project's parking block wraps its rows (it can hold hundreds of spots) instead of widening the board. */
+.inv-tower--parking {
+  flex-shrink: 1;
+  max-width: 36rem;
+}
+.inv-tower__count {
+  margin-left: var(--space-2);
+  font-weight: 500;
+  text-transform: none;
+  letter-spacing: 0;
 }
 .inv-tower__floors {
   display: flex;

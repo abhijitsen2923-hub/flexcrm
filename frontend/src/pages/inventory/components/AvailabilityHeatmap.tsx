@@ -1,4 +1,5 @@
 import type { Project, Tower } from "../../../types/realestate";
+import { PARKING_TYPE_LABEL, groupParkingByType, isParkingBlock } from "../../../utils/projectInventory";
 import "./AvailabilityHeatmap.css";
 
 interface Props {
@@ -15,7 +16,36 @@ function heatColor(ratio: number): string {
   return `rgb(${r},${g},${b})`;
 }
 
+// The parking block: one cell per parking type (CP, OP …); a click filters the board to its level (floor 0).
+function ParkingHeatmap({ tower, onFloorClick }: { tower: Tower; onFloorClick: (f: number) => void }) {
+  return (
+    <div className="heatmap-tower">
+      <h4 className="heatmap-tower__name">{tower.name}</h4>
+      <div className="heatmap-tower__grid">
+        {groupParkingByType(tower.units).map(({ label, units }) => {
+          const available = units.filter((u) => u.status === "available").length;
+          const name = label in PARKING_TYPE_LABEL ? PARKING_TYPE_LABEL[label as keyof typeof PARKING_TYPE_LABEL] : "Other parking";
+          return (
+            <button
+              key={label}
+              className="heatmap-cell"
+              style={{ background: heatColor(units.length > 0 ? available / units.length : 0) }}
+              onClick={() => onFloorClick(units[0]?.floor ?? 0)}
+              title={`${name}: ${available}/${units.length} available`}
+              aria-label={`${name}, ${available} of ${units.length} spots available`}
+            >
+              <span className="heatmap-cell__floor">{label}</span>
+              <span className="heatmap-cell__count">{available}/{units.length}</span>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function TowerHeatmap({ tower, onFloorClick, selectedFloor }: { tower: Tower; onFloorClick: (f: number) => void; selectedFloor: number | null }) {
+  if (isParkingBlock(tower.name)) return <ParkingHeatmap tower={tower} onFloorClick={onFloorClick} />;
   const floorMap = new Map<number, { total: number; available: number }>();
   for (const unit of tower.units) {
     const entry = floorMap.get(unit.floor) ?? { total: 0, available: 0 };
@@ -65,7 +95,16 @@ export function AvailabilityHeatmap({ projects, onFloorClick, selectedFloor }: P
 
       {projects.map((project) => (
         <section key={project.id} className="heatmap-project">
-          <h3 className="heatmap-project__name">{project.name}</h3>
+          <h3 className="heatmap-project__name">
+            {project.name}{" "}
+            <span className="heatmap-project__meta">
+              {project.availableUnits} / {project.totalUnits} units available
+              {project.totalParking > 0 && ` · ${project.availableParking} / ${project.totalParking} parking`}
+            </span>
+          </h3>
+          {project.towers.every((t) => t.units.length === 0) && (
+            <p className="heatmap-project__empty">No units yet — add them from Projects → Edit project.</p>
+          )}
           <div className="heatmap-project__towers">
             {project.towers.map((tower) => (
               <TowerHeatmap

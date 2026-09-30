@@ -113,7 +113,7 @@ export function UnitDetailPanel({ unit, onClose, onStatusChange, onStartBooking 
           </div>
           <div className="unit-panel__field">
             <span className="unit-panel__label">Super built-up area</span>
-            <span>{unit.area} {unit.areaUnit}</span>
+            <span>{unit.area > 0 ? `${unit.area} ${unit.areaUnit}` : "—"}</span>
           </div>
           {unit.carpetArea != null && (
             <div className="unit-panel__field">
