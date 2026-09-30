@@ -25,6 +25,16 @@ from app.real_estate.documents import (
     render_payment_receipt,
     render_token_receipt,
 )
+from app.real_estate.inventory_layout import (
+    MAX_NEW_UNITS_PER_SAVE,
+    PARKING_BLOCK_NAME,
+    ExistingUnit,
+    NewUnit,
+    is_parking_block,
+    number_units,
+    plan_parking,
+    plan_tower_units,
+)
 from app.real_estate.models import (
     Booking,
     BookingInvoice,
@@ -63,11 +73,14 @@ from app.real_estate.schemas import (
     PricingUpdate,
     ProjectCreate,
     ProjectFullCreate,
+    ProjectInventorySync,
+    ProjectInventorySyncResult,
     ProjectMediaRead,
     ProjectPossessionRollup,
     ProjectPossessionSummary,
     ProjectPossessionUnit,
     ProjectRead,
+    ProjectTowerCreate,
     ProjectUpdate,
     ProjectWithTowersRead,
     SiteVisitCreate,
@@ -187,68 +200,263 @@ async def create_project_full(
     _: object = Depends(require_permissions(PermissionCode.LEAD_MANAGE)),
     session: AsyncSession = Depends(get_db_session),
 ):
-    """Create a project + its towers + each tower's units atomically (combined
-    Add-Project wizard). All-or-nothing: a failure rolls the whole thing back."""
-    # Everything except the nested towers maps 1:1 onto Project columns (incl. the
+    """Create a project + its towers + each tower's units + its parking atomically (the one-page project
+    form). All-or-nothing: a failure rolls the whole thing back."""
+    # Everything except the nested towers/parking maps 1:1 onto Project columns (incl. the
     # Phase-B detail + default box-price fields).
-    data = payload.model_dump(exclude={"towers"})
+    data = payload.model_dump(exclude={"towers", "parking"})
     data["demand_schedule"] = _json_demand_schedule(data.get("demand_schedule"))
+    _check_tower_names([t.name for t in payload.towers])
+    tower_plans = [(t, plan_tower_units(t.name.strip(), _tower_specs(t), [])) for t in payload.towers]
+    planned_numbers = {n.unit_number for _, plan in tower_plans for n in plan.new}
+    parking_plan = plan_parking(payload.parking, [], planned_numbers)
+    _check_new_unit_cap(sum(len(plan.new) for _, plan in tower_plans) + len(parking_plan.new))
+
     project = Project(**data)
     session.add(project)
     await session.flush()
-
-    for tspec in payload.towers:
-        tower = Tower(project_id=project.id, name=tspec.name, total_floors=tspec.total_floors)
+    for tspec, plan in tower_plans:
+        tower = Tower(project_id=project.id, name=tspec.name.strip(), total_floors=tspec.total_floors)
         session.add(tower)
         await session.flush()
-        # A tower can carry several unit-type batches (residential + shop + parking …).
-        # Number units per (prefix, floor) with a running counter shared ACROSS batches, so
-        # two same-prefix specs (e.g. 2BHK + 3BHK, both default prefix "R") continue the
-        # sequence (…R102 then R103…) instead of both restarting at R101 — units.unit_number
-        # has no DB-level uniqueness, so collisions must be prevented here. Counters reset
-        # per tower (R101 may legitimately exist in another tower).
-        specs = list(tspec.unit_specs)
-        if tspec.units is not None:
-            specs.append(tspec.units)
-        seq: dict[tuple[str, int], int] = {}
-        used: set[str] = set()
-        for u in specs:
-            prefix = (u.unit_prefix or _TYPE_PREFIX.get(u.unit_type, "U")).strip()
-            for fu in u.floors:
-                for _ in range(fu.count):
-                    n = seq.get((prefix, fu.floor), 0) + 1
-                    unit_number = f"{prefix}{fu.floor}{n:02d}"
-                    while unit_number in used:  # belt-and-braces vs any residual overlap
-                        n += 1
-                        unit_number = f"{prefix}{fu.floor}{n:02d}"
-                    seq[(prefix, fu.floor)] = n
-                    used.add(unit_number)
-                    session.add(
-                        Unit(
-                            project_id=project.id,
-                            tower_id=tower.id,
-                            floor=fu.floor,
-                            unit_number=unit_number,
-                            unit_type=u.unit_type.value,
-                            area=u.area,
-                            carpet_area=u.carpet_area,
-                            built_up_area=u.built_up_area,
-                            base_price=u.base_price,
-                            area_unit=u.area_unit,
-                            facing=u.facing,
-                            status=UnitStatus.available,
-                        )
-                    )
+        _add_units(session, project.id, tower.id, plan.new)
+    if parking_plan.new:
+        block = Tower(project_id=project.id, name=PARKING_BLOCK_NAME, total_floors=1)
+        session.add(block)
+        await session.flush()
+        _add_parking(session, project, block.id, parking_plan.new)
+    _apply_built_totals(
+        project,
+        [t.total_floors for t in payload.towers],
+        len(parking_plan.new)
+        + sum(1 for _, plan in tower_plans for n in plan.new if n.spec.unit_type == UnitType.parking),
+    )
+    await session.commit()
+    return await _load_project_with_inventory(session, project.id)
+
+
+@router.post("/inventory/projects/{project_id}/inventory", response_model=ProjectInventorySyncResult)
+async def sync_project_inventory(
+    project_id: UUID,
+    payload: ProjectInventorySync,
+    _: object = Depends(require_permissions(PermissionCode.LEAD_MANAGE)),
+    session: AsyncSession = Depends(get_db_session),
+):
+    """Edit project → Save: add the towers, units and parking the page describes that don't exist yet.
+
+    Additive and idempotent (see inventory_layout): saving the same page twice creates nothing the second time,
+    and existing units — with any booking on them — are never changed or removed. Tower cards are matched by
+    `tower_id`, else by name, so a double-click or a stale tab can't create a second copy of a tower."""
+    # Lock the project row: two Saves at once (double-click, two tabs) would both see the same gap and fill it.
+    project = (
+        await session.execute(select(Project).where(Project.id == project_id).with_for_update())
+    ).scalar_one_or_none()
+    if not project or project.is_deleted:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    towers = list(
+        (
+            await session.execute(
+                select(Tower)
+                .where(Tower.project_id == project_id, Tower.is_deleted.is_(False))
+                .order_by(Tower.created_at, Tower.name)
+            )
+        ).scalars()
+    )
+    # Every unit of the project, archived ones included (they count toward the layout and keep their numbers).
+    units = (
+        await session.execute(
+            select(Unit.tower_id, Unit.unit_number, Unit.unit_type, Unit.floor, Unit.is_deleted).where(
+                Unit.project_id == project_id
+            )
+        )
+    ).all()
+    by_id = {t.id: t for t in towers}
+    live_tower_ids = set(by_id)
+
+    _check_tower_names([card.name for card in payload.towers])
+    claimed: set[UUID] = set()
+    for card in payload.towers:
+        if card.tower_id is None:
+            continue
+        tower = by_id.get(card.tower_id)
+        if tower is None or is_parking_block(tower.name):
+            raise HTTPException(
+                status_code=404,
+                detail="A tower on this page no longer exists (it may have been archived). Reload the page and try again.",
+            )
+        if card.tower_id in claimed:
+            raise HTTPException(status_code=422, detail=f"The tower “{tower.name}” appears twice on this page.")
+        claimed.add(card.tower_id)
+    unclaimed_by_name = {
+        t.name.strip().casefold(): t for t in towers if t.id not in claimed and not is_parking_block(t.name)
+    }
+
+    def existing_in(tower_id: UUID) -> list[ExistingUnit]:
+        return [
+            ExistingUnit(unit_number=u.unit_number, unit_type=u.unit_type, floor=u.floor, archived=u.is_deleted)
+            for u in units
+            if u.tower_id == tower_id
+        ]
+
+    plans = []
+    for card in payload.towers:
+        name = card.name.strip()
+        tower = by_id[card.tower_id] if card.tower_id else unclaimed_by_name.pop(name.casefold(), None)
+        plans.append((card, tower, plan_tower_units(name, _tower_specs(card), existing_in(tower.id) if tower else [])))
+
+    project_numbers = {u.unit_number for u in units} | {n.unit_number for _, _, plan in plans for n in plan.new}
+    parking_plan = plan_parking(
+        payload.parking,
+        [
+            ExistingUnit(unit_number=u.unit_number, unit_type=u.unit_type, floor=u.floor, archived=u.is_deleted)
+            for u in units
+            if u.unit_type == UnitType.parking.value and u.tower_id in live_tower_ids
+        ],
+        project_numbers,
+    )
+    new_tower_units = sum(len(plan.new) for _, _, plan in plans)
+    _check_new_unit_cap(new_tower_units + len(parking_plan.new))
+
+    notes: list[str] = []
+    created_towers = 0
+    for card, tower, plan in plans:
+        name = card.name.strip()
+        if tower is None:
+            tower = Tower(project_id=project.id, name=name, total_floors=card.total_floors)
+            session.add(tower)
+            await session.flush()
+            towers.append(tower)
+            created_towers += 1
+        else:
+            top_floor = max((u.floor for u in units if u.tower_id == tower.id and not u.is_deleted), default=0)
+            if card.total_floors < top_floor:
+                notes.append(f"{name}: kept {top_floor} floors — it has units up to floor {top_floor}.")
+            tower.name = name
+            tower.total_floors = max(card.total_floors, top_floor)
+        notes.extend(plan.notes)
+        _add_units(session, project.id, tower.id, plan.new)
+
+    notes.extend(parking_plan.notes)
+    if parking_plan.new:
+        block = next((t for t in towers if is_parking_block(t.name)), None)
+        if block is None:
+            block = Tower(project_id=project.id, name=PARKING_BLOCK_NAME, total_floors=1)
+            session.add(block)
+            await session.flush()
+            towers.append(block)
+        _add_parking(session, project, block.id, parking_plan.new)
+
+    parking_spots = (
+        sum(
+            1
+            for u in units
+            if u.unit_type == UnitType.parking.value and not u.is_deleted and u.tower_id in live_tower_ids
+        )
+        + sum(1 for _, _, plan in plans for n in plan.new if n.spec.unit_type == UnitType.parking)
+        + len(parking_plan.new)
+    )
+    _apply_built_totals(project, [t.total_floors for t in towers if not is_parking_block(t.name)], parking_spots)
     await session.commit()
 
+    return {
+        "project": ProjectWithTowersRead.model_validate(await _load_project_with_inventory(session, project.id)),
+        "created": {"towers": created_towers, "units": new_tower_units, "parking": len(parking_plan.new)},
+        "notes": notes,
+    }
+
+
+def _tower_specs(card: ProjectTowerCreate) -> list[UnitBatchCreate]:
+    # A tower can carry several unit-type batches (residential + shop + godown …); `units` is the legacy single one.
+    return list(card.unit_specs) + ([card.units] if card.units is not None else [])
+
+
+def _check_tower_names(names: list[str]) -> None:
+    seen: set[str] = set()
+    for raw in names:
+        name = raw.strip()
+        if not name:
+            raise HTTPException(status_code=422, detail="Every tower needs a name.")
+        if is_parking_block(name):
+            raise HTTPException(
+                status_code=422,
+                detail=f"“{PARKING_BLOCK_NAME}” is kept for the project's parking — give this tower another name.",
+            )
+        if name.casefold() in seen:
+            raise HTTPException(status_code=422, detail=f"Two towers are named “{name}” — give each tower its own name.")
+        seen.add(name.casefold())
+
+
+def _check_new_unit_cap(count: int) -> None:
+    if count > MAX_NEW_UNITS_PER_SAVE:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"This would create {count:,} units — more than {MAX_NEW_UNITS_PER_SAVE:,} in one save. "
+                "Check the floors, flats per floor and parking counts."
+            ),
+        )
+
+
+def _add_units(session: AsyncSession, project_id: UUID, tower_id: UUID, new_units: list[NewUnit]) -> None:
+    for new in new_units:
+        spec = new.spec
+        session.add(
+            Unit(
+                project_id=project_id,
+                tower_id=tower_id,
+                floor=new.floor,
+                unit_number=new.unit_number,
+                unit_type=spec.unit_type.value,
+                area=spec.area,
+                carpet_area=spec.carpet_area,
+                built_up_area=spec.built_up_area,
+                base_price=spec.base_price,
+                area_unit=spec.area_unit,
+                facing=spec.facing,
+                status=UnitStatus.available,
+            )
+        )
+
+
+def _add_parking(session: AsyncSession, project: Project, block_id: UUID, spots: list[tuple[str, str]]) -> None:
+    # A spot has no area; its price is the project's parking cost (editable per spot later).
+    for _parking_type, number in spots:
+        session.add(
+            Unit(
+                project_id=project.id,
+                tower_id=block_id,
+                floor=0,
+                unit_number=number,
+                unit_type=UnitType.parking.value,
+                area=Decimal("0"),
+                base_price=project.parking_cost or Decimal("0"),
+                area_unit="sqft",
+                status=UnitStatus.available,
+            )
+        )
+
+
+def _apply_built_totals(project: Project, tower_floors: list[int], parking_spots: int) -> None:
+    """Keep the project's headline numbers in step with the inventory that exists. A number is only overwritten
+    once something of that kind is built — a project whose inventory isn't set up yet keeps what it was given."""
+    if tower_floors:
+        project.total_towers = len(tower_floors)
+        project.total_floors = max(tower_floors)
+    if parking_spots:
+        project.total_garages = parking_spots
+
+
+async def _load_project_with_inventory(session: AsyncSession, project_id: UUID) -> Project:
     stmt = (
         select(Project)
-        .where(Project.id == project.id, Project.is_deleted.is_(False))
+        .where(Project.id == project_id, Project.is_deleted.is_(False))
         .options(
             selectinload(Project.towers.and_(Tower.is_deleted.is_(False)))
             .selectinload(Tower.units.and_(Unit.is_deleted.is_(False))),
             selectinload(Project.media),
         )
+        .execution_options(populate_existing=True)
     )
     return (await session.execute(stmt)).scalar_one()
 
@@ -415,15 +623,6 @@ async def delete_project_media(
 # Inventory — towers + units (creation)
 # ---------------------------------------------------------------------------
 
-# Default unit-number prefix per type when the caller doesn't supply one.
-_TYPE_PREFIX = {
-    UnitType.residential: "R",
-    UnitType.parking: "P",
-    UnitType.shop: "S",
-    UnitType.godown: "G",
-}
-
-
 @router.post(
     "/inventory/projects/{project_id}/towers",
     response_model=TowerRead,
@@ -436,7 +635,7 @@ async def create_tower(
     session: AsyncSession = Depends(get_db_session),
 ):
     project = await session.get(Project, project_id)
-    if not project:
+    if not project or project.is_deleted:
         raise HTTPException(status_code=404, detail="Project not found")
     tower = Tower(project_id=project_id, name=payload.name, total_floors=payload.total_floors)
     session.add(tower)
@@ -457,29 +656,19 @@ async def create_units_batch(
     _: object = Depends(require_permissions(PermissionCode.LEAD_MANAGE)),
     session: AsyncSession = Depends(get_db_session),
 ):
-    tower = await session.get(Tower, tower_id)
-    if not tower:
+    # Locked so two batches at once can't hand out the same numbers.
+    tower = (await session.execute(select(Tower).where(Tower.id == tower_id).with_for_update())).scalar_one_or_none()
+    if not tower or tower.is_deleted:
         raise HTTPException(status_code=404, detail="Tower not found")
+    project = await session.get(Project, tower.project_id)
+    if not project or project.is_deleted:
+        raise HTTPException(status_code=404, detail="Project not found")
 
-    prefix = (payload.unit_prefix or _TYPE_PREFIX.get(payload.unit_type, "U")).strip()
-    for fu in payload.floors:
-        for n in range(1, fu.count + 1):
-            session.add(
-                Unit(
-                    project_id=tower.project_id,
-                    tower_id=tower.id,
-                    floor=fu.floor,
-                    unit_number=f"{prefix}{fu.floor}{n:02d}",
-                    unit_type=payload.unit_type.value,
-                    area=payload.area,
-                    carpet_area=payload.carpet_area,
-                    built_up_area=payload.built_up_area,
-                    base_price=payload.base_price,
-                    area_unit=payload.area_unit,
-                    facing=payload.facing,
-                    status=UnitStatus.available,
-                )
-            )
+    # Always adds: numbered after every unit the tower already has (archived included), never a duplicate.
+    used = set((await session.execute(select(Unit.unit_number).where(Unit.tower_id == tower_id))).scalars())
+    new_units = number_units(payload, used)
+    _check_new_unit_cap(len(new_units))
+    _add_units(session, tower.project_id, tower.id, new_units)
     await session.commit()
     # Return the tower's units freshly loaded (avoids per-object refresh after commit).
     stmt = (

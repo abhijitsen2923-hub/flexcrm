@@ -1,7 +1,7 @@
 """Real estate Pydantic schemas."""
 from datetime import date, datetime
 from decimal import Decimal
-from typing import Literal
+from typing import Annotated, Literal
 from uuid import UUID
 
 from pydantic import Field, computed_field
@@ -204,10 +204,41 @@ class ProjectTowerCreate(ORMModel):
     units: UnitBatchCreate | None = None  # legacy single-spec — still honoured
 
 
+# Parking spots per type (Multi-Level / Covered / Independent / Open), numbered per type across the whole
+# project (CP01, CP02 … OP01 …) regardless of tower.
+ParkingCounts = dict[GarageOption, Annotated[int, Field(ge=0, le=5000)]]
+
+
 class ProjectFullCreate(ProjectCreate):
     """Create a project together with its towers and each tower's units in one
     atomic call (the combined Add-Project wizard)."""
     towers: list[ProjectTowerCreate] = Field(default_factory=list)
+    parking: ParkingCounts = Field(default_factory=dict)
+
+
+class ProjectTowerSync(ProjectTowerCreate):
+    """A tower card on the project page: an existing tower (`tower_id`) or a new one. Its unit specs are the
+    TARGET layout — saving adds only the units that are missing."""
+    tower_id: UUID | None = None
+
+
+class ProjectInventorySync(ORMModel):
+    """Edit project → Save: bring the project's inventory up to the page's layout. Additive only: units that
+    exist (and any booking on them) are never changed or removed."""
+    towers: list[ProjectTowerSync] = Field(default_factory=list)
+    parking: ParkingCounts = Field(default_factory=dict)
+
+
+class InventoryCreatedCounts(ORMModel):
+    towers: int = 0
+    units: int = 0
+    parking: int = 0
+
+
+class ProjectInventorySyncResult(ORMModel):
+    project: ProjectWithTowersRead
+    created: InventoryCreatedCounts
+    notes: list[str] = []
 
 
 class SiteVisitProjectMini(ORMModel):
