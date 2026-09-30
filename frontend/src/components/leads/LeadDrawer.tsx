@@ -1,5 +1,5 @@
 import { ArrowRight, Mail, MessageCircle, Phone, Sparkles, X } from "lucide-react";
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 
 import { Badge, Button, LoadingBlock, EmptyState, useToast } from "../../components";
@@ -11,13 +11,24 @@ import { usePermissions } from "../../hooks/usePermissions";
 import { callsService, type ExternalCall } from "../../services/callyzer";
 import { leadsService } from "../../services/leads";
 import { siteVisitsService } from "../../services/site-visits";
-import type { Lead, LeadAssignmentEvent, LeadCallLog, PipelineStage, StageTransition } from "../../types";
+import type {
+  Lead,
+  LeadAssignmentEvent,
+  LeadCallLog,
+  LeadIntent,
+  LeadIntentChange,
+  PipelineStage,
+  StageTransition
+} from "../../types";
 import type { SiteVisit } from "../../types/realestate";
 import { mailtoHref, telHref, whatsAppHref } from "../../utils/contactLinks";
 import { extractErrorMessage } from "../../utils/errors";
 import { formatCurrency, formatDate, formatDateTime, formatRelative } from "../../utils/format";
 import { industryInterestLabel, pipelineCategoryTone, titleCase } from "../../utils/options";
+import { INTENT_LABEL, intentSourceLabel, isIntentLocked } from "../../utils/leadIntent";
 import { canSetStage } from "../../utils/stageAccess";
+import { IntentBadge } from "./IntentBadge";
+import { IntentSlider } from "./IntentSlider";
 import { LeadBookingsTab } from "./LeadBookingsTab";
 import { actorName, assignmentSourceLabel, buildLeadTimeline } from "./leadHistoryTimeline";
 
@@ -67,9 +78,98 @@ export function LeadDrawer({ open, lead, onClose, onTransitionRequest, onLogged,
   const [history, setHistory] = useState<StageTransition[]>([]);
   // Owner changes (from → to), merged into the Stage History timeline.
   const [ownerEvents, setOwnerEvents] = useState<LeadAssignmentEvent[]>([]);
+  // Intent changes made in the lead details (shown in the same timeline).
+  const [intentChanges, setIntentChanges] = useState<LeadIntentChange[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyError, setHistoryError] = useState(false);
-  const timeline = useMemo(() => buildLeadTimeline(history, ownerEvents), [history, ownerEvents]);
+  const timeline = useMemo(
+    () => buildLeadTimeline(history, ownerEvents, intentChanges),
+    [history, ownerEvents, intentChanges]
+  );
+  // Quick intent change in the header. The slider shows the user's latest pick (for that lead) until the lead
+  // itself reflects it — never snapping back while a newer pick is still waiting or saving.
+  const [intentOverride, setIntentOverride] = useState<{ leadId: string; intent: LeadIntent } | null>(null);
+  // Inline status under the slider (a toast would sit over the drawer's corner, right where it is).
+  const [intentStatus, setIntentStatus] = useState<"idle" | "saving" | "saved">("idle");
+  const currentLeadId = useRef<string | null>(null);
+  currentLeadId.current = lead?.id ?? null;
+  // A drag passes Low → Medium → High: one save, shortly after the last change (flushed if the drawer closes
+  // or switches lead first). Saves run one after another, so they reach the server in the order picked.
+  const pendingIntent = useRef<{ leadId: string; intent: LeadIntent; timer: ReturnType<typeof setTimeout> } | null>(null);
+  const saveChain = useRef<Promise<void>>(Promise.resolve());
+  const savesInFlight = useRef(0);
+  const onLoggedRef = useRef(onLogged);
+  onLoggedRef.current = onLogged;
+  const toastRef = useRef(toast);
+  toastRef.current = toast;
+
+  function queueIntentSave(leadId: string, next: LeadIntent) {
+    savesInFlight.current += 1;
+    if (currentLeadId.current === leadId) setIntentStatus("saving");
+    saveChain.current = saveChain.current.then(async () => {
+      try {
+        await leadsService.setIntent(leadId, next);
+        const last = savesInFlight.current === 1 && !pendingIntent.current;
+        if (currentLeadId.current === leadId && last) setIntentStatus("saved");
+        // The parent refreshes the list; the new updated_at reloads this drawer's history.
+        onLoggedRef.current?.();
+      } catch (err) {
+        // Only touch the display if this lead is still the one open.
+        if (currentLeadId.current === leadId) {
+          setIntentOverride(null);
+          setIntentStatus("idle");
+        }
+        toastRef.current.error("Couldn't change intent", extractErrorMessage(err));
+      } finally {
+        savesInFlight.current -= 1;
+      }
+    });
+  }
+
+  function changeIntent(next: LeadIntent) {
+    if (!lead) return;
+    const leadId = lead.id;
+    setIntentOverride({ leadId, intent: next });
+    setIntentStatus("idle");
+    if (pendingIntent.current) clearTimeout(pendingIntent.current.timer);
+    pendingIntent.current = {
+      leadId,
+      intent: next,
+      timer: setTimeout(() => {
+        pendingIntent.current = null;
+        queueIntentSave(leadId, next);
+      }, 500),
+    };
+  }
+
+  const queueIntentSaveRef = useRef(queueIntentSave);
+  queueIntentSaveRef.current = queueIntentSave;
+  useEffect(() => {
+    setIntentStatus("idle");
+    return () => {
+      // Closing the drawer / opening another lead: send a pick that was still waiting.
+      const pending = pendingIntent.current;
+      if (pending) {
+        clearTimeout(pending.timer);
+        pendingIntent.current = null;
+        queueIntentSaveRef.current(pending.leadId, pending.intent);
+      }
+    };
+  }, [lead?.id, open]);
+
+  // The lead caught up with the pick (and nothing newer is waiting or saving) → show the lead's own value.
+  useEffect(() => {
+    if (
+      intentOverride &&
+      lead &&
+      intentOverride.leadId === lead.id &&
+      (lead.intent ?? null) === intentOverride.intent &&
+      !pendingIntent.current &&
+      savesInFlight.current === 0
+    ) {
+      setIntentOverride(null);
+    }
+  }, [lead, intentOverride]);
   const [calls, setCalls] = useState<LeadCallLog[]>([]);
   const [visits, setVisits] = useState<SiteVisit[]>([]);
   const [visitsLoading, setVisitsLoading] = useState(false);
@@ -101,9 +201,12 @@ export function LeadDrawer({ open, lead, onClose, onTransitionRequest, onLogged,
     window.addEventListener("keydown", handler);
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
+    // Toasts move beside the drawer (desktop), so they never cover its header — incl. the intent slider.
+    document.body.classList.add("has-lead-drawer");
     return () => {
       window.removeEventListener("keydown", handler);
       document.body.style.overflow = previousOverflow;
+      document.body.classList.remove("has-lead-drawer");
     };
   }, [open, onClose]);
 
@@ -111,6 +214,7 @@ export function LeadDrawer({ open, lead, onClose, onTransitionRequest, onLogged,
     if (!open || !lead) {
       setHistory([]);
       setOwnerEvents([]);
+      setIntentChanges([]);
       return;
     }
     let cancelled = false;
@@ -118,14 +222,16 @@ export function LeadDrawer({ open, lead, onClose, onTransitionRequest, onLogged,
     setHistoryError(false);
     void (async () => {
       try {
-        const [rows, events] = await Promise.all([
+        const [rows, events, intents] = await Promise.all([
           leadsService.transitions(lead.id),
-          // Owner history is additive — if it fails, still show the stage history.
+          // Owner and intent history are additive — if one fails, still show the stage history.
           leadsService.assignments(lead.id).catch(() => [] as LeadAssignmentEvent[]),
+          leadsService.intentChanges(lead.id).catch(() => [] as LeadIntentChange[]),
         ]);
         if (!cancelled) {
           setHistory(rows);
           setOwnerEvents(events);
+          setIntentChanges(intents);
         }
       } catch {
         if (!cancelled) setHistoryError(true);
@@ -281,6 +387,10 @@ export function LeadDrawer({ open, lead, onClose, onTransitionRequest, onLogged,
 
   const stages = byIndustry[lead.industry];
   const currentStage = getStage(lead.industry, lead.stage_code);
+  // Intent is fixed from "Booked / Token" onward and on a closed stage (read-only there).
+  const intentLocked = isIntentLocked(currentStage, stages ?? []);
+  const shownIntent: LeadIntent | null =
+    intentOverride && intentOverride.leadId === lead.id ? intentOverride.intent : lead.intent ?? null;
   const interestLabel = industryInterestLabel(lead.industry);
   const isRealEstate = lead.industry === "real_estate";
   const tabs: TabKey[] = isRealEstate
@@ -307,7 +417,7 @@ export function LeadDrawer({ open, lead, onClose, onTransitionRequest, onLogged,
     <div className="modal-backdrop" role="dialog" aria-modal="true">
       <div className="drawer">
         <header className="drawer__header">
-          <div>
+          <div className="drawer__title">
             <div className="muted text-xs">Lead #{lead.lead_number}</div>
             <h2 style={{ marginTop: "0.25rem" }}>{lead.contact_name || lead.title}</h2>
             {lead.contact_name && lead.title && (
@@ -318,10 +428,36 @@ export function LeadDrawer({ open, lead, onClose, onTransitionRequest, onLogged,
               <Badge tone={currentStage ? pipelineCategoryTone(currentStage.category) : "neutral"}>
                 {currentStage?.name ?? lead.stage_code}
               </Badge>
+              <IntentBadge intent={shownIntent} suffix=" intent" />
               <span className="muted text-sm">
                 Owner: {lead.assigned_to ? `${lead.assigned_to.first_name} ${lead.assigned_to.last_name}` : "Unassigned"}
               </span>
             </div>
+          </div>
+          {/* Intent in the top-right corner: changeable here without moving the stage (fixed from Booked on). */}
+          <div className="drawer__intent">
+            {canManageVisits && !intentLocked ? (
+              <IntentSlider
+                id="drawer-intent"
+                value={shownIntent}
+                onChange={changeIntent}
+                hint={
+                  intentStatus === "saving"
+                    ? "Saving…"
+                    : intentStatus === "saved" && shownIntent
+                      ? `Saved — ${INTENT_LABEL[shownIntent]} intent`
+                      : "Change without moving the stage"
+                }
+              />
+            ) : (
+              <IntentSlider
+                id="drawer-intent"
+                value={shownIntent}
+                onChange={() => undefined}
+                locked
+                lockedNote={intentLocked ? (currentStage?.category === "closed_lost" ? "fixed — lead is closed" : "fixed from Booked onward") : "view only"}
+              />
+            )}
           </div>
           <button type="button" className="btn btn--ghost btn--icon" onClick={onClose} aria-label="Close drawer">
             <X size={18} />
@@ -496,7 +632,7 @@ export function LeadDrawer({ open, lead, onClose, onTransitionRequest, onLogged,
                           type="button"
                           className={`btn btn--sm ${isCurrent ? "btn--secondary" : "btn--ghost"}`}
                           disabled={isCurrent}
-                          onClick={() => onTransitionRequest(lead, stage)}
+                          onClick={() => onTransitionRequest({ ...lead, intent: shownIntent }, stage)}
                         >
                           {stage.position}. {stage.name}
                           {isCurrent && <Sparkles size={12} style={{ marginLeft: "0.35rem" }} />}
@@ -637,6 +773,28 @@ export function LeadDrawer({ open, lead, onClose, onTransitionRequest, onLogged,
                         </li>
                       );
                     }
+                    if (item.kind === "intent") {
+                      const change = item.change;
+                      return (
+                        <li key={item.key} className="timeline__item">
+                          <div className="timeline__head">
+                            <Badge tone="success">Intent</Badge>
+                            <IntentBadge intent={change.from_intent} />
+                            <ArrowRight size={12} className="muted" />
+                            <IntentBadge intent={change.to_intent} />
+                            <span className="muted text-sm" style={{ marginLeft: "auto" }}>
+                              {formatDateTime(change.performed_at)}
+                            </span>
+                          </div>
+                          <div className="timeline__meta">
+                            <span className="muted text-sm">
+                              {intentSourceLabel(change.source)}
+                              {change.performed_by ? ` · by ${actorName(change.performed_by, "a team member")}` : ""}
+                            </span>
+                          </div>
+                        </li>
+                      );
+                    }
                     const entry = item.transition;
                     const from = entry.from_stage_code ? getStage(lead.industry, entry.from_stage_code) : null;
                     const to = getStage(lead.industry, entry.to_stage_code);
@@ -648,6 +806,7 @@ export function LeadDrawer({ open, lead, onClose, onTransitionRequest, onLogged,
                           <Badge tone={to ? pipelineCategoryTone(to.category) : "neutral"}>
                             {to?.name ?? entry.to_stage_code}
                           </Badge>
+                          {entry.intent && <IntentBadge intent={entry.intent} />}
                           <span className="muted text-sm" style={{ marginLeft: "auto" }}>
                             {formatDateTime(entry.performed_at)}
                           </span>

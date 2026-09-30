@@ -1,6 +1,7 @@
 import { Check, ChevronDown, Phone } from "lucide-react";
 
 import { DuplicateChip } from "./DuplicateChip";
+import { IntentBadge } from "./IntentBadge";
 import type { Lead, PipelineStage } from "../../types";
 import { telHref } from "../../utils/contactLinks";
 import { pipelineCategoryTone } from "../../utils/options";
@@ -90,6 +91,7 @@ export function LeadRow({
             )}
             <span className="lead-row__sep">·</span>
             <span className="muted">#{lead.lead_number}</span>
+            <IntentBadge intent={lead.intent} showNotRated={false} />
             {overdue && <span className="lead-row__overdue">Overdue</span>}
           </span>
         </span>

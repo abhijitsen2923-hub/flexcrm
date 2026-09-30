@@ -6,6 +6,8 @@ import type {
   LeadAssignmentEvent,
   LeadCallLog,
   LeadIndustry,
+  LeadIntent,
+  LeadIntentChange,
   LeadListResponse,
   PaginationQuery,
   SearchSortQuery,
@@ -22,6 +24,8 @@ export interface LeadListQuery extends PaginationQuery, SearchSortQuery {
   stage_code?: string;        // single code, or comma-joined for a multi-stage filter
   source?: string;
   campaign?: string;
+  // Intent, comma-joined for several: "high,medium" — "none" = not rated.
+  intent?: string;
   assigned_to_id?: string;
   unassigned?: boolean;       // owner/admin: filter to leads with no owner (triage)
   // Selected local day's UTC boundaries — leads whose next action is due that day.
@@ -54,6 +58,7 @@ export interface LeadCreatePayload {
   expected_close_date?: string | null;
   source?: string | null;
   campaign?: string | null;
+  intent?: LeadIntent | null;
   interest?: string | null;
   assigned_to_id?: string | null;
   partner_id?: string | null;
@@ -104,6 +109,8 @@ export interface StageTransitionPayload {
     // Cheque no. / UPI-UTR / other payment detail → Booking.token_reference.
     token_reference?: string | null;
   } | null;
+  // The lead's intent chosen with this move (asked on every move before "Booked / Token").
+  intent?: LeadIntent | null;
 }
 
 export interface LeadImportDuplicate {
@@ -197,15 +204,34 @@ export const leadsService = {
     leadIds: string[],
     toStageCode: string,
     comment: string,
-    nextActionDate?: string | null
+    nextActionDate?: string | null,
+    intent?: LeadIntent | null
   ): Promise<LeadBulkActionResult> {
     const { data } = await apiClient.post<LeadBulkActionResult>("/leads/bulk-transition", {
       lead_ids: leadIds,
       to_stage_code: toStageCode,
       comment,
       next_action_date: nextActionDate ?? null,
+      intent: intent ?? null,
     });
     return data;
+  },
+
+  // Lead details → change the intent without moving the stage (409 once it is fixed: Booked onward / closed).
+  async setIntent(leadId: string, intent: LeadIntent): Promise<Lead> {
+    const { data } = await apiClient.put<Lead>(`/leads/${leadId}/intent`, { intent });
+    return data;
+  },
+
+  // Intent history. A backend without this endpoint (404) yields [] so the drawer still shows the rest.
+  async intentChanges(leadId: string): Promise<LeadIntentChange[]> {
+    try {
+      const { data } = await apiClient.get<LeadIntentChange[]>(`/leads/${leadId}/intent-changes`);
+      return data;
+    } catch (error) {
+      if (axios.isAxiosError(error) && error.response?.status === 404) return [];
+      throw error;
+    }
   },
 
   // Per-(lead, user) call tracking.

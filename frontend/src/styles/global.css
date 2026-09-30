@@ -2191,3 +2191,171 @@ body.has-import-pill .app-content { padding-bottom: 72px; }
   text-decoration: none;
 }
 .followup__call:active { background: var(--color-success); color: #fff; }
+
+/* ---- Lead intent (High / Medium / Low) ------------------------------------------------------------------
+   Compact slider (components/leads/IntentSlider) + badge (IntentBadge) + the leads-list quick chips. */
+.intent-badge::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+}
+.intent-badge--high { background: var(--color-success-soft); color: var(--color-success); }
+.intent-badge--medium { background: var(--color-warning-soft); color: var(--color-warning); }
+.intent-badge--low { background: #eef1f5; color: #6b7280; }
+.intent-badge--none { background: transparent; color: var(--color-text-subtle); border: 1px dashed var(--color-border-strong); }
+.intent-badge--none::before { display: none; }
+
+.intent {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 3px;
+  width: 214px;
+  max-width: 100%;
+}
+.intent__top {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  width: 100%;
+  gap: 8px;
+}
+.intent__label { font-size: 0.72rem; font-weight: 700; color: var(--color-text); }
+.intent__req { color: var(--color-danger); }
+.intent__value { font-size: 0.72rem; font-weight: 700; color: var(--color-text-subtle); }
+.intent__value--high { color: var(--color-success); }
+.intent__value--medium { color: var(--color-warning); }
+.intent__value--low { color: #6b7280; }
+.intent__hint { font-size: 0.68rem; color: var(--color-text-muted); text-align: right; }
+.intent__error { font-size: 0.68rem; color: var(--color-danger); font-weight: 700; text-align: right; }
+.intent--locked { align-items: flex-end; }
+.intent__locked-row { display: flex; align-items: center; gap: 6px; }
+
+.intent-slider {
+  position: relative;
+  width: 100%;
+  padding: 7px 8px 2px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  cursor: pointer;
+  /* Vertical swipes scroll the page; sideways movement is ours (tap / drag to pick). */
+  touch-action: pan-y;
+  user-select: none;
+}
+.intent-slider:hover { background: var(--color-surface-muted); }
+.intent-slider:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
+.intent-slider.has-error { border-color: var(--color-danger); background: var(--color-danger-soft); }
+.intent-slider.is-disabled { cursor: not-allowed; opacity: 0.6; }
+.intent-slider__track {
+  position: relative;
+  height: 6px;
+  margin: 0 7px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #cfd4dc 0%, #fbd38d 50%, #86d3a0 100%);
+}
+.intent-slider__stop {
+  position: absolute;
+  top: 50%;
+  width: 9px;
+  height: 9px;
+  border: 2px solid var(--color-border-strong);
+  border-radius: 50%;
+  background: var(--color-surface);
+  transform: translate(-50%, -50%);
+}
+.intent-slider__thumb {
+  position: absolute;
+  top: 50%;
+  width: 17px;
+  height: 17px;
+  border: 3px solid var(--color-primary);
+  border-radius: 50%;
+  background: var(--color-surface);
+  box-shadow: var(--shadow-md);
+  transform: translate(-50%, -50%);
+  transition: left 0.15s ease;
+}
+.intent-slider__labels {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  margin-top: 6px;
+  font-size: 0.66rem;
+  font-weight: 700;
+  color: var(--color-text-muted);
+}
+.intent-slider__labels span:nth-child(2) { text-align: center; }
+.intent-slider__labels span:nth-child(3) { text-align: right; }
+.intent-slider__labels .is-on { color: var(--color-text); }
+@media (prefers-reduced-motion: reduce) {
+  .intent-slider__thumb { transition: none; }
+}
+
+/* Stage change on the left, intent in the right corner (the stage-change + bulk-move dialogs). */
+.transition-move-bar {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px 16px;
+  flex-wrap: wrap;
+}
+/* Keep the intent in the right corner even when it wraps under long stage names. */
+.transition-move-bar > .intent { margin-left: auto; }
+.transition-move-bar__stages {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  padding-top: 4px;
+}
+
+/* Leads list: one-tap intent chips next to the search box. */
+.intent-chips { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.intent-chips__label { font-size: 0.75rem; font-weight: 700; color: var(--color-text-muted); margin-right: 2px; }
+.intent-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  background: var(--color-surface);
+  color: var(--color-text);
+  font-size: 0.78rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+.intent-chip i { width: 8px; height: 8px; border-radius: 50%; }
+.intent-chip--high i { background: var(--color-success); }
+.intent-chip--medium i { background: var(--color-primary); }
+.intent-chip--low i { background: #6b7280; }
+.intent-chip[aria-pressed="true"].intent-chip--high { background: var(--color-success-soft); border-color: var(--color-success); color: var(--color-success); }
+.intent-chip[aria-pressed="true"].intent-chip--medium { background: var(--color-warning-soft); border-color: var(--color-primary); color: var(--color-warning); }
+.intent-chip[aria-pressed="true"].intent-chip--low { background: #eef1f5; border-color: #6b7280; color: #6b7280; }
+
+@media (max-width: 639px) {
+  .transition-move-bar > .intent { margin-left: 0; }
+  .transition-move-bar .intent,
+  .drawer__header .intent { width: 100%; align-items: stretch; }
+  .transition-move-bar .intent__hint,
+  .transition-move-bar .intent__error,
+  .drawer__header .intent__hint,
+  .drawer__header .intent__error { text-align: left; }
+  .transition-move-bar .intent--locked,
+  .drawer__header .intent--locked { align-items: flex-start; }
+}
+.leads-intent-row { padding: 0.55rem 1rem; border-bottom: 1px solid var(--color-border); }
+.lead-row__meta .intent-badge { padding: 1px 7px; font-size: 0.66rem; }
+/* Lead drawer: intent in the header's top-right corner (before the close button). */
+.drawer__intent { margin-left: auto; flex-shrink: 0; }
+@media (max-width: 639px) {
+  /* Name + close button share the first line (the title shrinks); the intent gets its own line below. */
+  .drawer__header { flex-wrap: wrap; }
+  .drawer__title { flex: 1 1 0; min-width: 0; }
+  .drawer__intent { order: 3; flex-basis: 100%; margin-left: 0; }
+}
+/* While a lead drawer is open, toasts sit just left of it (desktop) instead of over its header. */
+@media (min-width: 640px) {
+  body.has-lead-drawer .toast-stack { right: calc(min(720px, 100vw) + var(--space-4)); }
+}

@@ -4,9 +4,12 @@ import type { CustomRole, CreateCustomRolePayload, UpdateCustomRolePayload } fro
 import { customRolesService } from "../../../services/customRoles";
 import { extractErrorMessage } from "../../../utils/errors";
 
+// LEAD_DOCS_MANAGE (Travel visa documents) isn't offered for new grants: FlexCRM is real estate only and no
+// screen uses it. Where it is already granted it still shows, so it can be revoked.
+const HIDDEN_PERMISSION_CODES: ReadonlyArray<string> = ["LEAD_DOCS_MANAGE"];
 const ALL_PERMISSION_CODES: ReadonlyArray<string> = [
   "DASHBOARD_VIEW",
-  "LEAD_VIEW", "LEAD_MANAGE", "LEAD_IMPORT", "LEAD_DOCS_MANAGE",
+  "LEAD_VIEW", "LEAD_MANAGE", "LEAD_IMPORT",
   "CAMPAIGN_MANAGE",
   "CUSTOMER_VIEW", "CUSTOMER_MANAGE",
   "DEAL_VIEW", "DEAL_MANAGE",
@@ -120,7 +123,10 @@ export function CustomRoleEditorModal({ open, onClose, onSaved, editing }: Props
               gap: "0.5rem",
             }}
           >
-            {ALL_PERMISSION_CODES.map((code) => (
+            {[
+              ...ALL_PERMISSION_CODES,
+              ...HIDDEN_PERMISSION_CODES.filter((c) => ((editing?.permissions ?? []) as readonly string[]).includes(c)),
+            ].map((code) => (
               <label
                 key={code}
                 style={{

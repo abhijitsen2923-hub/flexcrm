@@ -16,6 +16,7 @@ import {
 } from "../components";
 import { BulkStageModal } from "../components/leads/BulkStageModal";
 import { DuplicateChip } from "../components/leads/DuplicateChip";
+import { IntentBadge } from "../components/leads/IntentBadge";
 import { LeadDrawer } from "../components/leads/LeadDrawer";
 import { LeadRowList } from "../components/leads/LeadRowList";
 import { StageTransitionModal } from "../components/leads/StageTransitionModal";
@@ -33,7 +34,7 @@ import { leadsService, type LeadDuplicate } from "../services/leads";
 import { organizationsService } from "../services/organizations";
 import { siteVisitsService } from "../services/site-visits";
 import { usersService } from "../services/users";
-import type { Lead, LeadIndustry, Organization, PipelineStage, User } from "../types";
+import type { Lead, LeadIndustry, LeadIntent, Organization, PipelineStage, User } from "../types";
 import { syncOpenDrawer } from "../components/leads/drawerSync";
 import {
   NEW_CAMPAIGN_VALUE,
@@ -46,6 +47,17 @@ import {
 import { localDayRange } from "../utils/dateRange";
 import { extractErrorMessage } from "../utils/errors";
 import { formatCurrency } from "../utils/format";
+import {
+  INTENT_FILTER_ORDER,
+  INTENT_LABEL,
+  NOT_RATED,
+  intentFilterLabel,
+  isIntentLocked,
+  isLeadIntent,
+  parseIntentFilter,
+  toggleIntentFilter,
+  type IntentFilterToken
+} from "../utils/leadIntent";
 import { OTHER_OPTION, industryInterestLabel, leadIndustryOptions, leadSourceOptions, pipelineCategoryTone, propertyInterestOptions, propertyTypeOptions, salutationOptions, titleCase } from "../utils/options";
 import { canSetStage } from "../utils/stageAccess";
 
@@ -72,6 +84,7 @@ interface CreateFormState {
   source_other: string;
   campaign: string;
   campaign_other: string;
+  intent: string; // "" = not rated yet
   interest: string;
   interest_other: string;
   // Real-estate specific (only submitted when industry === "real_estate")
@@ -86,7 +99,7 @@ interface CreateFormState {
 
 
 function makeEmptyForm(
-  defaultIndustry: LeadIndustry = "education",
+  defaultIndustry: LeadIndustry = "real_estate",
   defaultCurrency: string = "INR"
 ): CreateFormState {
   return {
@@ -106,6 +119,7 @@ function makeEmptyForm(
     source_other: "",
     campaign: "",
     campaign_other: "",
+    intent: "",
     interest: "",
     interest_other: "",
     property_type: "",
@@ -121,9 +135,8 @@ function makeEmptyForm(
 
 export default function LeadsPage() {
   const { user } = useAuth();
-  // Scope the user's default view to the industry they picked at registration.
-  // `business_type` may be null on legacy accounts created before that column
-  // existed — fall back to no filter so they keep seeing everything.
+  // Default view = the user's industry until the workspace loads (below), which then sets it for everyone —
+  // the per-user business_type is empty for every staff member an owner adds.
   const defaultIndustry: LeadIndustry | "" = user?.business_type ?? "";
 
   const [view, setView] = useState<ViewMode>("list");
@@ -148,6 +161,8 @@ export default function LeadsPage() {
   const [ownerFilter, setOwnerFilter] = useState<string>("");
   const [sourceFilter, setSourceFilter] = useState<string>("");
   const [campaignFilter, setCampaignFilter] = useState<string>("");
+  // Intent: "high,medium" / "none" (not rated) — the quick chips by the search box + the Filters panel.
+  const [intentFilter, setIntentFilter] = useState<string>("");
   // Raw search box value + its debounced counterpart (the latter drives the query
   // so typing doesn't fire a request per keystroke).
   const [searchInput, setSearchInput] = useState("");
@@ -226,13 +241,19 @@ export default function LeadsPage() {
       created_to: leadDate.to,
       source: sourceFilter || undefined,
       campaign: campaignFilter || undefined,
+      intent: intentFilter || undefined,
       // "__unassigned__" is a sentinel (an empty string would be stripped by
       // buildQueryString): map it to the backend `unassigned` flag, not an owner id.
       assigned_to_id: ownerFilter && ownerFilter !== "__unassigned__" ? ownerFilter : undefined,
       unassigned: ownerFilter === "__unassigned__" ? true : undefined,
       search: search || undefined
     };
-  }, [page, pageSize, industryFilter, stageFilter, nextActionOn, stageChangedFrom, stageChangedTo, leadDateFrom, leadDateTo, sourceFilter, campaignFilter, ownerFilter, search]);
+  }, [page, pageSize, industryFilter, stageFilter, nextActionOn, stageChangedFrom, stageChangedTo, leadDateFrom, leadDateTo, sourceFilter, campaignFilter, intentFilter, ownerFilter, search]);
+
+  function toggleIntent(token: IntentFilterToken) {
+    setIntentFilter((prev) => toggleIntentFilter(prev, token));
+    setPage(1);
+  }
 
   function toggleStage(code: string) {
     setStageFilter((prev) => (prev.includes(code) ? prev.filter((c) => c !== code) : [...prev, code]));
@@ -245,13 +266,14 @@ export default function LeadsPage() {
     setStageFilter([]);
     setSourceFilter("");
     setCampaignFilter("");
+    setIntentFilter("");
     setOwnerFilter("");
     setNextActionOn("");
     setStageChangedFrom("");
     setStageChangedTo("");
     setLeadDateFrom("");
     setLeadDateTo("");
-    if (!user?.business_type) setIndustryFilter("");
+    if (!inheritedIndustry) setIndustryFilter("");
     setSelectedIds(new Set());
     setBulkStageCode("");
     setPage(1);
@@ -305,17 +327,18 @@ export default function LeadsPage() {
     stageFilter.length +
     (sourceFilter ? 1 : 0) +
     (campaignFilter ? 1 : 0) +
+    (intentFilter ? 1 : 0) +
     (ownerFilter ? 1 : 0) +
     (nextActionOn ? 1 : 0) +
     (stageChangedFrom ? 1 : 0) +
     (stageChangedTo ? 1 : 0) +
     (leadDateFrom ? 1 : 0) +
     (leadDateTo ? 1 : 0) +
-    (!user?.business_type && industryFilter ? 1 : 0);
+    (!inheritedIndustry && industryFilter ? 1 : 0);
 
   // --- Create lead modal -------------------------------------------------
   const [formOpen, setFormOpen] = useState(false);
-  const [form, setForm] = useState<CreateFormState>(() => makeEmptyForm(user?.business_type ?? "education"));
+  const [form, setForm] = useState<CreateFormState>(() => makeEmptyForm(user?.business_type ?? "real_estate"));
   const [formError, setFormError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   // Warn-but-allow duplicate detection (by email or phone, per-tenant).
@@ -338,7 +361,7 @@ export default function LeadsPage() {
   // Channel partners for the "Referred by" picker — real-estate only, and only
   // for users who can create leads (the options endpoint requires LEAD_MANAGE).
   const [partnerOptions, setPartnerOptions] = useState<PartnerOption[]>([]);
-  const canAttributePartner = hasPerm("LEAD_MANAGE") && (user?.business_type === "real_estate");
+  const canAttributePartner = hasPerm("LEAD_MANAGE") && inheritedIndustry === "real_estate";
   useEffect(() => {
     if (!canAttributePartner) return;
     let cancelled = false;
@@ -413,20 +436,26 @@ export default function LeadsPage() {
   // org's industry; on a legacy "All industries" view the picker is empty (pick an
   // industry first). Also drops the capture/terminal stages and any the role can't set.
   const bulkStageOptions = useMemo(() => {
-    const ind = industryFilter || user?.business_type;
+    const ind = industryFilter || inheritedIndustry;
     if (!ind) return [];
     return (byIndustry[ind] ?? [])
       .filter((s) => !BULK_EXCLUDED_STAGES.has(s.code))
       .filter((s) => canSetStage(user?.role, s.code))
       .map((s) => ({ value: s.code, label: s.name }));
-  }, [industryFilter, user?.business_type, user?.role, byIndustry, BULK_EXCLUDED_STAGES]);
+  }, [industryFilter, inheritedIndustry, user?.role, byIndustry, BULK_EXCLUDED_STAGES]);
 
   const bulkStageName = useMemo(
     () => bulkStageOptions.find((o) => o.value === bulkStageCode)?.label ?? bulkStageCode,
     [bulkStageOptions, bulkStageCode]
   );
+  // Intent is asked on a bulk move unless the target stage fixes it (a closed stage like Not Interested).
+  const bulkIntentAsked = useMemo(() => {
+    const ind = industryFilter || inheritedIndustry;
+    const target = ind ? getStage(ind, bulkStageCode) : undefined;
+    return !target || !isIntentLocked(target, ind ? byIndustry[ind] ?? [] : []);
+  }, [industryFilter, inheritedIndustry, bulkStageCode, getStage, byIndustry]);
 
-  async function handleBulkStage(comment: string, nextActionDate: string | null) {
+  async function handleBulkStage(comment: string, nextActionDate: string | null, intent: LeadIntent | null) {
     if (!bulkStageCode || selectedIds.size === 0) return;
     setBulkTransitioning(true);
     try {
@@ -434,7 +463,8 @@ export default function LeadsPage() {
         Array.from(selectedIds),
         bulkStageCode,
         comment,
-        nextActionDate
+        nextActionDate,
+        intent
       );
       if (result.updated === 0) {
         // Nothing moved (e.g. every pick was a backward move the role can't make).
@@ -460,7 +490,7 @@ export default function LeadsPage() {
     // Industry is the ORG's (single-industry, authoritative) — the per-user
     // business_type can be stale/null. The backend pins it regardless; this just
     // drives which optional (real-estate) fields the form shows.
-    setForm(makeEmptyForm(org?.business_type ?? user?.business_type ?? "education", allowedCurrencies[0] ?? "INR"));
+    setForm(makeEmptyForm(org?.business_type ?? user?.business_type ?? "real_estate", allowedCurrencies[0] ?? "INR"));
     setFormError(null);
     setDuplicates([]);
     setDupChecked(false);
@@ -535,6 +565,7 @@ export default function LeadsPage() {
         expected_close_date: form.expected_close_date || null,
         source: (form.source === OTHER_OPTION ? form.source_other.trim() : form.source) || null,
         campaign: (form.campaign === NEW_CAMPAIGN_VALUE ? cleanCampaignName(form.campaign_other) : form.campaign) || null,
+        intent: isLeadIntent(form.intent) ? form.intent : null,
         interest: (form.interest === OTHER_OPTION ? form.interest_other.trim() : form.interest.trim()) || null,
         ...(form.industry === "real_estate" ? {
           property_type: (form.property_type === OTHER_OPTION ? form.property_type_other.trim() : form.property_type) || null,
@@ -668,6 +699,7 @@ export default function LeadsPage() {
           <div style={{ fontWeight: 600, display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
             <DuplicateChip status={lead.duplicate_status} owner={lead.duplicate_owner} isDuplicate={lead.is_duplicate} />
             <span className="cell-truncate">{lead.contact_name || lead.customer?.contact_name || lead.title}</span>
+            <IntentBadge intent={lead.intent} showNotRated={false} />
           </div>
           <div className="muted text-xs cell-truncate">{lead.title}</div>
         </button>
@@ -747,7 +779,7 @@ export default function LeadsPage() {
     },
     {
       key: "interest",
-      header: industryInterestLabel((industryFilter || user?.business_type || "education") as LeadIndustry),
+      header: industryInterestLabel((industryFilter || inheritedIndustry || "real_estate") as LeadIndustry),
       width: "10%",
       render: (lead) => (
         <span className="cell-truncate" title={lead.interest ?? ""}>{lead.interest ?? "—"}</span>
@@ -938,6 +970,23 @@ export default function LeadsPage() {
           )}
         </div>
 
+        {/* One-tap intent filter next to the search box (several at once; "Not rated" is in Filters). */}
+        <div className="leads-intent-row intent-chips" role="group" aria-label="Filter by intent">
+          <span className="intent-chips__label">Intent</span>
+          {(["high", "medium", "low"] as const).map((key) => (
+            <button
+              key={key}
+              type="button"
+              className={`intent-chip intent-chip--${key}`}
+              aria-pressed={parseIntentFilter(intentFilter).has(key)}
+              onClick={() => toggleIntent(key)}
+            >
+              <i aria-hidden="true" />
+              {INTENT_LABEL[key]}
+            </button>
+          ))}
+        </div>
+
         {/* Active-filter summary chips — each removable; mirrors the panel. */}
         {activeFilterCount > 0 && (
           <div className="active-filters">
@@ -947,7 +996,7 @@ export default function LeadsPage() {
                 <X size={12} aria-hidden="true" />
               </button>
             ))}
-            {!user?.business_type && industryFilter && (
+            {!inheritedIndustry && industryFilter && (
               <button type="button" className="active-filter" onClick={() => { setIndustryFilter(""); setPage(1); }}>
                 Industry: {titleCase(industryFilter)}
                 <X size={12} aria-hidden="true" />
@@ -962,6 +1011,12 @@ export default function LeadsPage() {
             {campaignFilter && (
               <button type="button" className="active-filter" onClick={() => { setCampaignFilter(""); setPage(1); }}>
                 Campaign: {campaignFilter}
+                <X size={12} aria-hidden="true" />
+              </button>
+            )}
+            {intentFilter && (
+              <button type="button" className="active-filter" onClick={() => { setIntentFilter(""); setPage(1); }}>
+                Intent: {intentFilterLabel(intentFilter)}
                 <X size={12} aria-hidden="true" />
               </button>
             )}
@@ -1208,7 +1263,7 @@ export default function LeadsPage() {
               </div>
               <span className="muted text-xs">When the lead came in (its Created date).</span>
             </div>
-            {!user?.business_type && (
+            {!inheritedIndustry && (
               <label className="mobile-filters__field">
                 <span className="mobile-filters__label">Industry</span>
                 <select
@@ -1241,6 +1296,21 @@ export default function LeadsPage() {
                       onChange={() => toggleStage(option.value)}
                     />
                     <span>{option.label}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+            <div className="mobile-filters__field">
+              <span className="mobile-filters__label">Intent</span>
+              <div className="filter-stage-list">
+                {INTENT_FILTER_ORDER.map((token) => (
+                  <label key={token} className="filter-stage-list__item">
+                    <input
+                      type="checkbox"
+                      checked={parseIntentFilter(intentFilter).has(token)}
+                      onChange={() => toggleIntent(token)}
+                    />
+                    <span>{token === NOT_RATED ? "Not rated" : INTENT_LABEL[token]}</span>
                   </label>
                 ))}
               </div>
@@ -1591,6 +1661,19 @@ export default function LeadsPage() {
               })()}
             />
           )}
+          <SelectField
+            id="lead-intent"
+            label="Intent"
+            value={form.intent}
+            onChange={(event) => setForm({ ...form, intent: event.target.value })}
+            options={[
+              { value: "", label: "Not rated yet" },
+              { value: "high", label: "High — ready to buy" },
+              { value: "medium", label: "Medium — considering" },
+              { value: "low", label: "Low — just exploring" }
+            ]}
+            hint="Optional now — it's asked on every stage change."
+          />
           {/* Real estate captures a Budget min–max range (above) instead of a
               single Value, so Value/Currency are hidden for that vertical. */}
           {form.industry !== "real_estate" && (
@@ -1674,6 +1757,7 @@ export default function LeadsPage() {
         open={bulkStageOpen}
         count={selectedIds.size}
         stageName={bulkStageName}
+        intentAsked={bulkIntentAsked}
         onClose={() => { if (!bulkTransitioning) setBulkStageOpen(false); }}
         onSubmit={handleBulkStage}
       />
@@ -1751,7 +1835,7 @@ function KanbanView({ leads, industryFilter, onCardClick, onStageDrop }: KanbanV
   // Kanban can only show one industry at a time — pick the user's filter,
   // otherwise default to the industry of the first visible lead.
   const industry: LeadIndustry =
-    industryFilter || leads[0]?.industry || "education";
+    industryFilter || leads[0]?.industry || "real_estate";
   const stages = byIndustry[industry];
 
   const leadsByStage = useMemo(() => {
@@ -1827,6 +1911,7 @@ function KanbanView({ leads, industryFilter, onCardClick, onStageDrop }: KanbanV
                   <div className="kanban__card-title" style={{ display: "flex", alignItems: "center", gap: 6 }}>
                     <DuplicateChip status={lead.duplicate_status} owner={lead.duplicate_owner} isDuplicate={lead.is_duplicate} />
                     <span>{lead.title}</span>
+                    <IntentBadge intent={lead.intent} showNotRated={false} />
                   </div>
                   <div className="kanban__card-meta">
                     #{lead.lead_number} · {lead.customer?.company_name ?? "—"}

@@ -2,11 +2,9 @@ import { Sparkles } from "lucide-react";
 import { useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
 
-import { Button, SelectField, TextField } from "../../components";
+import { Button, TextField } from "../../components";
 import { useAuth } from "../../hooks/useAuth";
-import type { LeadIndustry } from "../../types";
 import { extractErrorMessage } from "../../utils/errors";
-import { leadIndustryOptions } from "../../utils/options";
 
 
 export default function RegisterPage() {
@@ -19,7 +17,6 @@ export default function RegisterPage() {
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
   const [password, setPassword] = useState("");
-  const [businessType, setBusinessType] = useState<LeadIndustry | "">("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -34,7 +31,8 @@ export default function RegisterPage() {
         email,
         password,
         phone: phone || null,
-        business_type: businessType as LeadIndustry,
+        // FlexCRM workspaces are real estate (the server refuses other business types for new signups).
+        business_type: "real_estate",
         organization_name: orgName.trim() || undefined
       });
       navigate("/", { replace: true });
@@ -65,7 +63,7 @@ export default function RegisterPage() {
             label="Organization name"
             value={orgName}
             onChange={(event) => setOrgName(event.target.value)}
-            placeholder="e.g. Acme Tutorials"
+            placeholder="e.g. Skyline Realty"
             hint="What's the name of your business? Optional — defaults to your first name's workspace."
             autoComplete="organization"
           />
@@ -103,16 +101,6 @@ export default function RegisterPage() {
             onChange={(event) => setPhone(event.target.value)}
             placeholder="Optional"
             autoComplete="tel"
-          />
-          <SelectField
-            id="register-business-type"
-            label="Business type"
-            value={businessType}
-            placeholder="Choose your business type"
-            onChange={(event) => setBusinessType(event.target.value as LeadIndustry | "")}
-            options={leadIndustryOptions}
-            required
-            hint="Drives the default industry shown on Leads and other CRM views. You can still switch industries later."
           />
           <TextField
             id="register-password"

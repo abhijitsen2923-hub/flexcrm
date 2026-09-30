@@ -5,9 +5,11 @@ import { usePipelines } from "../../context/PipelineContext";
 import { useInventory } from "../../hooks/useInventory";
 import { bookingsService } from "../../services/bookings";
 import type { PartnerOption } from "../../services/channelPartners";
-import type { Lead, PipelineStage, User } from "../../types";
+import type { Lead, LeadIntent, PipelineStage, User } from "../../types";
 import type { Booking, PaymentMode } from "../../types/realestate";
 import { extractErrorMessage } from "../../utils/errors";
+import { INTENT_LABEL, isIntentLocked } from "../../utils/leadIntent";
+import { IntentSlider } from "./IntentSlider";
 import {
   FIELD_ELEMENT_IDS,
   MIN_COMMENT_LENGTH,
@@ -69,6 +71,7 @@ interface StageTransitionModalProps {
       token_received_on: string;
       token_reference?: string | null;
     } | null;
+    intent?: LeadIntent;
   }) => Promise<void>;
 }
 
@@ -82,12 +85,16 @@ export function StageTransitionModal({
   onClose,
   onSubmit
 }: StageTransitionModalProps) {
-  const { getStage } = usePipelines();
+  const { getStage, byIndustry } = usePipelines();
   const { projects } = useInventory();
   const fromStage = lead ? getStage(lead.industry, lead.stage_code) : undefined;
   const isSiteVisitStage = targetStage?.code === SITE_VISIT_STAGE;
   const isBookedStage = targetStage?.code === BOOKED_STAGE;
+  // Intent is asked on every move before "Booked / Token"; from there on (and on a closed stage) it is fixed.
+  const intentLocked = targetStage ? isIntentLocked(targetStage, byIndustry[targetStage.industry] ?? []) : false;
 
+  // Never pre-selected: the user picks the intent on every move (the current one shows as a hint).
+  const [intent, setIntent] = useState<LeadIntent | null>(null);
   const [comment, setComment] = useState("");
   const [nextAction, setNextAction] = useState(""); // datetime-local (date + time)
   const [siteProjectIds, setSiteProjectIds] = useState<string[]>([]);
@@ -110,6 +117,7 @@ export function StageTransitionModal({
   useEffect(() => {
     if (open) {
       setShowErrors(false);
+      setIntent(null);
       setComment("");
       setNextAction("");
       setSiteProjectIds([]);
@@ -161,6 +169,8 @@ export function StageTransitionModal({
   const errors = useMemo(
     () =>
       validateTransition({
+        intentRequired: Boolean(targetStage) && !intentLocked,
+        intent: intent ?? "",
         comment,
         isSiteVisitStage,
         siteProjectIds,
@@ -175,8 +185,9 @@ export function StageTransitionModal({
         tokenMode,
         tokenDate,
       }),
-    [comment, isSiteVisitStage, siteProjectIds, siteDateTime, isBookedStage, existingBooking, unitId,
-      availableUnits.length, salespersonId, assignableUsers.length, tokenAmount, tokenMode, tokenDate]
+    [targetStage, intentLocked, intent, comment, isSiteVisitStage, siteProjectIds, siteDateTime, isBookedStage,
+      existingBooking, unitId, availableUnits.length, salespersonId, assignableUsers.length, tokenAmount, tokenMode,
+      tokenDate]
   );
   const hasErrors = firstInvalidField(errors) !== null;
   const fieldError = (field: TransitionField) => (showErrors ? errors[field] : undefined);
@@ -234,7 +245,8 @@ export function StageTransitionModal({
                 token_received_on: tokenDate,
                 token_reference: tokenReference.trim() || null
               }
-            : undefined
+            : undefined,
+        intent: !intentLocked && intent ? intent : undefined
       });
       onClose();
     } catch (submitError) {
@@ -262,12 +274,25 @@ export function StageTransitionModal({
     >
       {/* noValidate: our own checks (validateTransition) decide, highlight and scroll — not the browser's. */}
       <form id="stage-transition-form" className="form" onSubmit={handleSubmit} noValidate>
-        <div className="row" style={{ gap: "0.5rem", alignItems: "center", flexWrap: "wrap" }}>
-          <Badge tone="neutral">{fromStage?.name ?? lead?.stage_code ?? "—"}</Badge>
-          <span className="muted">→</span>
-          <Badge tone={targetStage?.category === "closed_won" ? "success" : targetStage?.category === "closed_lost" ? "danger" : "warning"}>
-            {targetStage?.name ?? "Select target stage"}
-          </Badge>
+        {/* Stage change on the left, the lead's intent in the right corner (under it on a phone). */}
+        <div className="transition-move-bar">
+          <div className="transition-move-bar__stages">
+            <Badge tone="neutral">{fromStage?.name ?? lead?.stage_code ?? "—"}</Badge>
+            <span className="muted">→</span>
+            <Badge tone={targetStage?.category === "closed_won" ? "success" : targetStage?.category === "closed_lost" ? "danger" : "warning"}>
+              {targetStage?.name ?? "Select target stage"}
+            </Badge>
+          </div>
+          <IntentSlider
+            id={FIELD_ELEMENT_IDS.intent}
+            value={intentLocked ? lead?.intent ?? null : intent}
+            onChange={setIntent}
+            required
+            locked={intentLocked}
+            lockedNote={targetStage?.category === "closed_lost" ? "not asked when a lead is closed" : "fixed from Booked onward"}
+            hint={lead?.intent ? `Currently: ${INTENT_LABEL[lead.intent]}` : "Not rated yet"}
+            error={fieldError("intent")}
+          />
         </div>
 
         <TextareaField

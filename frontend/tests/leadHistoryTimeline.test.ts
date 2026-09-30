@@ -7,7 +7,7 @@ import {
   assignmentSourceLabel,
   buildLeadTimeline,
 } from "../src/components/leads/leadHistoryTimeline.ts";
-import type { LeadAssignmentEvent, StageTransition } from "../src/types/crm.ts";
+import type { LeadAssignmentEvent, LeadIntentChange, StageTransition } from "../src/types/crm.ts";
 
 function stage(id: string, at: string, from: string | null, to: string): StageTransition {
   return {
@@ -70,4 +70,30 @@ test("source labels, with a safe fallback for unknown sources", () => {
   assert.equal(assignmentSourceLabel("import"), "Assigned on upload");
   assert.equal(assignmentSourceLabel("booking"), "Salesperson set at booking");
   assert.equal(assignmentSourceLabel("something_new"), "Owner changed");
+});
+
+function intentChange(id: string, at: string, source: LeadIntentChange["source"]): LeadIntentChange {
+  return {
+    id, lead_id: "lead-1", from_intent: "medium", to_intent: "high", source, performed_at: at,
+    performed_by_id: "u-1", performed_by: { id: "u-1", first_name: "Ravi", last_name: null },
+  };
+}
+
+test("intent changes made in the lead details join the timeline; ones made with a stage move don't repeat", () => {
+  const entries = buildLeadTimeline(
+    [stage("s2", "2026-09-27T10:00:00Z", "call", "follow_up"), stage("s1", "2026-09-25T09:00:00Z", null, "new_enquiry")],
+    [owner("o1", "2026-09-26T12:00:00Z")],
+    [
+      intentChange("i2", "2026-09-28T08:00:00Z", "quick_set"),
+      intentChange("i1", "2026-09-27T10:00:00Z", "stage_change"), // shown on stage s2's entry instead
+      intentChange("i0", "2026-09-25T09:00:00Z", "created"),
+    ]
+  );
+  assert.deepEqual(keys(entries), ["intent-i2", "stage-s2", "owner-o1", "stage-s1"]);
+});
+
+test("a quick intent change at the same instant as a stage entry sorts above it", () => {
+  const at = "2026-09-27T10:00:00Z";
+  const entries = buildLeadTimeline([stage("s1", at, null, "new_enquiry")], [], [intentChange("i1", at, "quick_set")]);
+  assert.deepEqual(keys(entries), ["intent-i1", "stage-s1"]);
 });

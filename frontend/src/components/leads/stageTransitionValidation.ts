@@ -4,6 +4,7 @@
 export const MIN_COMMENT_LENGTH = 10;
 
 export type TransitionField =
+  | "intent"
   | "comment"
   | "siteProjects"
   | "siteDateTime"
@@ -16,6 +17,7 @@ export type TransitionField =
 // DOM id of each validated field in StageTransitionModal — the first invalid one is scrolled into view on
 // Save (a test checks every id is actually rendered by the modal).
 export const FIELD_ELEMENT_IDS: Readonly<Record<TransitionField, string>> = {
+  intent: "transition-intent",
   comment: "transition-comment",
   siteProjects: "sv-projects",
   siteDateTime: "sv-datetime",
@@ -28,6 +30,7 @@ export const FIELD_ELEMENT_IDS: Readonly<Record<TransitionField, string>> = {
 
 // Top-to-bottom order of the fields in the modal — the first invalid one is scrolled into view.
 export const TRANSITION_FIELD_ORDER: readonly TransitionField[] = [
+  "intent", // top right, beside the stage change
   "comment",
   "siteProjects",
   "siteDateTime",
@@ -39,6 +42,10 @@ export const TRANSITION_FIELD_ORDER: readonly TransitionField[] = [
 ];
 
 export interface TransitionFormState {
+  // Intent (High / Medium / Low) is asked on every move before "Booked / Token" (not on Booked onward or a
+  // closed stage, where it is fixed) — and never pre-selected: "" until the user picks one.
+  intentRequired: boolean;
+  intent: string;
   comment: string;
   isSiteVisitStage: boolean;
   siteProjectIds: readonly string[];
@@ -61,6 +68,8 @@ export type TransitionErrors = Partial<Record<TransitionField, string>>;
 /** Every unmet requirement for saving the move, keyed by field ({} = ready to save). */
 export function validateTransition(s: TransitionFormState): TransitionErrors {
   const errors: TransitionErrors = {};
+
+  if (s.intentRequired && !s.intent) errors.intent = "Pick an intent — Low, Medium or High";
 
   const commentLength = s.comment.trim().length;
   if (commentLength < MIN_COMMENT_LENGTH) {

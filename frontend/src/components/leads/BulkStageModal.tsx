@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 
 import { Badge, Button, Modal, TextareaField, TextField } from "../../components";
+import type { LeadIntent } from "../../types";
 import { extractErrorMessage } from "../../utils/errors";
+import { IntentSlider } from "./IntentSlider";
 
 const MIN_COMMENT_LENGTH = 10;
 
@@ -9,9 +11,11 @@ interface BulkStageModalProps {
   open: boolean;
   count: number;            // how many leads will move
   stageName: string;        // human label of the target stage
+  // Whether the move asks for intent (not for a closed target stage, where intent is fixed).
+  intentAsked: boolean;
   onClose: () => void;
-  // One shared comment (+ optional next action) applied to every selected lead.
-  onSubmit: (comment: string, nextActionDate: string | null) => Promise<void>;
+  // One shared comment (+ optional next action, + the intent when asked) applied to every selected lead.
+  onSubmit: (comment: string, nextActionDate: string | null, intent: LeadIntent | null) => Promise<void>;
 }
 
 /**
@@ -20,7 +24,10 @@ interface BulkStageModalProps {
  * carries one shared comment. Per-lead capture (booking/site-visit) is NOT
  * offered here — those stages are excluded from the bulk picker.
  */
-export function BulkStageModal({ open, count, stageName, onClose, onSubmit }: BulkStageModalProps) {
+export function BulkStageModal({ open, count, stageName, intentAsked, onClose, onSubmit }: BulkStageModalProps) {
+  // Never pre-selected — one intent for every selected lead, picked each time.
+  const [intent, setIntent] = useState<LeadIntent | null>(null);
+  const [showIntentError, setShowIntentError] = useState(false);
   const [comment, setComment] = useState("");
   const [nextAction, setNextAction] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -28,6 +35,8 @@ export function BulkStageModal({ open, count, stageName, onClose, onSubmit }: Bu
 
   useEffect(() => {
     if (open) {
+      setIntent(null);
+      setShowIntentError(false);
       setComment("");
       setNextAction("");
       setError(null);
@@ -40,10 +49,19 @@ export function BulkStageModal({ open, count, stageName, onClose, onSubmit }: Bu
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!canSubmit) return;
+    if (intentAsked && !intent) {
+      setShowIntentError(true);
+      document.getElementById("bulk-stage-intent")?.scrollIntoView({ behavior: "smooth", block: "center" });
+      return;
+    }
     setSubmitting(true);
     setError(null);
     try {
-      await onSubmit(comment.trim(), nextAction ? new Date(nextAction).toISOString() : null);
+      await onSubmit(
+        comment.trim(),
+        nextAction ? new Date(nextAction).toISOString() : null,
+        intentAsked ? intent : null
+      );
       onClose();
     } catch (submitError) {
       setError(extractErrorMessage(submitError));
@@ -69,9 +87,24 @@ export function BulkStageModal({ open, count, stageName, onClose, onSubmit }: Bu
       }
     >
       <form id="bulk-stage-form" className="form" onSubmit={handleSubmit}>
-        <div className="row" style={{ gap: "0.5rem", alignItems: "center", flexWrap: "wrap" }}>
-          <span className="muted">Moving to</span>
-          <Badge tone="warning">{stageName}</Badge>
+        <div className="transition-move-bar">
+          <div className="transition-move-bar__stages">
+            <span className="muted">Moving to</span>
+            <Badge tone="warning">{stageName}</Badge>
+          </div>
+          {intentAsked && (
+            <IntentSlider
+              id="bulk-stage-intent"
+              value={intent}
+              onChange={(next) => {
+                setIntent(next);
+                setShowIntentError(false);
+              }}
+              required
+              hint="Set on every selected lead"
+              error={showIntentError && !intent ? "Pick an intent — Low, Medium or High" : undefined}
+            />
+          )}
         </div>
         <p className="muted text-sm">
           Bulk moves only go forward — leads already past this stage, or closed (Sold or lost), are skipped

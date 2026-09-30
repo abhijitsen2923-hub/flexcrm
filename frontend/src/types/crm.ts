@@ -262,7 +262,27 @@ export interface StageTransition {
   performed_by_id: string | null;
   performed_at: string;
   mentions: string[] | null;
+  // Intent recorded with this move (chosen, or — from Booked onward — the lead's intent as it stood).
+  intent?: LeadIntent | null;
   performed_by?: UserSummary | null;
+}
+
+/** How serious a lead is. null = not rated. */
+export type LeadIntent = "high" | "medium" | "low";
+
+/** Where an intent change came from (backend `INTENT_SOURCES`). */
+export type LeadIntentSource = "stage_change" | "bulk" | "quick_set" | "created" | "import";
+
+/** One change of a lead's intent (GET /leads/{id}/intent-changes). */
+export interface LeadIntentChange {
+  id: string;
+  lead_id: string;
+  from_intent: LeadIntent | null;
+  to_intent: LeadIntent | null;
+  source: LeadIntentSource;
+  performed_at: string;
+  performed_by_id: string | null;
+  performed_by?: HistoryActor | null;
 }
 
 /** Lean user reference on history rows — id + name only (either name part may be missing). */
@@ -318,6 +338,8 @@ export interface Lead {
   expected_close_date: string | null;
   source: string | null;
   campaign: string | null;
+  // High / Medium / Low; null = not rated. Fixed from "Booked / Token" onward.
+  intent?: LeadIntent | null;
   interest: string | null;
   last_comment_preview: string | null;
   last_comment_at: string | null;

@@ -18,6 +18,8 @@ const COMMENT = "Token received, unit confirmed with the buyer.";
 // A complete, valid "Booked / Token" move by a manager who picks the salesperson.
 function booked(overrides: Partial<TransitionFormState> = {}): TransitionFormState {
   return {
+    intentRequired: false, // fixed from Booked onward
+    intent: "",
     comment: COMMENT,
     isSiteVisitStage: false,
     siteProjectIds: [],
@@ -93,7 +95,16 @@ test("site visit: needs a site and a date/time", () => {
   assert.deepEqual(validateTransition(plain({ isSiteVisitStage: true, siteProjectIds: ["p1"], siteDateTime: "2026-09-28T10:00" })), {});
 });
 
+test("intent: required only when the move asks for it, and nothing counts as picked until chosen", () => {
+  assert.equal(validateTransition(plain({ intentRequired: true })).intent, "Pick an intent — Low, Medium or High");
+  assert.equal(validateTransition(plain({ intentRequired: true, intent: "low" })).intent, undefined);
+  assert.equal(validateTransition(plain({ intentRequired: false })).intent, undefined); // Booked onward / closed
+  assert.deepEqual(validateTransition(plain({ intentRequired: true, intent: "high" })), {});
+});
+
 test("first invalid field follows on-screen order", () => {
+  // Intent sits at the top (beside the stage change), above the comment.
+  assert.equal(firstInvalidField(validateTransition(plain({ intentRequired: true, comment: "" }))), "intent");
   assert.equal(firstInvalidField(validateTransition(booked({ tokenAmount: "", unitId: "" }))), "unit");
   assert.equal(firstInvalidField(validateTransition(booked({ tokenDate: "", tokenMode: "" }))), "tokenMode");
 });

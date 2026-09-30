@@ -1,10 +1,12 @@
-// Pure helpers for the lead drawer's Stage History tab: merge stage moves and owner changes into ONE
-// timeline, and label owner changes. No React / DOM, so they're unit-testable with `node --test`.
-import type { HistoryActor, LeadAssignmentEvent, StageTransition } from "../../types";
+// Pure helpers for the lead drawer's Stage History tab: merge stage moves, owner changes and intent changes
+// made in the lead details into ONE timeline, and label owner changes. No React / DOM, so they're
+// unit-testable with `node --test`.
+import type { HistoryActor, LeadAssignmentEvent, LeadIntentChange, StageTransition } from "../../types";
 
 export type TimelineEntry =
   | { kind: "stage"; key: string; at: string; transition: StageTransition }
-  | { kind: "owner"; key: string; at: string; event: LeadAssignmentEvent };
+  | { kind: "owner"; key: string; at: string; event: LeadAssignmentEvent }
+  | { kind: "intent"; key: string; at: string; change: LeadIntentChange };
 
 const SOURCE_LABELS: Record<string, string> = {
   created: "Assigned when created",
@@ -36,24 +38,30 @@ function toTime(iso: string): number {
 }
 
 /**
- * Stage moves + owner changes, newest first. On an identical timestamp (creating a lead with an owner
- * writes both in one transaction) the owner change sorts above the stage entry, so "Lead created" stays
- * at the bottom; otherwise each source keeps its own (newest-first) order.
+ * Stage moves + owner changes + intent changes made WITHOUT a stage change (the lead details' quick set),
+ * newest first. Intent chosen with a stage move shows on that move's entry, so those intent changes aren't
+ * listed again. On an identical timestamp (creating a lead with an owner writes both in one transaction) an
+ * owner / intent change sorts above the stage entry, so "Lead created" stays at the bottom; otherwise each
+ * source keeps its own (newest-first) order.
  */
 export function buildLeadTimeline(
   transitions: readonly StageTransition[],
-  events: readonly LeadAssignmentEvent[]
+  events: readonly LeadAssignmentEvent[],
+  intentChanges: readonly LeadIntentChange[] = []
 ): TimelineEntry[] {
   const entries: TimelineEntry[] = [
     ...transitions.map((t) => ({ kind: "stage" as const, key: `stage-${t.id}`, at: t.performed_at, transition: t })),
     ...events.map((e) => ({ kind: "owner" as const, key: `owner-${e.id}`, at: e.performed_at, event: e })),
+    ...intentChanges
+      .filter((c) => c.source === "quick_set")
+      .map((c) => ({ kind: "intent" as const, key: `intent-${c.id}`, at: c.performed_at, change: c })),
   ];
   return entries
     .map((entry, index) => ({ entry, index }))
     .sort((a, b) => {
       const byTime = toTime(b.entry.at) - toTime(a.entry.at);
       if (byTime !== 0) return byTime;
-      if (a.entry.kind !== b.entry.kind) return a.entry.kind === "owner" ? -1 : 1;
+      if ((a.entry.kind === "stage") !== (b.entry.kind === "stage")) return a.entry.kind === "stage" ? 1 : -1;
       return a.index - b.index;
     })
     .map(({ entry }) => entry);
