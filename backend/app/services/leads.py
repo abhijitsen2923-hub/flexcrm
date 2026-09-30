@@ -4,10 +4,11 @@ from uuid import UUID
 
 from fastapi import BackgroundTasks
 
-from sqlalchemy import select, update
+from sqlalchemy import or_, select, update
 
 from app.core.currencies import DEFAULT_CURRENCY, allowed_currencies_for_org
-from app.core.exceptions import NotFoundError, ValidationError
+from app.core.exceptions import ConflictError, NotFoundError, ValidationError
+from app.core.lead_intent import INTENT_NOT_RATED, LEAD_INTENTS, stage_locks_intent
 from app.core.tenancy import current_org
 from app.database.enums import LeadIndustry
 from app.database.pipeline_seed import initial_stage_code
@@ -15,6 +16,7 @@ from app.models.lead import Lead, LeadCallLog
 from app.models.organization import Organization
 from app.repositories.customers import CustomerRepository
 from app.repositories.leads import LeadRepository
+from app.repositories.pipeline_stages import PipelineStageRepository
 from app.repositories.users import UserRepository
 from app.schemas.common import PaginationParams
 from app.schemas.lead import LeadCreate, LeadDuplicate, LeadFilterParams, LeadUpdate
@@ -23,6 +25,7 @@ from app.services.base import ServiceBase
 from app.services.campaigns import CampaignService, CampaignWritePolicy
 from app.services.email import EmailService
 from app.services.lead_assignments import LeadAssignmentService
+from app.services.lead_intents import LeadIntentService
 from app.services.notifications import NotificationService
 from app.services.realtime import realtime_manager
 from app.services.stage_transitions import StageTransitionService
@@ -47,6 +50,26 @@ def lead_number_from_search(term: str | None) -> int | None:
     """"92422" / "#92422" → 92422; anything else (phone numbers, text, 10+ digits) → None."""
     match = _LEAD_NUMBER_SEARCH.fullmatch(term.strip()) if term else None
     return int(match.group(1)) if match else None
+
+
+def _intent_filter_clause(raw: str | None):
+    """"high,medium" / "none" (comma-joined) → one OR clause over Lead.intent; None when no intent filter.
+    Case and spaces don't matter; an unknown value is a 422 (not silently ignored)."""
+    tokens = {t.strip().lower() for t in (raw or "").split(",") if t.strip()}
+    if not tokens:
+        return None
+    unknown = tokens - {*LEAD_INTENTS, INTENT_NOT_RATED}
+    if unknown:
+        raise ValidationError(
+            f"Unknown intent filter {', '.join(sorted(unknown))!s} — use high, medium, low or none."
+        )
+    rated = sorted(tokens & set(LEAD_INTENTS))
+    clauses = []
+    if rated:
+        clauses.append(Lead.intent.in_(rated))
+    if INTENT_NOT_RATED in tokens:
+        clauses.append(Lead.intent.is_(None))
+    return or_(*clauses)
 
 
 class LeadService(ServiceBase):
@@ -75,6 +98,7 @@ class LeadService(ServiceBase):
         self.email_service = EmailService()
         self.transition_service = StageTransitionService(session)
         self.assignment_service = LeadAssignmentService(session)
+        self.intent_service = LeadIntentService(session)
 
     async def bulk_reassign(self, lead_ids: list[UUID], assigned_to_id: UUID, *, actor_id: UUID | None) -> int:
         """Reassign the owner of many leads at once (Manager bulk action).
@@ -247,6 +271,11 @@ class LeadService(ServiceBase):
         # row query and the count, keeping pagination totals correct).
         if filters.unassigned:
             extra_filters.append(Lead.assigned_to_id.is_(None))
+        # Intent: one or several of high / medium / low, and "none" for not-rated leads (IS NULL — like
+        # "unassigned", the generic builder can't express it, so it's one OR clause here).
+        intent_clause = _intent_filter_clause(filters.intent)
+        if intent_clause is not None:
+            extra_filters.append(intent_clause)
         list_args = dict(
             pagination=pagination,
             filters={
@@ -409,6 +438,7 @@ class LeadService(ServiceBase):
                 "expected_close_date": payload.expected_close_date,
                 "source": payload.source,
                 "campaign": campaign,
+                "intent": payload.intent,
                 "interest": payload.interest,
                 "assigned_to_id": payload.assigned_to_id,
                 "partner_id": payload.partner_id,
@@ -434,6 +464,14 @@ class LeadService(ServiceBase):
             to_user_id=payload.assigned_to_id,
             actor_id=actor_id,
             source=assignment_source,
+        )
+        # A starting intent (New Lead form / CSV column) begins the lead's intent history.
+        self.intent_service.record(
+            lead_id=lead.id,
+            from_intent=None,
+            to_intent=payload.intent,
+            actor_id=actor_id,
+            source="import" if assignment_source == "import" else "created",
         )
         if payload.assigned_to_id and notify_assignee:
             await self._notify_assignee(
@@ -500,6 +538,33 @@ class LeadService(ServiceBase):
             await self._notify_assignee(
                 update_data["assigned_to_id"], f"Lead assigned: {lead.title}", lead.title, background_tasks
             )
+        await self.commit()
+        await self.invalidate_reporting_cache()
+        lead = await self.get_lead(lead.id)
+        await realtime_manager.broadcast({"event": "lead.updated", "payload": {"id": str(lead.id), "title": lead.title}})
+        return lead
+
+    async def set_intent(self, lead_id: UUID, intent: str, *, actor_id: UUID):
+        """Lead details → change the intent without moving the stage. Refused once the intent is fixed
+        (Booked / Token onward, closed stages). An unchanged intent is a no-op."""
+        lead = await self.get_lead(lead_id)
+        # Lock the lead row (held until commit) and re-read what we check and change: the loaded object can be
+        # stale (a stage move or another quick change may have committed meanwhile). Serialises quick changes
+        # and stage moves on this lead, so the "fixed" check and the history's "from" are exact.
+        await self.session.refresh(lead, attribute_names=["intent", "stage_code"], with_for_update=True)
+        stage = await PipelineStageRepository(self.session).find(lead.industry, lead.stage_code)
+        if stage is not None and stage_locks_intent(stage):
+            raise ConflictError(
+                f"This lead's intent is fixed at its current stage ({stage.name}) and can't be changed."
+            )
+        previous = lead.intent
+        if previous == intent:
+            return lead
+        self.intent_service.record(
+            lead_id=lead.id, from_intent=previous, to_intent=intent, actor_id=actor_id, source="quick_set"
+        )
+        lead.intent = intent
+        lead.updated_by_id = actor_id
         await self.commit()
         await self.invalidate_reporting_cache()
         lead = await self.get_lead(lead.id)

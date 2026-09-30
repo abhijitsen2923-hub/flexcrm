@@ -37,6 +37,7 @@ from sqlalchemy.exc import DBAPIError
 from app.core.currencies import DEFAULT_CURRENCY, allowed_currencies_for_org
 from app.core.exceptions import AppException, ValidationError
 from app.core.lead_csv import CsvColumn, import_columns_for
+from app.core.lead_intent import normalize_intent
 from app.core.logging import get_logger, request_id_context
 from app.core.permissions import can_set_stage
 from app.core.tenancy import current_org
@@ -393,6 +394,7 @@ class LeadImportService(ServiceBase):
             "currency": currency,
         }
         _handled = {"stage", "contact_name", "title", "currency", "owner_email"}
+        intent_warning: str | None = None
         for col in columns:
             if col.key in _handled:
                 continue
@@ -406,6 +408,17 @@ class LeadImportService(ServiceBase):
                 payload_kwargs[col.key] = self._parse_int(raw_val, field=col.header, default=0, lo=0, hi=100)
             elif col.kind == "date":
                 payload_kwargs[col.key] = self._parse_date(raw_val)
+            elif col.kind == "intent":
+                # An existing sheet may already have an "Intent" column meaning something else — import the
+                # lead anyway, not rated, and say so (never fail the row over it).
+                try:
+                    payload_kwargs[col.key] = normalize_intent(raw_val)
+                except ValueError:
+                    payload_kwargs[col.key] = None
+                    intent_warning = (
+                        f"{col.header} '{str(raw_val).strip()}' isn't High, Medium or Low — the lead was imported "
+                        "without an intent."
+                    )
             else:
                 payload_kwargs[col.key] = raw_val or None
 
@@ -471,9 +484,11 @@ class LeadImportService(ServiceBase):
                     StageTransitionCreate(
                         to_stage_code=target_stage.code,
                         comment=f"Imported from CSV upload — initial stage set to {target_stage.name}.",
+                        intent=payload.intent,
                     ),
                     actor_id=actor_id,
                     actor_role=actor_role,
+                    intent_source="import",
                 )
                 was_promoted = target_stage.code == "sold"
             except Exception as exc:  # noqa: BLE001 — the lead is saved; report the stage, don't call it failed
@@ -486,7 +501,8 @@ class LeadImportService(ServiceBase):
                     f"wasn't set: {reason}"
                 )
 
-        return _RowResult(lead_number, was_promoted, assignee_id, stage_warning)
+        warning = " ".join(w for w in (intent_warning, stage_warning) if w) or None
+        return _RowResult(lead_number, was_promoted, assignee_id, warning)
 
     # --- helpers -----------------------------------------------------------
 

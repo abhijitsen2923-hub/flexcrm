@@ -17,7 +17,7 @@ class CsvColumn:
     key: str                       # LeadCreate/Lead attribute name (or "stage")
     header: str                    # column header shown in template + export
     aliases: frozenset[str] = frozenset()  # accepted import headers (lowercased)
-    kind: str = "str"              # str | decimal | int | date | currency | stage
+    kind: str = "str"              # str | decimal | int | date | currency | stage | intent
     sample: str = ""               # example value used in the downloadable template
 
     def all_aliases(self) -> frozenset[str]:
@@ -48,6 +48,8 @@ _COMMON: list[CsvColumn] = [
         frozenset({"utm_campaign", "campaign name", "campaign_name"}),
         sample="",
     ),
+    # How serious the lead is: High / Medium / Low (any case). Blank = not rated.
+    CsvColumn("intent", "Intent", frozenset({"lead intent", "intent level"}), kind="intent", sample="High"),
     # Assign the lead's owner (assignee) by their user email. The importer resolves it
     # to a user in your workspace; unknown emails error the row. Blank = unassigned.
     CsvColumn(

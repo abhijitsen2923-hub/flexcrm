@@ -5,6 +5,7 @@ from uuid import UUID
 
 from pydantic import EmailStr, Field
 
+from app.core.lead_intent import LeadIntent
 from app.database.enums import LeadIndustry
 from app.schemas.common import ORMModel, SearchSortParams
 from app.schemas.customer import CustomerCompact
@@ -44,6 +45,8 @@ class LeadCreate(ORMModel):
     expected_close_date: date | None = None
     source: str | None = Field(default=None, max_length=120)
     campaign: str | None = Field(default=None, max_length=120)
+    # Optional on create (a brand-new lead may not be judged yet).
+    intent: LeadIntent | None = None
     interest: str | None = Field(default=None, max_length=255)
     assigned_to_id: UUID | None = None
     # Referring channel partner (broker), if this walk-in came via one.
@@ -101,6 +104,13 @@ class LeadBulkTransition(ORMModel):
     to_stage_code: str = Field(min_length=1, max_length=64)
     comment: str = Field(min_length=MIN_COMMENT_LENGTH, max_length=4000)
     next_action_date: datetime | None = None
+    # Intent for every lead moved (the app asks for it unless the target stage fixes intent).
+    intent: LeadIntent | None = None
+
+
+class LeadIntentUpdate(ORMModel):
+    """Lead details → change the intent without moving the stage."""
+    intent: LeadIntent
 
 
 class LeadBulkActionResult(ORMModel):
@@ -162,6 +172,7 @@ class LeadRead(ORMModel):
     expected_close_date: date | None = None
     source: str | None = None
     campaign: str | None = None
+    intent: str | None = None  # high | medium | low; None = not rated
     # External provenance (set only on ingested leads): which connector and the
     # portal's own id (e.g. the 99acres lead_id). Surfaced in the lead detail.
     source_provider: str | None = None
@@ -214,6 +225,8 @@ class LeadFilterParams(SearchSortParams):
     stage_code: str | None = None  # single code, or comma-joined for multi-select → IN (...)
     source: str | None = None
     campaign: str | None = None
+    # Intent, comma-joined for several: high,medium,low and "none" (not rated) → intent IN (...) / IS NULL.
+    intent: str | None = None
     assigned_to_id: UUID | None = None
     # Owner/admin triage: filter to leads with no owner (assigned_to_id IS NULL) so
     # they can be handed out. A plain bool because the generic filter builder can't

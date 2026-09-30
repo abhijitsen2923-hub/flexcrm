@@ -19,3 +19,16 @@ class LeadAssignmentEventRead(ORMModel):
     from_user: TransitionActor | None = None
     to_user: TransitionActor | None = None
     performed_by: TransitionActor | None = None
+
+
+class LeadIntentChangeRead(ORMModel):
+    """One change of a lead's intent (high | medium | low; None = not rated), who made it and how."""
+
+    id: UUID
+    lead_id: UUID
+    from_intent: str | None = None
+    to_intent: str | None = None
+    source: str
+    performed_at: datetime
+    performed_by_id: UUID | None = None
+    performed_by: TransitionActor | None = None

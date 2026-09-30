@@ -26,6 +26,9 @@ def ws_client(tmp_path, monkeypatch):
     monkeypatch.setenv("JWT_REFRESH_SECRET_KEY", "test-refresh-secret-key-1234")
     monkeypatch.setenv("REDIS_URL", "redis://localhost:6399/0")
     monkeypatch.setenv("RATE_LIMIT_PER_MINUTE", "1000")
+    # Existing tests sign up Education / Travel workspaces; production allows real estate only
+    # (tests/test_signup_verticals.py covers that default).
+    monkeypatch.setenv("SIGNUP_BUSINESS_TYPES", "education,travel,real_estate")
     monkeypatch.setenv("DOCS_ENABLED", "false")
 
     from app.core.config import get_settings

@@ -5,6 +5,7 @@ from uuid import UUID
 
 from pydantic import Field
 
+from app.core.lead_intent import LeadIntent
 from app.schemas.common import ORMModel
 
 
@@ -54,6 +55,10 @@ class StageTransitionCreate(ORMModel):
     # Real-estate 'Booked / Token' capture — property unit + token. When present,
     # create_transition creates/updates the lead's Booking with the token.
     booking: BookedTokenCapture | None = None
+    # The lead's intent chosen with this move. The app asks for it on every move before "Booked / Token";
+    # omitted → the lead keeps its intent (older clients). Ignored where intent is fixed (Booked onward,
+    # closed stages).
+    intent: LeadIntent | None = None
 
 
 class TransitionActor(ORMModel):
@@ -79,4 +84,5 @@ class StageTransitionRead(ORMModel):
     performed_by_id: UUID | None = None
     performed_at: datetime
     mentions: list[UUID] | None = None
+    intent: str | None = None
     performed_by: TransitionActor | None = None

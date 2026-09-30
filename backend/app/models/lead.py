@@ -29,6 +29,7 @@ class Lead(TenantBase, UUIDPrimaryKeyMixin, TimestampMixin, TenantAuditMixin, Te
     __table_args__ = (
         CheckConstraint("probability >= 0 AND probability <= 100", name="ck_leads_probability_range"),
         CheckConstraint("value >= 0", name="ck_leads_value_non_negative"),
+        CheckConstraint("intent IN ('high', 'medium', 'low')", name="ck_leads_intent"),
         # Composite FK validates (industry, stage_code) against public.pipeline_stages.
         ForeignKeyConstraint(
             ["industry", "stage_code"],
@@ -77,6 +78,9 @@ class Lead(TenantBase, UUIDPrimaryKeyMixin, TimestampMixin, TenantAuditMixin, Te
     # Marketing campaign this lead is attributed to (free string, controlled list
     # app-side) — a secondary attribution dimension alongside source.
     campaign: Mapped[str | None] = mapped_column(String(120), nullable=True, index=True)
+    # How serious the lead is — high | medium | low (NULL = not rated); set on stage changes, the lead
+    # details' quick set, create and CSV import. Fixed from "Booked / Token" onward (app/core/lead_intent.py).
+    intent: Mapped[str | None] = mapped_column(String(8), nullable=True, index=True)
     interest: Mapped[str | None] = mapped_column(String(255), nullable=True)
     # External provenance for leads ingested from an outside source (e.g. Meta
     # Lead Ads). `external_id` is the provider's own record id (the Meta

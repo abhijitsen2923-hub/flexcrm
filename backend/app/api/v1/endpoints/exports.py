@@ -17,6 +17,7 @@ from sqlalchemy.orm import selectinload
 
 from app.api.deps import require_permissions
 from app.core.lead_csv import CsvColumn, columns_for
+from app.core.lead_intent import INTENT_LABEL
 from app.core.permissions import PermissionCode
 from app.core.tenancy import current_org
 from app.database.enums import LeadIndustry
@@ -47,6 +48,8 @@ def _csv_response(filename: str, rows: list[list[str]], header: list[str]) -> St
 def _lead_cell(lead: Lead, col: CsvColumn) -> str:
     if col.key == "owner_email":
         return lead.assigned_to.email if lead.assigned_to else ""
+    if col.key == "intent":
+        return INTENT_LABEL.get(lead.intent or "", "")
     attr = "stage_code" if col.key == "stage" else col.key
     value = getattr(lead, attr, None)
     if value is None:

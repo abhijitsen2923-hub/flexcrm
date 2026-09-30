@@ -5,7 +5,8 @@ from uuid import UUID
 from fastapi import BackgroundTasks
 from sqlalchemy import select, text
 
-from app.core.exceptions import AuthenticationError, ConflictError, ServiceUnavailableError
+from app.core.config import get_settings
+from app.core.exceptions import AuthenticationError, ConflictError, ServiceUnavailableError, ValidationError
 from app.core.permissions import effective_permissions_for_user
 from app.core.schema_naming import make_schema_name
 from app.core.security import (
@@ -49,6 +50,11 @@ class AuthService(ServiceBase):
         user_agent: str | None = None,
         ip_address: str | None = None,
     ) -> TokenResponse:
+        # New workspaces: only the business types this deployment offers (real estate). Checked first, so a
+        # refused signup never creates anything.
+        allowed = get_settings().signup_business_types
+        if payload.business_type.value not in allowed:
+            raise ValidationError("New workspaces can only be created for real estate.")
         # Lookup of "is this email taken" must cross orgs — bypass the global
         # filter for it. The same is true for every read in this method until
         # we've created the new org and set scope on the session.

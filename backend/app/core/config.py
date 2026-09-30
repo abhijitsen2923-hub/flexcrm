@@ -49,6 +49,10 @@ class Settings(BaseSettings):
     ]
     docs_enabled: bool = True
 
+    # Business types a NEW workspace may sign up with (comma-separated). FlexCRM runs real estate only, so
+    # Education / Travel signups are refused; existing workspaces of any type keep working.
+    signup_business_types: Annotated[list[str], NoDecode] = ["real_estate"]
+
     # When true, 500 responses include the exception type/message to aid
     # debugging. Default true during stabilization; set EXPOSE_ERROR_DETAIL=false
     # in the deployment env before go-live so internals aren't leaked to clients.
@@ -125,7 +129,7 @@ class Settings(BaseSettings):
 
     archival_retention_days: int = 90
 
-    @field_validator("cors_origins", mode="before")
+    @field_validator("cors_origins", "signup_business_types", mode="before")
     @classmethod
     def parse_cors_origins(cls, value: str | list[str]) -> list[str]:
         if isinstance(value, str):

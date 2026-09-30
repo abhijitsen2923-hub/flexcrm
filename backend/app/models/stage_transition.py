@@ -39,6 +39,9 @@ class StageTransition(TenantBase, UUIDPrimaryKeyMixin):
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
     mentions: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    # The lead's intent recorded with this move — chosen on the move, or (from Booked onward, where it is
+    # fixed) the lead's intent at that moment. NULL on older rows / moves that didn't set one.
+    intent: Mapped[str | None] = mapped_column(String(8), nullable=True)
 
     lead = relationship("Lead", back_populates="stage_transitions")
     # Cross-schema relationship to public.users. The FK string "public.users.id"

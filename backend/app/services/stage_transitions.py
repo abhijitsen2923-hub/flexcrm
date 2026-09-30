@@ -4,6 +4,7 @@ from uuid import UUID
 from sqlalchemy import select
 
 from app.core.exceptions import AuthorizationError, NotFoundError, ValidationError
+from app.core.lead_intent import stage_locks_intent
 from app.core.logging import get_logger
 from app.core.permissions import STAGE_MANAGER_ROLES, can_set_stage
 from app.core.tenancy import current_org
@@ -20,6 +21,7 @@ from app.services.base import ServiceBase
 from app.services.customer_promotion import CustomerPromotionService
 from app.services.lead_assignments import LeadAssignmentService
 from app.services.lead_documents import LeadDocumentService
+from app.services.lead_intents import LeadIntentService
 from app.services.notifications import NotificationService
 from app.services.realtime import realtime_manager
 # Phase 4 wiring — auto-create SalesOrder + Invoice + Commission accrual on
@@ -79,6 +81,7 @@ class StageTransitionService(ServiceBase):
         self.promotion_service = CustomerPromotionService(session)
         self.document_service = LeadDocumentService(session)
         self.user_repository = UserRepository(session)
+        self.intent_service = LeadIntentService(session)
 
     async def list_transitions(self, lead_id: UUID) -> list[StageTransition]:
         lead = await self.lead_repository.get(lead_id)
@@ -94,6 +97,7 @@ class StageTransitionService(ServiceBase):
         actor_id: UUID,
         actor_role: UserRole,
         allow_backward: bool = True,
+        intent_source: str = "stage_change",
     ) -> StageTransition:
         """Move one lead to `payload.to_stage_code`. `allow_backward=False` (bulk moves) rejects, for
         EVERY role, a move to an earlier active stage and any change to a closed (Sold or lost) lead,
@@ -193,6 +197,25 @@ class StageTransitionService(ServiceBase):
         ):
             lead.batch_code = payload.batch_code.strip()[:64]
 
+        # Intent (High / Medium / Low) is chosen with the move — except where it is fixed (Booked / Token
+        # onward, closed stages): there the lead keeps its intent and the row records it as it stood.
+        # Omitted (older clients) → the lead keeps its intent and the row records none. The current intent
+        # is re-read under the lead's row lock (a quick change may have committed since the lead was loaded).
+        await self.session.refresh(lead, attribute_names=["intent"], with_for_update=True)
+        if stage_locks_intent(target_stage):
+            transition_intent = lead.intent
+        else:
+            transition_intent = payload.intent
+            if payload.intent is not None:
+                self.intent_service.record(
+                    lead_id=lead.id,
+                    from_intent=lead.intent,
+                    to_intent=payload.intent,
+                    actor_id=actor_id,
+                    source=intent_source,
+                )
+                lead.intent = payload.intent
+
         transition = await self.transition_repository.create(
             {
                 "lead_id": lead.id,
@@ -203,6 +226,7 @@ class StageTransitionService(ServiceBase):
                 "attachment_path": payload.attachment_path,
                 "performed_by_id": actor_id,
                 "mentions": [str(uid) for uid in (payload.mentions or [])] or None,
+                "intent": transition_intent,
             }
         )
 
@@ -358,6 +382,7 @@ class StageTransitionService(ServiceBase):
         actor_role: UserRole,
         next_action_date: datetime | None = None,
         enforce_owner_id: UUID | None = None,
+        intent: str | None = None,
     ) -> dict:
         """Move each lead to `to_stage_code` via the normal single-lead path, so
         every rule and side effect (comment, role gates, Sold/Booked promotions,
@@ -391,10 +416,12 @@ class StageTransitionService(ServiceBase):
                         to_stage_code=to_stage_code,
                         comment=comment,
                         next_action_date=next_action_date,
+                        intent=intent,
                     ),
                     actor_id=actor_id,
                     actor_role=actor_role,
                     allow_backward=False,
+                    intent_source="bulk",
                 )
                 updated += 1
             except (ValidationError, AuthorizationError, NotFoundError) as exc:
@@ -476,7 +503,8 @@ class StageTransitionService(ServiceBase):
         industry: LeadIndustry,
         actor_id: UUID,
     ) -> StageTransition:
-        """Auto stamp written when a lead is first created — comment is system-generated."""
+        """Auto stamp written when a lead is first created — comment is system-generated. Carries the
+        lead's starting intent (if it was given one), so the first history entry shows it."""
         target_stage = await self.stage_repository.find(industry, lead.stage_code)
         comment = f"Lead created by user. Initial stage: {target_stage.name if target_stage else lead.stage_code}."
         transition = await self.transition_repository.create(
@@ -486,6 +514,7 @@ class StageTransitionService(ServiceBase):
                 "to_stage_code": lead.stage_code,
                 "comment": comment,
                 "performed_by_id": actor_id,
+                "intent": lead.intent,
             }
         )
         lead.last_comment_preview = comment[:255]

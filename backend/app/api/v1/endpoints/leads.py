@@ -2,13 +2,16 @@ from uuid import UUID
 
 from fastapi import APIRouter, BackgroundTasks, Body, Depends, File, HTTPException, Query, UploadFile, status
 from fastapi.responses import StreamingResponse
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import load_effective_permissions, pagination_params, require_permissions
 from app.core.exceptions import ValidationError
 from app.core.lead_csv import build_template_csv
 from app.core.permissions import ASSIGNED_ONLY_LEAD_ROLES, PermissionCode
+from app.core.tenancy import current_org
 from app.database.session import get_db_session
+from app.models.organization import Organization
 from app.schemas.common import MessageResponse, PaginatedResponse, PaginationParams, build_page_meta
 from app.schemas.lead import (
     LeadBulkActionResult,
@@ -19,11 +22,12 @@ from app.schemas.lead import (
     LeadCreate,
     LeadDuplicate,
     LeadFilterParams,
+    LeadIntentUpdate,
     LeadRead,
     LeadUpdate,
 )
 from app.schemas.channel_partner import BrokeragePayoutRead
-from app.schemas.lead_assignment import LeadAssignmentEventRead
+from app.schemas.lead_assignment import LeadAssignmentEventRead, LeadIntentChangeRead
 from app.schemas.lead_document import LeadDocumentRead, LeadDocumentUpload
 from app.schemas.stage_transition import StageTransitionCreate, StageTransitionRead
 from app.services.channel_partners import ChannelPartnerService
@@ -31,6 +35,7 @@ from app.services.campaigns import CampaignWritePolicy
 from app.services.lead_assignments import LeadAssignmentService
 from app.services.lead_documents import LeadDocumentService, get_lead_or_404
 from app.services.lead_import import LeadImportService
+from app.services.lead_intents import LeadIntentService
 from app.services.leads import LeadService
 from app.services.stage_transitions import StageTransitionService
 
@@ -181,6 +186,7 @@ async def bulk_transition_leads(
         actor_role=current_user.role,
         next_action_date=payload.next_action_date,
         enforce_owner_id=enforce,
+        intent=payload.intent,
     )
     return LeadBulkActionResult(**result)
 
@@ -279,6 +285,31 @@ async def list_assignments(
     return await LeadAssignmentService(session).list_for_lead(lead_id)
 
 
+@router.get("/{lead_id}/intent-changes", response_model=list[LeadIntentChangeRead])
+async def list_intent_changes(
+    lead_id: UUID,
+    current_user=Depends(require_permissions(PermissionCode.LEAD_VIEW)),
+    session: AsyncSession = Depends(get_db_session),
+):
+    """The lead's intent history (High / Medium / Low changes, by whom, how), newest first. Same access rule
+    as the stage history; the drawer shows the ones made without a stage change in its timeline."""
+    await _enforce_lead_access(session, lead_id, current_user)
+    return await LeadIntentService(session).list_for_lead(lead_id)
+
+
+@router.put("/{lead_id}/intent", response_model=LeadRead)
+async def set_lead_intent(
+    lead_id: UUID,
+    payload: LeadIntentUpdate,
+    current_user=Depends(require_permissions(PermissionCode.LEAD_MANAGE)),
+    session: AsyncSession = Depends(get_db_session),
+):
+    """Lead details → change the lead's intent without moving the stage (recorded in its history).
+    409 once the intent is fixed (Booked / Token onward, closed stages)."""
+    await _enforce_lead_access(session, lead_id, current_user)
+    return await LeadService(session).set_intent(lead_id, payload.intent, actor_id=current_user.id)
+
+
 @router.post(
     "/{lead_id}/transitions",
     response_model=StageTransitionRead,
@@ -306,9 +337,18 @@ async def create_transition(
 @router.get("/import/template.csv")
 async def download_import_template(
     current_user=Depends(require_permissions(PermissionCode.LEAD_IMPORT)),
+    session: AsyncSession = Depends(get_db_session),
 ):
-    """Vertical-aware starter CSV — same shape the `POST /import` endpoint accepts."""
-    body, filename = build_template_csv(current_user.business_type)
+    """Vertical-aware starter CSV — same shape the `POST /import` endpoint accepts. Follows the WORKSPACE's
+    business type (like the import and the export): the per-user field is empty for every user an owner adds,
+    which gave their staff the Education template."""
+    org_id = current_org(session)
+    org = (
+        (await session.execute(select(Organization).where(Organization.id == org_id))).scalar_one_or_none()
+        if org_id is not None
+        else None
+    )
+    body, filename = build_template_csv(org.business_type if org else current_user.business_type)
     return StreamingResponse(
         iter([body]),
         media_type="text/csv",

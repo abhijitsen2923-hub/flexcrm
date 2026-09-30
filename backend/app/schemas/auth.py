@@ -18,8 +18,9 @@ class RegisterRequest(BaseModel):
     # working without a 422.
     role: UserRole = UserRole.owner
     # Industry of the registering business. Stored on the new Organization;
-    # every user inside the org inherits it.
-    business_type: LeadIndustry
+    # every user inside the org inherits it. Real estate unless the deployment allows others
+    # (SIGNUP_BUSINESS_TYPES) — the signup page no longer asks.
+    business_type: LeadIndustry = LeadIndustry.real_estate
     # Organization name. Each registration creates a new Organization with the
     # registering user as its first admin. (Joining an existing org via invite
     # is a future feature.) If omitted, defaults to "{first_name}'s Workspace".
