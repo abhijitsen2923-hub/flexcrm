@@ -76,6 +76,16 @@ class SalesOrder(TenantBase, UUIDPrimaryKeyMixin, TimestampMixin, TenantAuditMix
 
     customer = relationship("Customer")
     lead = relationship("Lead")
+
+    # The customer's name for lists (SalesOrderRead.customer_name). Only read when `customer` was loaded with the
+    # order — an async session must never lazy-load it.
+    @property
+    def customer_name(self) -> str | None:
+        customer = self.__dict__.get("customer")
+        if customer is None:
+            return None
+        return (customer.contact_name or customer.company_name or "").strip() or None
+
     assists = relationship(
         "SalesOrderAssist",
         back_populates="sales_order",

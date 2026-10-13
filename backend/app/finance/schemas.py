@@ -31,6 +31,8 @@ class SalesOrderRead(ORMModel):
     customer_id: UUID
     primary_owner_id: UUID | None = None
     title: str
+    # Who bought — the customer's name (the title is the lead's title, often just "flat" or "Mr").
+    customer_name: str | None = None
     deal_value: Decimal
     currency: str
     payment_status: PaymentStatus
@@ -402,6 +404,7 @@ class ManualIncomeFilters(SearchSortParams):
 class FinanceBreakdownRow(ORMModel):
     label: str
     value: Decimal
+    count: int | None = None  # how many entries make up `value` (when the chart shows it)
 
 
 class FinanceSummaryResponse(ORMModel):
@@ -423,6 +426,10 @@ class FinanceSummaryResponse(ORMModel):
     # Charts
     expense_by_category: list[FinanceBreakdownRow] = []
     income_by_category: list[FinanceBreakdownRow] = []
+    # Money collected on bookings, by what it was paid for (the instalment it was recorded against — the builder's own
+    # milestone names: booking amount, agreement, a construction stage, registration …).
+    collections_by_purpose: list[FinanceBreakdownRow] = []
+    collections_total: Decimal = Decimal("0")
 
 
 # ---- Per-customer demand ledger (Phase 3a) ----

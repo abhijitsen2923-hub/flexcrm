@@ -21,6 +21,7 @@ from app.database.enums import (
     FinanceBusinessMode,
     FinanceCategoryKind,
     InvoiceStatus,
+    LeadIndustry,
     PaymentStatus,
     VendorBillStatus,
 )
@@ -114,13 +115,19 @@ class SalesOrderService(ServiceBase):
             raise ValidationError("Cannot create a SalesOrder for a lead without a Customer.")
 
         order_number = await _next_sequence(self.session, SalesOrder, "order_number", "SO")
+        deal_value = lead.value or Decimal("0")
+        if deal_value <= 0 and lead.industry == LeadIndustry.real_estate:
+            # A flat's lead keeps `value` at 0 (hidden on the form) — the sale is worth its booking's agreed price.
+            from app.real_estate.sale_value import sale_value_for_lead
+
+            deal_value = await sale_value_for_lead(self.session, lead.id)
         order = SalesOrder(
             order_number=order_number,
             lead_id=lead.id,
             customer_id=lead.customer_id,
             primary_owner_id=lead.assigned_to_id,
             title=lead.title,
-            deal_value=lead.value or Decimal("0"),
+            deal_value=deal_value,
             # Inherit currency from the lead — multi-currency support: a
             # USD-denominated lead becomes a USD-denominated sales order.
             currency=(lead.currency or "INR").upper(),
@@ -217,7 +224,7 @@ class SalesOrderService(ServiceBase):
         )
 
     async def list_orders(self, *, filters: dict[str, object] | None = None):
-        stmt = select(SalesOrder).options(selectinload(SalesOrder.assists))
+        stmt = select(SalesOrder).options(selectinload(SalesOrder.assists), selectinload(SalesOrder.customer))
         for key, value in (filters or {}).items():
             if value is None:
                 continue
@@ -230,7 +237,11 @@ class SalesOrderService(ServiceBase):
             await self.session.execute(
                 select(SalesOrder)
                 .where(SalesOrder.id == order_id)
-                .options(selectinload(SalesOrder.assists), selectinload(SalesOrder.invoice))
+                .options(
+                    selectinload(SalesOrder.assists),
+                    selectinload(SalesOrder.invoice),
+                    selectinload(SalesOrder.customer),
+                )
             )
         ).scalar_one_or_none()
         if order is None:
@@ -988,6 +999,8 @@ class FinanceSummaryService(ServiceBase):
             )
         ).all()
 
+        collections = await self._collections_by_purpose()
+
         income_total = manual_income_total + sales_revenue_total
         expense_total = expenses_total + bills_total
         expense_paid = expenses_paid + vendor_payments_paid
@@ -1007,7 +1020,41 @@ class FinanceSummaryService(ServiceBase):
             net_position=income_total - expense_paid,
             expense_by_category=[FinanceBreakdownRow(label=n, value=Decimal(v)) for n, v in exp_by_cat],
             income_by_category=[FinanceBreakdownRow(label=n, value=Decimal(v)) for n, v in inc_by_cat],
+            collections_by_purpose=collections,
+            collections_total=sum((row.value for row in collections), Decimal("0")),
         )
+
+    # Shown for money recorded on a booking without picking which instalment it pays.
+    UNLINKED_PURPOSE = "Not linked to an instalment"
+
+    async def _collections_by_purpose(self) -> list[FinanceBreakdownRow]:
+        """Money collected on (non-archived) bookings, grouped by what it was paid for: the instalment each payment
+        was recorded against — the builder's own milestone names, so "Agreement" and "agreement " are one group."""
+        # Local import: the real-estate models import finance-adjacent modules at load time.
+        from app.real_estate.models import Booking, PaymentReceipt, PaymentSchedule
+
+        name = func.trim(PaymentSchedule.installment_name)
+        key = func.coalesce(func.lower(name), "")
+        rows = (
+            await self.session.execute(
+                select(
+                    func.min(name).label("label"),
+                    func.coalesce(func.sum(PaymentReceipt.amount), 0).label("value"),
+                    func.count(PaymentReceipt.id).label("count"),
+                )
+                .select_from(PaymentReceipt)
+                .join(Booking, Booking.id == PaymentReceipt.booking_id)
+                .outerjoin(PaymentSchedule, PaymentSchedule.id == PaymentReceipt.schedule_id)
+                .where(Booking.is_deleted.is_(False))
+                .group_by(key)
+                .order_by(func.sum(PaymentReceipt.amount).desc())
+            )
+        ).all()
+        return [
+            FinanceBreakdownRow(label=row.label or self.UNLINKED_PURPOSE, value=Decimal(row.value), count=row.count)
+            for row in rows
+            if Decimal(row.value) > 0
+        ]
 
 
 class CustomerDemandService(ServiceBase):
