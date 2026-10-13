@@ -124,6 +124,18 @@ test("a parking spot is priced on its own — no parking charge on top", () => {
   const legacy = seedPricing(spot, LEGACY);
   assert.equal(legacy.parking, 0);
   assert.equal(legacy.basisArea, 0);
+  // None of the flat's lump sums ride along on a standalone spot either.
+  const lumps = seedPricing(spot, {
+    amenities: 150_000, sinkingFund: 50_000, legalFees: 25_000, overhead: 10_000, otherCharges: 5_000, parking: 300_000,
+  });
+  assert.deepEqual(
+    [lumps.amenities, lumps.sinkingFund, lumps.legalFees, lumps.overhead, lumps.otherCharges, lumps.parking],
+    [0, 0, 0, 0, 0, 0]
+  );
+  // A flat keeps them.
+  const flat = seedPricing(unit({ unitType: "residential" }), { amenities: 150_000, legalFees: 25_000 });
+  assert.equal(flat.amenities, 150_000);
+  assert.equal(flat.legalFees, 25_000);
   const priced = seedPricing(spot, { parkingPrices: { CP: 400_000 } });
   assert.equal(priced.parking, 0);
   assert.deepEqual(priced.parkingTypes, []);

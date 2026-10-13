@@ -101,17 +101,24 @@ export default function BookingsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [preselectedUnitId, navState?.towerName, navState?.projectName]);
 
-  // If a deep-linked unit resolved to placeholder names (projects hadn't loaded
-  // yet), patch them once inventory arrives. Guarded against re-render loops.
+  // A deep-linked (or resumed) unit is set before inventory has loaded, so it can lack its real tower/project
+  // names and — always on the Inventory board's "Start booking" path — the project's price defaults (floor rise,
+  // PLC, per-sq-ft charges, parking prices) the booking price calculator seeds from. Fill in whatever is missing
+  // once inventory arrives. Guarded against re-render loops: once both are present it returns `prev`.
   useEffect(() => {
     setWizardUnit((prev) => {
-      if (!prev || (prev.towerName !== "Tower" && prev.projectName !== "Project")) return prev;
+      if (!prev) return prev;
+      const placeholderNames = prev.towerName === "Tower" || prev.projectName === "Project";
+      const missingDefaults = prev.priceDefaults == null;
+      if (!placeholderNames && !missingDefaults) return prev;
       const ctx = unitContext(prev.id);
       if (!ctx) return prev;
-      const towerName = navState?.towerName ?? ctx.towerName;
-      const projectName = navState?.projectName ?? ctx.projectName;
-      if (towerName === prev.towerName && projectName === prev.projectName) return prev;
-      return { ...prev, towerName, projectName, priceDefaults: ctx.priceDefaults };
+      return {
+        ...prev,
+        towerName: placeholderNames ? navState?.towerName ?? ctx.towerName : prev.towerName,
+        projectName: placeholderNames ? navState?.projectName ?? ctx.projectName : prev.projectName,
+        priceDefaults: prev.priceDefaults ?? ctx.priceDefaults,
+      };
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projects]);

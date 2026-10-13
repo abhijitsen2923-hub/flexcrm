@@ -109,8 +109,9 @@ export interface PriceSeed {
 
 /**
  * The calculator's starting figures. The unit's own price wins for the rate (it was priced when it was made);
- * per-sq-ft charges are worked out on the same basis area; PLC only for a unit marked PLC; a parking spot never
- * gets the parking charge on top of its own price.
+ * per-sq-ft charges are worked out on the same basis area; PLC only for a unit marked PLC. A parking spot booked on
+ * its own is its own price: none of the flat's charges (parking, amenities, sinking fund, legal, overhead, other)
+ * are pre-filled on top — staff can still type one in.
  */
 export function seedPricing(unit: PricingUnit, defaults: PriceDefaults | null | undefined): PriceSeed {
   const d = defaults ?? {};
@@ -132,12 +133,16 @@ export function seedPricing(unit: PricingUnit, defaults: PriceDefaults | null | 
     floorRisePerFloor,
     floorRiseFrom: d.floorRiseFrom != null && d.floorRiseFrom >= 1 ? d.floorRiseFrom : DEFAULT_FLOOR_RISE_FROM,
     plc: unit.hasPlc ? rupees(positive(d.plcRate) * area) : 0,
-    amenities: positive(d.amenitiesRate) > 0 ? rupees(positive(d.amenitiesRate) * area) : positive(d.amenities),
+    amenities: isParkingSpot
+      ? 0
+      : positive(d.amenitiesRate) > 0
+        ? rupees(positive(d.amenitiesRate) * area)
+        : positive(d.amenities),
     parking,
     parkingTypes,
-    sinkingFund: positive(d.sinkingFund),
-    legalFees: positive(d.legalFees),
-    overhead: positive(d.overhead),
-    otherCharges: positive(d.otherCharges),
+    sinkingFund: isParkingSpot ? 0 : positive(d.sinkingFund),
+    legalFees: isParkingSpot ? 0 : positive(d.legalFees),
+    overhead: isParkingSpot ? 0 : positive(d.overhead),
+    otherCharges: isParkingSpot ? 0 : positive(d.otherCharges),
   };
 }
