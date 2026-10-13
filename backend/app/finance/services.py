@@ -150,10 +150,12 @@ class SalesOrderService(ServiceBase):
         self.session.add(invoice)
 
         # Accrue commission for the primary owner (and assists pro rata) — unless
-        # the lead is marked incentive-exempt ("Others / owner's reference"), in
-        # which case nobody earns on this deal. The SalesOrder + Invoice are still
-        # created so the revenue is recorded; only the commission accrual is skipped.
-        if order.primary_owner_id is not None and not lead.incentive_exempt:
+        # the lead is marked incentive-exempt ("Others / owner's reference") or it is
+        # a channel-partner sale: a CP sale pays the partner's brokerage only, never
+        # an internal incentive (the salesperson, if picked, is just on record). The
+        # SalesOrder + Invoice are still created so the revenue is recorded; only the
+        # commission accrual is skipped.
+        if order.primary_owner_id is not None and not lead.incentive_exempt and lead.partner_id is None:
             total_assist_percent = sum(a.percent for a in order.assists)
             primary_percent = max(0, 100 - total_assist_percent)
             await self._accrue_commission(order, order.primary_owner_id, primary_percent)

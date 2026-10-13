@@ -79,6 +79,10 @@ class ChannelPartnerStats(ORMModel):
     """Per-partner performance rollup for the roster + dashboard."""
     leads_total: int = 0
     leads_active: int = 0
+    # Referred leads that have had a site visit / a booking (reached that pipeline stage or later, or have the
+    # record) — cumulative, so a sold lead counts in both.
+    leads_visited: int = 0
+    leads_booked: int = 0
     leads_sold: int = 0
     conversion_rate: float = 0.0  # sold / total, 0..1
     brokerage_accrued: Decimal = Decimal("0")

@@ -3,15 +3,18 @@ lead submission, and brokerage accrual."""
 from decimal import Decimal
 from uuid import UUID
 
-from sqlalchemy import func, select
+from sqlalchemy import exists, func, or_, select
 from sqlalchemy.orm import selectinload
 
 from app.core.exceptions import NotFoundError
 from app.core.tenancy import current_org
-from app.database.enums import LeadIndustry, UserRole, UserStatus
+from app.database.enums import BookingStatus, LeadIndustry, UserRole, UserStatus
+from app.database.pipeline_seed import REAL_ESTATE_STAGES
 from app.models.channel_partner import BrokeragePayout, ChannelPartner
 from app.models.lead import Lead
+from app.models.stage_transition import StageTransition
 from app.models.user import User
+from app.real_estate.models import Booking, SiteVisit
 from app.services.email import EmailService
 from app.schemas.channel_partner import (
     ChannelPartnerCreate,
@@ -26,6 +29,44 @@ from app.services.leads import LeadService
 
 SOLD = "sold"
 LOST = "lost"
+
+
+def _reached_from(code: str) -> tuple[str, ...]:
+    """The real-estate stages at or after `code` in the pipeline, leaving out the closed-lost ones — a lead that
+    got to any of them has passed `code` (the pipeline runs in order)."""
+    start = next(position for _i, position, c, *_ in REAL_ESTATE_STAGES if c == code)
+    return tuple(c for _i, position, c, _n, category, _r in REAL_ESTATE_STAGES if position >= start and category != "closed_lost")
+
+
+# Site Visit Done … Sold / Closed, and Booked / Token … Sold / Closed.
+VISITED_STAGES = _reached_from("site_visit_done")
+BOOKED_STAGES = _reached_from("booked")
+
+
+def _reached(codes: tuple[str, ...]):
+    """The lead is at one of `codes` now, or its stage history shows it got there (it may have moved on — even to
+    Not Interested — since)."""
+    return or_(
+        Lead.stage_code.in_(codes),
+        exists().where(StageTransition.lead_id == Lead.id, StageTransition.to_stage_code.in_(codes)),
+    )
+
+
+# A site visit happened: the pipeline got to Site Visit Done (or later), or a visit is recorded as completed /
+# attended.
+_VISITED = or_(
+    _reached(VISITED_STAGES),
+    exists().where(
+        SiteVisit.lead_id == Lead.id, or_(SiteVisit.status == "completed", SiteVisit.attended.is_(True))
+    ),
+)
+# A booking happened: the pipeline got to Booked / Token (or later), or the lead has a live (not cancelled) booking.
+_BOOKED = or_(
+    _reached(BOOKED_STAGES),
+    exists().where(
+        Booking.lead_id == Lead.id, Booking.is_deleted.is_(False), Booking.status != BookingStatus.cancelled
+    ),
+)
 
 
 def _humanize(stage_code: str) -> str:
@@ -92,11 +133,13 @@ class ChannelPartnerService(ServiceBase):
 
     # --- stats -------------------------------------------------------------
     async def _lead_counts(self, partner_id: UUID | None = None) -> dict[UUID, dict[str, int]]:
-        """{partner_id: {total, sold, lost}} over non-deleted attributed leads."""
+        """{partner_id: {total, visited, booked, sold, lost}} over non-deleted attributed leads."""
         stmt = (
             select(
                 Lead.partner_id,
                 func.count().label("total"),
+                func.count().filter(_VISITED).label("visited"),
+                func.count().filter(_BOOKED).label("booked"),
                 func.count().filter(Lead.stage_code == SOLD).label("sold"),
                 func.count().filter(Lead.stage_code == LOST).label("lost"),
             )
@@ -106,7 +149,10 @@ class ChannelPartnerService(ServiceBase):
         if partner_id is not None:
             stmt = stmt.where(Lead.partner_id == partner_id)
         rows = await self.session.execute(stmt)
-        return {r.partner_id: {"total": r.total, "sold": r.sold, "lost": r.lost} for r in rows}
+        return {
+            r.partner_id: {"total": r.total, "visited": r.visited, "booked": r.booked, "sold": r.sold, "lost": r.lost}
+            for r in rows
+        }
 
     async def _payout_sums(self, partner_id: UUID | None = None) -> dict[UUID, dict[str, Decimal]]:
         """{partner_id: {paid, outstanding}} — outstanding = accrued (not paid/reversed)."""
@@ -138,13 +184,15 @@ class ChannelPartnerService(ServiceBase):
         lead_counts: dict[UUID, dict[str, int]],
         payout_sums: dict[UUID, dict[str, Decimal]],
     ) -> ChannelPartnerStats:
-        lc = lead_counts.get(partner_id, {"total": 0, "sold": 0, "lost": 0})
+        lc = lead_counts.get(partner_id, {"total": 0, "visited": 0, "booked": 0, "sold": 0, "lost": 0})
         ps = payout_sums.get(partner_id, {"paid": Decimal("0"), "outstanding": Decimal("0")})
         total, sold, lost = lc["total"], lc["sold"], lc["lost"]
         paid, outstanding = ps["paid"], ps["outstanding"]
         return ChannelPartnerStats(
             leads_total=total,
             leads_active=max(0, total - sold - lost),
+            leads_visited=lc["visited"],
+            leads_booked=lc["booked"],
             leads_sold=sold,
             conversion_rate=(sold / total) if total else 0.0,
             brokerage_accrued=paid + outstanding,

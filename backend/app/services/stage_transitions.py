@@ -297,8 +297,9 @@ class StageTransitionService(ServiceBase):
             # Channel-partner attribution + incentive exemption travel with the
             # booked move, independent of the salesperson. A CP pick sets partner_id
             # (only when provided, so it never silently clears one set on the lead
-            # form); incentive_exempt marks an "Others / owner's reference" sale so
-            # NOBODY accrues at Sold. FK is same-schema, so no cross-tenant guard.
+            # form); incentive_exempt marks an "Others / owner's reference" sale so no
+            # salesperson accrues at Sold (a channel partner still earns brokerage).
+            # FK is same-schema, so no cross-tenant guard.
             if payload.partner_id is not None:
                 lead.partner_id = payload.partner_id
             lead.incentive_exempt = bool(payload.incentive_exempt)
@@ -330,10 +331,11 @@ class StageTransitionService(ServiceBase):
                 order = await sales_service.create_from_lead(lead, actor_id=actor_id)
             # Channel-partner brokerage: accrue the referring partner's payout on
             # the Sold deal. Idempotent (one payout per lead) so a re-sold
-            # transition with an existing order won't double-accrue. Skipped for an
-            # incentive-exempt (owner's-reference) sale. Local import to avoid a
-            # circular import at module load.
-            if order is not None and not lead.incentive_exempt:
+            # transition with an existing order won't double-accrue. An owner's-
+            # reference sale still pays the partner: "no incentive" means no
+            # salesperson incentive. Local import to avoid a circular import at
+            # module load.
+            if order is not None:
                 from app.services.channel_partners import ChannelPartnerService
 
                 await ChannelPartnerService(self.session).accrue_brokerage(lead, sales_order=order)
