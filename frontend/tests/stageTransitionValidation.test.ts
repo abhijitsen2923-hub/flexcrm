@@ -30,6 +30,7 @@ function booked(overrides: Partial<TransitionFormState> = {}): TransitionFormSta
     availableUnitCount: 3,
     salespersonId: "user-1",
     assignableUserCount: 2,
+    partnerId: "",
     tokenAmount: "11000",
     tokenMode: "neft",
     tokenDate: "2026-09-27",
@@ -69,8 +70,21 @@ test("unit: required unless the lead already has a booking; explains when none a
   assert.equal(validateTransition(booked({ unitId: "", availableUnitCount: 0, hasExistingBooking: true })).unit, undefined);
 });
 
+test("salesperson: optional on a channel-partner sale (the partner earns the brokerage)", () => {
+  assert.equal(validateTransition(booked({ salespersonId: "", partnerId: "cp-1" })).salesperson, undefined);
+  assert.equal(firstInvalidField(validateTransition(booked({ salespersonId: "", partnerId: "cp-1" }))), null);
+  // Picking one anyway (on record) or "owner's reference" is still fine.
+  assert.equal(validateTransition(booked({ salespersonId: "user-1", partnerId: "cp-1" })).salesperson, undefined);
+  assert.equal(validateTransition(booked({ salespersonId: "__owner_reference__", partnerId: "cp-1" })).salesperson, undefined);
+  // Clearing the partner makes it required again.
+  assert.ok(validateTransition(booked({ salespersonId: "", partnerId: "" })).salesperson);
+});
+
 test("salesperson: required only when there are users to pick from", () => {
-  assert.equal(validateTransition(booked({ salespersonId: "" })).salesperson, "Select a salesperson.");
+  assert.equal(
+    validateTransition(booked({ salespersonId: "" })).salesperson,
+    "Select a salesperson (or credit a channel partner below)."
+  );
   assert.equal(validateTransition(booked({ salespersonId: "", assignableUserCount: 0 })).salesperson, undefined);
   assert.equal(validateTransition(booked({ salespersonId: "__owner_reference__" })).salesperson, undefined);
 });

@@ -6,6 +6,7 @@ import {
   Card,
   DataTable,
   EmptyState,
+  KpiCard,
   Modal,
   SelectField,
   TextField,
@@ -17,7 +18,8 @@ import { usePermissions } from "../../hooks/usePermissions";
 import { channelPartnersService } from "../../services/channelPartners";
 import { usersService } from "../../services/users";
 import { extractErrorMessage } from "../../utils/errors";
-import { formatDate, formatInr } from "../../utils/format";
+import { formatDate, formatInr, formatNumber } from "../../utils/format";
+import { partnerFunnel, shareOfReferred } from "../../utils/partnerTotals";
 import type { Lead, User } from "../../types";
 import type {
   BrokeragePayout,
@@ -224,6 +226,8 @@ export default function ChannelPartnersPage() {
       render: (p) => (p.brokerage_type === "percent" ? `${p.brokerage_rate}%` : formatInr(Number(p.brokerage_rate))),
     },
     { key: "leads", header: "Referred", align: "right", render: (p) => p.stats.leads_total },
+    { key: "visited", header: "Site visits", align: "right", render: (p) => p.stats.leads_visited ?? 0 },
+    { key: "booked", header: "Bookings", align: "right", render: (p) => p.stats.leads_booked ?? 0 },
     {
       key: "sold",
       header: "Sold",
@@ -259,6 +263,7 @@ export default function ChannelPartnersPage() {
   ];
 
   if (loading) return <LoadingBlock label="Loading channel partners…" />;
+  const funnel = partnerFunnel(partners);
 
   return (
     <div>
@@ -278,9 +283,29 @@ export default function ChannelPartnersPage() {
           description="Add a broker/channel partner to start attributing referrals and brokerage."
         />
       ) : (
-        <Card>
-          <DataTable columns={columns} rows={partners} rowKey={(p) => p.id} onRowClick={(p) => void openDetail(p)} />
-        </Card>
+        <>
+          <div className="kpi-grid">
+            <KpiCard label="Referred leads" value={formatNumber(funnel.referred)} hint="Leads the partners brought in" />
+            <KpiCard
+              label="Site visits done"
+              value={formatNumber(funnel.visited)}
+              hint={shareOfReferred(funnel.visited, funnel.referred) || "Reached Site Visit Done or later"}
+            />
+            <KpiCard
+              label="Bookings done"
+              value={formatNumber(funnel.booked)}
+              hint={shareOfReferred(funnel.booked, funnel.referred) || "Reached Booked / Token or later"}
+            />
+            <KpiCard
+              label="Sales closed"
+              value={formatNumber(funnel.sold)}
+              hint={shareOfReferred(funnel.sold, funnel.referred) || "At Sold / Closed"}
+            />
+          </div>
+          <Card>
+            <DataTable columns={columns} rows={partners} rowKey={(p) => p.id} onRowClick={(p) => void openDetail(p)} />
+          </Card>
+        </>
       )}
 
       {/* Create / edit */}
@@ -370,6 +395,8 @@ export default function ChannelPartnersPage() {
           <div className="stack" style={{ gap: "1rem" }}>
             <div className="kpi-grid">
               <div className="kpi"><div className="kpi__label">Referred</div><div className="kpi__value">{detail.partner.stats.leads_total}</div></div>
+              <div className="kpi"><div className="kpi__label">Site visits</div><div className="kpi__value">{detail.partner.stats.leads_visited ?? 0}</div></div>
+              <div className="kpi"><div className="kpi__label">Bookings</div><div className="kpi__value">{detail.partner.stats.leads_booked ?? 0}</div></div>
               <div className="kpi"><div className="kpi__label">Sold</div><div className="kpi__value">{detail.partner.stats.leads_sold}</div></div>
               <div className="kpi"><div className="kpi__label">Earned</div><div className="kpi__value">{formatInr(Number(detail.partner.stats.brokerage_accrued))}</div></div>
               <div className="kpi"><div className="kpi__label">Outstanding</div><div className="kpi__value">{formatInr(Number(detail.partner.stats.brokerage_outstanding))}</div></div>

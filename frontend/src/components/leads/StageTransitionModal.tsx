@@ -182,13 +182,14 @@ export function StageTransitionModal({
         availableUnitCount: availableUnits.length,
         salespersonId,
         assignableUserCount: assignableUsers.length,
+        partnerId,
         tokenAmount,
         tokenMode,
         tokenDate,
       }),
     [targetStage, intentLocked, intent, comment, isSiteVisitStage, siteProjectIds, siteDateTime, isBookedStage,
-      existingBooking, unitId, availableUnits.length, salespersonId, assignableUsers.length, tokenAmount, tokenMode,
-      tokenDate]
+      existingBooking, unitId, availableUnits.length, salespersonId, assignableUsers.length, partnerId, tokenAmount,
+      tokenMode, tokenDate]
   );
   const hasErrors = firstInvalidField(errors) !== null;
   const fieldError = (field: TransitionField) => (showErrors ? errors[field] : undefined);
@@ -418,14 +419,20 @@ export function StageTransitionModal({
                   value={salespersonId}
                   onChange={(event) => setSalespersonId(event.target.value)}
                   options={[
-                    { value: "", label: "Select salesperson…" },
+                    { value: "", label: partnerId ? "No salesperson (channel-partner sale)" : "Select salesperson…" },
                     ...assignableUsers.map((u) => ({ value: u.id, label: `${u.first_name} ${u.last_name}` })),
                     { value: OWNER_REFERENCE, label: "Others (owner's reference — no incentive)" }
                   ]}
                   hint={
-                    salespersonId === OWNER_REFERENCE
-                      ? "Owner's reference — nobody earns an incentive on this sale."
-                      : "Sets the lead's owner and the new customer's owner."
+                    partnerId
+                      ? salespersonId === OWNER_REFERENCE
+                        ? "No salesperson incentive — the channel partner still earns their brokerage."
+                        : salespersonId
+                          ? "On record only — a channel-partner sale pays the partner's brokerage, not a salesperson incentive."
+                          : "Optional for a channel-partner sale — the partner earns the brokerage."
+                      : salespersonId === OWNER_REFERENCE
+                        ? "Owner's reference — nobody earns an incentive on this sale."
+                        : "Sets the lead's owner and the new customer's owner."
                   }
                   error={fieldError("salesperson")}
                 />
@@ -453,7 +460,9 @@ export function StageTransitionModal({
                 hint={
                   assignablePartners.length === 0
                     ? "No channel partners yet — add them in the Channel Partners section."
-                    : "If a broker / channel partner brought this deal, credit them here."
+                    : partnerId
+                      ? "They earn their brokerage when this sale closes (Sold); no salesperson incentive."
+                      : "If a broker / channel partner brought this deal, credit them here."
                 }
               />
               <TextField

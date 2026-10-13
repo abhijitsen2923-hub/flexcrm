@@ -58,6 +58,9 @@ export interface TransitionFormState {
   // Salesperson is only required when there ARE users to pick from (roles without USER_VIEW get none
   // and book as the lead's owner).
   assignableUserCount: number;
+  // A channel partner credited for the sale. Then the salesperson is optional: a channel-partner sale pays the
+  // partner's brokerage, never a salesperson incentive.
+  partnerId: string;
   tokenAmount: string;
   tokenMode: string;
   tokenDate: string;
@@ -91,7 +94,9 @@ export function validateTransition(s: TransitionFormState): TransitionErrors {
           ? "No available units — add or release a unit in Inventory first."
           : "Select a unit.";
     }
-    if (s.assignableUserCount > 0 && !s.salespersonId) errors.salesperson = "Select a salesperson.";
+    if (s.assignableUserCount > 0 && !s.salespersonId && !s.partnerId) {
+      errors.salesperson = "Select a salesperson (or credit a channel partner below).";
+    }
     // Whole rupees, at least ₹1 — the same rule the input's min="1" / step="1" enforced natively.
     const amount = Number(s.tokenAmount);
     if (!s.tokenAmount.trim() || !Number.isInteger(amount) || amount < 1) {

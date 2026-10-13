@@ -31,6 +31,10 @@ export interface ChannelPartnerFull extends ChannelPartner {
 export interface ChannelPartnerStats {
   leads_total: number;
   leads_active: number;
+  // Referred leads that have had a site visit / a booking (reached that stage or later, or have the record).
+  // Optional: a backend older than these counts doesn't send them.
+  leads_visited?: number;
+  leads_booked?: number;
   leads_sold: number;
   conversion_rate: number; // 0..1
   brokerage_accrued: string;

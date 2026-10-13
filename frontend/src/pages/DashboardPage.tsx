@@ -38,6 +38,7 @@ import { channelPartnersService } from "../services/channelPartners";
 import { leadsService } from "../services/leads";
 import type { Lead, LeadIndustry, PipelineStage } from "../types";
 import type { ChannelPartnerListItem } from "../types/partner";
+import { partnerFunnel, shareOfReferred } from "../utils/partnerTotals";
 import { assignedDayQuery } from "../utils/assignedDay";
 import { telHref } from "../utils/contactLinks";
 import { formatCurrency, formatInr, formatNumber, formatRelative } from "../utils/format";
@@ -127,10 +128,7 @@ export default function DashboardPage() {
   const cp = partners
     ? {
         total: partners.length,
-        active: partners.filter((p) => p.is_active).length,
-        referred: partners.reduce((n, p) => n + p.stats.leads_total, 0),
-        sold: partners.reduce((n, p) => n + p.stats.leads_sold, 0),
-        outstanding: partners.reduce((n, p) => n + Number(p.stats.brokerage_outstanding), 0),
+        ...partnerFunnel(partners),
         top: [...partners].sort((a, b) => b.stats.leads_total - a.stats.leads_total).slice(0, 5),
       }
     : null;
@@ -286,14 +284,26 @@ export default function DashboardPage() {
       {showChannelPartners && cp && cp.total > 0 && (
         <>
           <div className="kpi-grid" style={{ marginTop: 0 }}>
-            <KpiCard label="Channel partners" value={formatNumber(cp.total)} />
-            <KpiCard label="Active partners" value={formatNumber(cp.active)} />
             <KpiCard
               label="Partner-referred leads"
               value={formatNumber(cp.referred)}
-              hint={cp.sold > 0 ? `${cp.sold} sold` : undefined}
+              hint={`From ${formatNumber(cp.total)} channel ${cp.total === 1 ? "partner" : "partners"}`}
             />
-            <KpiCard label="Brokerage outstanding" value={formatInr(cp.outstanding)} />
+            <KpiCard
+              label="Partner site visits"
+              value={formatNumber(cp.visited)}
+              hint={shareOfReferred(cp.visited, cp.referred) || undefined}
+            />
+            <KpiCard
+              label="Partner bookings"
+              value={formatNumber(cp.booked)}
+              hint={shareOfReferred(cp.booked, cp.referred) || undefined}
+            />
+            <KpiCard
+              label="Partner sales closed"
+              value={formatNumber(cp.sold)}
+              hint={shareOfReferred(cp.sold, cp.referred) || undefined}
+            />
           </div>
           <div className="chart-grid">
             <Card title="Top channel partners" subtitle="By referred leads">
@@ -302,7 +312,9 @@ export default function DashboardPage() {
                   <li key={p.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "1px solid var(--color-border)", paddingBottom: "0.5rem" }}>
                     <div>
                       <strong style={{ fontSize: "0.9rem" }}>{p.company_name}</strong>
-                      <div className="muted text-xs">{p.stats.leads_total} referred · {p.stats.leads_sold} sold</div>
+                      <div className="muted text-xs">
+                        {p.stats.leads_total} referred · {p.stats.leads_visited ?? 0} visited · {p.stats.leads_booked ?? 0} booked · {p.stats.leads_sold} sold
+                      </div>
                     </div>
                     <span className="text-sm">{formatInr(Number(p.stats.brokerage_outstanding))}</span>
                   </li>
