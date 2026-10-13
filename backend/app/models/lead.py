@@ -118,6 +118,10 @@ class Lead(TenantBase, UUIDPrimaryKeyMixin, TimestampMixin, TenantAuditMixin, Te
         nullable=True,
         index=True,
     )
+    # When the lead was given to its CURRENT owner (NULL = unassigned, or assigned before the owner history
+    # existed). Set on every owner change; drives the leads list's "Assigned today / yesterday" and the
+    # dashboard tile.
+    assigned_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
     # Channel partner (broker) who referred this lead, if any. Same-schema FK, so
     # a plain string relationship resolves fine (unlike the public.users links).
     partner_id: Mapped[UUID | None] = mapped_column(

@@ -85,10 +85,14 @@ class BaseRepository(Generic[ModelType]):
             query = query.options(*options)
 
         order_column = getattr(self.model, sort_by)
+        # A unique tie-breaker (the primary key, same direction): rows that share the sort value — e.g. leads
+        # bulk-reassigned in one action share one assigned_at — would otherwise come back in an unstable order,
+        # so paging could repeat some rows and skip others.
+        tie_breaker = self.model.id if sort_by != "id" and hasattr(self.model, "id") else None
         if sort_order == "asc":
-            query = query.order_by(order_column.asc())
+            query = query.order_by(order_column.asc(), *([tie_breaker.asc()] if tie_breaker is not None else []))
         else:
-            query = query.order_by(order_column.desc())
+            query = query.order_by(order_column.desc(), *([tie_breaker.desc()] if tie_breaker is not None else []))
 
         query = query.offset(pagination.offset).limit(pagination.page_size)
 

@@ -183,6 +183,7 @@ class LeadRead(ORMModel):
     next_action_date: datetime | None = None
     stage_changed_at: datetime | None = None
     assigned_to_id: UUID | None = None
+    assigned_at: datetime | None = None  # when the current owner got the lead
     partner_id: UUID | None = None
     property_type: str | None = None
     budget_min: Decimal | None = None
@@ -248,3 +249,7 @@ class LeadFilterParams(SearchSortParams):
     # `created_from <= created_at < created_to`.
     created_from: datetime | None = None
     created_to: datetime | None = None
+    # "Assigned on": when the lead was given to its current owner — local-day UTC boundaries, half-open:
+    # `assigned_from <= assigned_at < assigned_to` (unassigned leads never match).
+    assigned_from: datetime | None = None
+    assigned_to: datetime | None = None

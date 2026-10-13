@@ -283,7 +283,10 @@ class StageTransitionService(ServiceBase):
                 lead.assigned_to_id = payload.assigned_to_id
             elif lead.assigned_to_id is None:
                 lead.assigned_to_id = actor_id
-            # A changed salesperson is an owner change — log it (committed with this transition).
+            # A changed salesperson is an owner change — log it (committed with this transition) and stamp
+            # when the new owner got the lead.
+            if lead.assigned_to_id != previous_owner_id:
+                lead.assigned_at = datetime.now(UTC)
             LeadAssignmentService(self.session).record(
                 lead_id=lead.id,
                 from_user_id=previous_owner_id,

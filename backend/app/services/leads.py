@@ -84,6 +84,7 @@ class LeadService(ServiceBase):
         "lead_number",
         "last_comment_at",
         "next_action_date",
+        "assigned_at",
     }
 
     def __init__(self, session):
@@ -138,6 +139,12 @@ class LeadService(ServiceBase):
             .values(assigned_to_id=assigned_to_id, updated_by_id=actor_id)
         )
         count = result.rowcount or 0
+        # "Assigned on" moves only for leads that really changed hands (re-picking the same owner keeps it).
+        changed_ids = [lid for lid, previous in previous_owners if previous != assigned_to_id]
+        if changed_ids:
+            await self.session.execute(
+                update(Lead).where(Lead.id.in_(changed_ids)).values(assigned_at=datetime.now(UTC))
+            )
         if count:
             await self.notification_service.create_notification(
                 user_id=assigned_to_id,
@@ -266,6 +273,13 @@ class LeadService(ServiceBase):
             extra_filters.append(Lead.created_at >= filters.created_from)
         if filters.created_to is not None:
             extra_filters.append(Lead.created_at < filters.created_to)
+        # "Assigned on" range — when the current owner got the lead (unassigned leads never match).
+        if filters.assigned_from is not None or filters.assigned_to is not None:
+            extra_filters.append(Lead.assigned_to_id.is_not(None))
+        if filters.assigned_from is not None:
+            extra_filters.append(Lead.assigned_at >= filters.assigned_from)
+        if filters.assigned_to is not None:
+            extra_filters.append(Lead.assigned_at < filters.assigned_to)
         # Unassigned (triage) filter — IS NULL can't be expressed by the generic
         # equality/IN builder, so it goes through extra_filters (applied to both the
         # row query and the count, keeping pagination totals correct).
@@ -441,6 +455,7 @@ class LeadService(ServiceBase):
                 "intent": payload.intent,
                 "interest": payload.interest,
                 "assigned_to_id": payload.assigned_to_id,
+                "assigned_at": datetime.now(UTC) if payload.assigned_to_id else None,
                 "partner_id": payload.partner_id,
                 # Real-estate fields were previously dropped on create — persist
                 # them so Budget (which replaces Value for real estate) is saved.
@@ -533,6 +548,9 @@ class LeadService(ServiceBase):
                 actor_id=actor_id,
                 source="reassign",
             )
+            # A real owner change stamps "assigned on" (cleared when unassigned); the same owner keeps it.
+            if update_data["assigned_to_id"] != previous_owner_id:
+                update_data["assigned_at"] = datetime.now(UTC) if update_data["assigned_to_id"] else None
         lead = await self.repository.update(lead, update_data)
         if update_data.get("assigned_to_id"):
             await self._notify_assignee(
