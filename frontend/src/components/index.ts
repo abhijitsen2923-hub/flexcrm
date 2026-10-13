@@ -18,4 +18,5 @@ export { LoadingBlock, Spinner } from "./ui/Spinner";
 export { Modal } from "./ui/Modal";
 export { Pagination } from "./ui/Pagination";
 export { SkeletonCard, SkeletonCircle, SkeletonKpiRow, SkeletonRect, SkeletonTable } from "./ui/SkeletonBlock";
+export { Stepper } from "./ui/Stepper";
 export { ToastProvider, useToast } from "./ui/Toast";

@@ -108,9 +108,27 @@ export function UnitDetailPanel({ unit, onClose, onStatusChange, onStartBooking 
 
         <div className="unit-panel__grid">
           <div className="unit-panel__field">
-            <span className="unit-panel__label">Type</span>
+            <span className="unit-panel__label">Category</span>
             <span>{UNIT_TYPE_LABEL[unit.unitType]}</span>
           </div>
+          {unit.flatType && (
+            <div className="unit-panel__field">
+              <span className="unit-panel__label">Flat type</span>
+              <span>Type {unit.flatType}</span>
+            </div>
+          )}
+          {unit.configuration && (
+            <div className="unit-panel__field">
+              <span className="unit-panel__label">Configuration</span>
+              <span>{unit.configuration}</span>
+            </div>
+          )}
+          {unit.hasPlc && (
+            <div className="unit-panel__field">
+              <span className="unit-panel__label">PLC</span>
+              <span>Yes — corner / view</span>
+            </div>
+          )}
           <div className="unit-panel__field">
             <span className="unit-panel__label">Super built-up area</span>
             <span>{unit.area > 0 ? `${unit.area} ${unit.areaUnit}` : "—"}</span>

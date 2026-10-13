@@ -103,7 +103,9 @@ export function AvailabilityHeatmap({ projects, onFloorClick, selectedFloor }: P
             </span>
           </h3>
           {project.towers.every((t) => t.units.length === 0) && (
-            <p className="heatmap-project__empty">No units yet — add them from Projects → Edit project.</p>
+            <p className="heatmap-project__empty">
+              No units yet — set up each tower's flat types in Projects → Edit project, then Save.
+            </p>
           )}
           <div className="heatmap-project__towers">
             {project.towers.map((tower) => (

@@ -59,6 +59,31 @@
   font-size: 0.75rem;
 }
 
+/* Configuration chips (2 BHK, 3 BHK …) — wrap on phones instead of widening the page. */
+.inv-config-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: calc(-1 * var(--space-4));
+}
+.inv-config-chip {
+  padding: 0.2rem 0.65rem;
+  border: 1px solid var(--color-border-strong);
+  border-radius: 999px;
+  background: var(--color-surface);
+  color: var(--color-text-muted);
+  font-size: 0.75rem;
+  font-weight: 500;
+  cursor: pointer;
+}
+.inv-config-chip:hover { color: var(--color-text); }
+.inv-config-chip[aria-pressed="true"] {
+  border-color: var(--color-primary);
+  background: var(--color-primary);
+  color: #fff;
+}
+.inv-config-chip:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
+
 /* Project section */
 .inv-project {
   display: flex;
@@ -145,6 +170,7 @@
 
 /* Unit cell */
 .inv-cell {
+  position: relative;
   width: 48px;
   height: 48px;
   display: flex;
@@ -160,6 +186,16 @@
   letter-spacing: 0.02em;
 }
 .inv-cell:hover { opacity: 0.85; transform: scale(1.08); }
+/* The flat type letter (A, B …) in the tile's corner; older units without a type show none. */
+.inv-cell__type {
+  position: absolute;
+  top: 2px;
+  left: 3px;
+  font-size: 0.55rem;
+  font-weight: 700;
+  line-height: 1;
+  opacity: 0.85;
+}
 .inv-cell:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
 
 .inv-cell--available  { background: var(--status-available); }

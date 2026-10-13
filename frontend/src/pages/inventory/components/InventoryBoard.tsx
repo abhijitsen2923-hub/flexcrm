@@ -1,8 +1,15 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useRealtimeRefresh } from "../../../realtime";
 import { formatInr } from "../../../utils/format";
 import type { Project, Tower, Unit, UnitStatus, UnitType } from "../../../types/realestate";
 import { PARKING_TYPE_LABEL, groupParkingByType, isParkingBlock } from "../../../utils/projectInventory";
+import {
+  areaLabel,
+  compareUnitNumbers,
+  configurationOptions,
+  hasConfiguration,
+  unitKindLabel,
+} from "../../../utils/unitLabel";
 import { UnitDetailPanel } from "./UnitDetailPanel";
 import "./InventoryBoard.css";
 
@@ -27,13 +34,23 @@ interface UnitCellProps {
 }
 
 function UnitCell({ unit, onClick }: UnitCellProps) {
+  // "A-101 · Type A · 2 BHK · 1,250 sq ft · ₹62,50,000 · Available" — a unit without a flat type shows its
+  // category instead ("Residential"), as before.
+  const details = [unit.unitNumber, unitKindLabel(unit), areaLabel(unit), formatInr(unit.basePrice), STATUS_LABEL[unit.status]]
+    .filter(Boolean)
+    .join(" · ");
   return (
     <button
       className={`inv-cell inv-cell--${unit.status}`}
       onClick={onClick}
-      title={`Unit ${unit.unitNumber} · ${UNIT_TYPE_LABEL[unit.unitType]} · ${formatInr(unit.basePrice)} · ${STATUS_LABEL[unit.status]}`}
-      aria-label={`Unit ${unit.unitNumber}, ${UNIT_TYPE_LABEL[unit.unitType]}, ${STATUS_LABEL[unit.status]}`}
+      title={details}
+      aria-label={`Unit ${details}`}
     >
+      {unit.flatType && (
+        <span className="inv-cell__type" aria-hidden="true">
+          {unit.flatType}
+        </span>
+      )}
       {unit.unitNumber}
     </button>
   );
@@ -64,16 +81,17 @@ interface TowerGridProps {
   projectName: string;
   filterFloor: number | null;
   typeFilter: UnitType | "all";
+  configFilter: string | null;
   onUnitClick: (unit: Unit & { towerName: string; projectName: string }) => void;
 }
 
-function TowerGrid({ tower, projectName, filterFloor, typeFilter, onUnitClick }: TowerGridProps) {
+function TowerGrid({ tower, projectName, filterFloor, typeFilter, configFilter, onUnitClick }: TowerGridProps) {
   const openUnit = (u: Unit) => onUnitClick({ ...u, towerName: tower.name, projectName });
+  const shown = (u: Unit) =>
+    (typeFilter === "all" || u.unitType === typeFilter) && (configFilter == null || hasConfiguration(u, configFilter));
   // The project's parking block: one row per parking type (CP, OP …), not per floor.
   if (isParkingBlock(tower.name)) {
-    const units = tower.units.filter(
-      (u) => (typeFilter === "all" || u.unitType === typeFilter) && (filterFloor == null || u.floor === filterFloor)
-    );
+    const units = tower.units.filter((u) => shown(u) && (filterFloor == null || u.floor === filterFloor));
     if (units.length === 0) return null;
     const available = units.filter((u) => u.status === "available").length;
     return (
@@ -98,12 +116,14 @@ function TowerGrid({ tower, projectName, filterFloor, typeFilter, onUnitClick }:
 
   const floorMap = new Map<number, Unit[]>();
   for (const unit of tower.units) {
-    if (typeFilter !== "all" && unit.unitType !== typeFilter) continue;
+    if (!shown(unit)) continue;
     const existing = floorMap.get(unit.floor) ?? [];
     existing.push(unit);
     floorMap.set(unit.floor, existing);
   }
   if (floorMap.size === 0) return null;
+  // Within a floor, by unit number — so A-101 … A-104 read Type A, B, C, D left to right.
+  for (const units of floorMap.values()) units.sort((a, b) => compareUnitNumbers(a.unitNumber, b.unitNumber));
   const floors = Array.from(floorMap.keys())
     .filter((f) => filterFloor == null || f === filterFloor)
     .sort((a, b) => b - a);
@@ -131,6 +151,15 @@ interface Props {
 export function InventoryBoard({ projects, onStatusChange, onRefresh, filterFloor = null, onStartBooking }: Props) {
   const [selectedUnit, setSelectedUnit] = useState<(Unit & { towerName: string; projectName: string }) | null>(null);
   const [typeFilter, setTypeFilter] = useState<UnitType | "all">("all");
+  // Configuration chips ("2 BHK", "3 BHK" …) — shown only when some unit has a configuration.
+  const [configFilter, setConfigFilter] = useState<string | null>(null);
+  const configurations = useMemo(
+    () => configurationOptions(projects.flatMap((p) => p.towers.flatMap((t) => t.units))),
+    [projects]
+  );
+  // A chosen configuration that no longer exists (after a refresh) stops filtering.
+  const activeConfig =
+    configFilter == null ? null : configurations.find((c) => c.toLowerCase() === configFilter.toLowerCase()) ?? null;
 
   useRealtimeRefresh((event) => event.event === "unit.status_changed", () => {
     onRefresh();
@@ -153,7 +182,7 @@ export function InventoryBoard({ projects, onStatusChange, onRefresh, filterFloo
           </span>
         ))}
         <label className="inv-type-filter">
-          Type:{" "}
+          Category:{" "}
           <select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value as UnitType | "all")}>
             <option value="all">All</option>
             {(Object.keys(UNIT_TYPE_LABEL) as UnitType[]).map((t) => (
@@ -162,6 +191,30 @@ export function InventoryBoard({ projects, onStatusChange, onRefresh, filterFloo
           </select>
         </label>
       </div>
+
+      {configurations.length > 0 && (
+        <div className="inv-config-chips" role="group" aria-label="Filter by configuration">
+          <button
+            type="button"
+            className="inv-config-chip"
+            aria-pressed={activeConfig == null}
+            onClick={() => setConfigFilter(null)}
+          >
+            All
+          </button>
+          {configurations.map((config) => (
+            <button
+              key={config}
+              type="button"
+              className="inv-config-chip"
+              aria-pressed={activeConfig === config}
+              onClick={() => setConfigFilter(activeConfig === config ? null : config)}
+            >
+              {config}
+            </button>
+          ))}
+        </div>
+      )}
 
       {projects.map((project) => (
         <section key={project.id} className="inv-project">
@@ -174,8 +227,8 @@ export function InventoryBoard({ projects, onStatusChange, onRefresh, filterFloo
           </div>
           {project.towers.every((t) => t.units.length === 0) && (
             <p className="inv-project__empty">
-              No units yet — open Projects → Edit this project, enter each tower's flat size and price, and Save to
-              create them.
+              No units yet — open Projects → Edit this project, set up each tower's flat types, and Save to create
+              them.
             </p>
           )}
           <div className="inv-project__towers">
@@ -186,6 +239,7 @@ export function InventoryBoard({ projects, onStatusChange, onRefresh, filterFloo
                 projectName={project.name}
                 filterFloor={filterFloor}
                 typeFilter={typeFilter}
+                configFilter={activeConfig}
                 onUnitClick={setSelectedUnit}
               />
             ))}

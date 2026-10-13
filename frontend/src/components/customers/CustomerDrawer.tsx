@@ -11,6 +11,7 @@ import { DocumentPreview } from "../../pages/bookings/components/DocumentPreview
 import type { Customer } from "../../types";
 import type { Booking, SiteVisit } from "../../types/realestate";
 import { formatCurrency, formatDate, formatDateTime } from "../../utils/format";
+import { flatTypeLabel } from "../../utils/unitLabel";
 
 type TabKey = "overview" | "purchases" | "payments" | "visits";
 
@@ -214,7 +215,7 @@ export function CustomerDrawer({ open, customer, onClose }: Props) {
                                 <strong>{b.unit ? `${b.unit.projectName} · ${b.unit.towerName}` : "Unit"}</strong>
                                 <div className="muted text-sm" style={{ marginTop: 2 }}>
                                   {b.unit
-                                    ? `${UNIT_TYPE_LABEL[b.unit.unitType] ?? b.unit.unitType} · Unit ${b.unit.unitNumber} · Floor ${b.unit.floor} · ${b.unit.area} ${b.unit.areaUnit}`
+                                    ? `${flatTypeLabel(b.unit) || (UNIT_TYPE_LABEL[b.unit.unitType] ?? b.unit.unitType)} · Unit ${b.unit.unitNumber} · Floor ${b.unit.floor} · ${b.unit.area} ${b.unit.areaUnit}`
                                     : `Unit ${b.unitId.slice(0, 8)}`}
                                 </div>
                               </div>

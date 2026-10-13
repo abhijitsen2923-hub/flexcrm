@@ -8,7 +8,8 @@ interface ModalProps extends PropsWithChildren {
   title?: ReactNode;
   footer?: ReactNode;
   onClose: () => void;
-  size?: "md" | "lg";
+  // xl (≈1080px) is for multi-step workspaces like the project wizard; on phones it's a full-height sheet.
+  size?: "md" | "lg" | "xl";
 }
 
 
@@ -39,7 +40,7 @@ export function Modal({ open, title, footer, onClose, size = "md", children }: M
     // Intentionally NO onClick-to-close on the backdrop: form modals must not be
     // dismissed by an accidental tap outside (data loss). Close via ✕ / Cancel / Esc.
     <div className="modal-backdrop" role="dialog" aria-modal="true">
-      <div className={["modal", size === "lg" ? "modal--lg" : null].filter(Boolean).join(" ")}>
+      <div className={["modal", size !== "md" ? `modal--${size}` : null].filter(Boolean).join(" ")}>
         {title !== undefined && (
           <header className="modal__header">
             <h2 style={{ fontSize: "1.05rem" }}>{title}</h2>

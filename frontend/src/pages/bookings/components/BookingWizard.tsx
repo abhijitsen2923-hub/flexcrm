@@ -8,6 +8,7 @@ import { DocumentPreview } from "./DocumentPreview";
 import type { Booking, PricingSnapshot, Unit } from "../../../types/realestate";
 import type { Customer } from "../../../types";
 import { extractErrorMessage } from "../../../utils/errors";
+import { areaLabel, flatTypeLabel } from "../../../utils/unitLabel";
 import "./BookingWizard.css";
 
 const STEPS = ["Unit", "Customer & KYC", "Pricing", "Schedule & Documents"] as const;
@@ -32,8 +33,16 @@ interface KycRow {
   uploaded: boolean;
 }
 
+// The unit being booked. The flat-type / area / category fields are optional so a caller that only knows the
+// basics still works; when present they show in the summary and seed the price calculator.
+export type BookingWizardUnit = Pick<Unit, "id" | "unitNumber" | "floor" | "area" | "basePrice"> &
+  Partial<Pick<Unit, "unitType" | "carpetArea" | "builtUpArea" | "areaUnit" | "flatType" | "configuration" | "hasPlc">> & {
+    towerName: string;
+    projectName: string;
+  };
+
 interface Props {
-  unit: Pick<Unit, "id" | "unitNumber" | "floor" | "area" | "basePrice"> & { towerName: string; projectName: string };
+  unit: BookingWizardUnit;
   onClose: () => void;
   onComplete: (booking: Booking) => void;
   // When resuming an existing (e.g. draft) booking, pass it here — the wizard
@@ -265,8 +274,11 @@ export function BookingWizard({ unit, onClose, onComplete, initialBooking = null
                 <div className="bw-unit-summary__field"><span>Project</span><strong>{unit.projectName}</strong></div>
                 <div className="bw-unit-summary__field"><span>Tower</span><strong>{unit.towerName}</strong></div>
                 <div className="bw-unit-summary__field"><span>Unit</span><strong>{unit.unitNumber}</strong></div>
+                {flatTypeLabel(unit) && (
+                  <div className="bw-unit-summary__field"><span>Type</span><strong>{flatTypeLabel(unit)}</strong></div>
+                )}
                 <div className="bw-unit-summary__field"><span>Floor</span><strong>{unit.floor}</strong></div>
-                <div className="bw-unit-summary__field"><span>Area</span><strong>{unit.area} sqft</strong></div>
+                <div className="bw-unit-summary__field"><span>Area</span><strong>{areaLabel(unit) || "—"}</strong></div>
                 <div className="bw-unit-summary__field"><span>Base Price</span><strong style={{ fontSize: "var(--text-display-lg)" }}>₹{unit.basePrice.toLocaleString("en-IN")}</strong></div>
               </div>
               <div className="bw-footer">
@@ -402,6 +414,10 @@ export function BookingWizard({ unit, onClose, onComplete, initialBooking = null
                 basePrice={unit.basePrice}
                 floor={unit.floor}
                 area={unit.area}
+                carpetArea={unit.carpetArea ?? null}
+                builtUpArea={unit.builtUpArea ?? null}
+                hasPlc={unit.hasPlc ?? false}
+                unitType={unit.unitType}
                 defaults={priceDefaults ?? undefined}
                 onPricingChange={setPricing}
               />

@@ -1,7 +1,69 @@
 export type UnitStatus = "available" | "hold" | "booked" | "registered" | "sold";
 export type UnitType = "residential" | "parking" | "shop" | "godown";
-// Garage / parking types a project offers (Multi-Level, Covered, Independent, Open).
+// Garage / parking types a project offers (Multi-Level, Covered, Independent, Open). Kept to the original
+// four: `garage_options` is also read by older backends, which reject anything else.
 export type GarageOption = "MLP" | "CP" | "IP" | "OP";
+// Every parking type a spot can be — adds Dependent Parking. Used for counts and per-type prices.
+export type ParkingType = GarageOption | "DP";
+export type ProjectType = "residential" | "commercial" | "mixed";
+// The area a unit's basic price is worked out on (null = super built-up, as before).
+export type PricingBasis = "super_built_up" | "built_up" | "carpet";
+export type FloorRiseBasis = "per_sqft" | "per_floor";
+// When a payment-plan milestone falls due. The last three are EVENTS: they become a demand only when the
+// builder marks them reached (project / tower) or raises them on one booking.
+export type PlanDueOn =
+  | "on_booking"
+  | "days_after_booking"
+  | "on_date"
+  | "on_stage"
+  | "on_possession"
+  | "on_registration";
+
+// One payment-plan milestone, exactly as the API stores it (snake_case both ways). The label is the
+// builder's own name; percent is a share of the booking's price (box price + GST).
+export interface PlanMilestone {
+  key: string;
+  label: string;
+  percent: number;
+  due_on: PlanDueOn;
+  days: number | null;      // days_after_booking only
+  due_date: string | null;  // on_date only (YYYY-MM-DD)
+}
+
+export interface MilestoneReached {
+  key: string;
+  towerId: string | null;   // null = the whole project
+  reachedOn: string;        // YYYY-MM-DD
+}
+
+// A tower's saved wizard layout, as the API stores it (snake_case both ways).
+export interface FlatTypeLayout {
+  code: string;                       // "A", "B" … — fixes the position on the floor (A → x01)
+  configuration: string | null;       // "2 BHK"
+  carpet_area: number | null;
+  built_up_area: number | null;
+  super_built_up_area: number;
+  has_plc: boolean;
+  floor_from: number | null;          // null = 1
+  floor_to: number | null;            // null = the tower's top floor
+}
+
+export interface OtherUnitLayout {
+  unit_type: "shop" | "godown";
+  per_floor: number;
+  floor_from: number;
+  floor_to: number;
+  area: number;                       // super built-up
+  carpet_area: number | null;
+  built_up_area: number | null;
+  unit_prefix: string | null;
+}
+
+export interface TowerLayout {
+  unit_prefix: string;                // "A-" → A-101
+  flat_types: FlatTypeLayout[];
+  others: OtherUnitLayout[];
+}
 export type UnitFacing = "north" | "south" | "east" | "west" | "north_east" | "north_west" | "south_east" | "south_west";
 export type SiteVisitFeedback = "hot" | "warm" | "cold";
 export type SiteVisitStatus = "scheduled" | "completed" | "cancelled";
@@ -25,6 +87,9 @@ export interface Unit {
   view: string | null;
   basePrice: number;
   status: UnitStatus;
+  flatType: string | null;            // "A" — null on older units, parking, shops, godowns
+  configuration: string | null;       // "2 BHK"
+  hasPlc: boolean;
   updatedAt: string;
 }
 
@@ -33,6 +98,8 @@ export interface Tower {
   projectId: string;
   name: string;
   totalFloors: number;
+  // The wizard layout last saved for this tower; null for towers set up before flat types existed.
+  layout: TowerLayout | null;
   units: Unit[];
 }
 
@@ -69,6 +136,17 @@ export interface Project {
   sinkingFund: number | null;
   amenitiesCharges: number | null;
   demandSchedule: { label: string; percent: number; due_date: string }[] | null;
+  // --- Add Project wizard ---
+  projectType: ProjectType | null;
+  pricingBasis: PricingBasis | null;
+  floorRiseRate: number | null;
+  floorRiseBasis: FloorRiseBasis | null;
+  floorRiseFrom: number | null;
+  plcRate: number | null;             // ₹/sq ft, for units with hasPlc
+  amenitiesRate: number | null;       // ₹/sq ft (amenitiesCharges stays the older lump sum)
+  parkingPrices: Partial<Record<ParkingType, number>> | null;
+  paymentPlan: PlanMilestone[] | null;
+  milestonesReached: MilestoneReached[] | null;
   towers: Tower[];
   media: ProjectMedia[];
   // Inventory counts: units = everything except parking (flats, shops, godowns); parking counted apart.
@@ -133,10 +211,15 @@ export interface PricingSnapshot {
   // Both optional so older snapshots (base entered as a flat amount) still parse.
   ratePerSqft?: number;
   area?: number;
+  // The area the rate was applied to (optional; older snapshots omit it = super built-up).
+  basis?: PricingBasis;
   basePrice: number;
   floorRise: number;
+  // First floor that paid floor rise (optional; older snapshots omit it = floor 2, i.e. floor − 1 steps).
+  floorRiseFrom?: number;
   plc: number;
   parking: number;
+  parkingType?: ParkingType; // the parking type chosen in the calculator (optional)
   // RERA "Box Price" components (optional; older snapshots omit them).
   generator?: number;
   amenities?: number;
@@ -183,6 +266,8 @@ export interface PaymentScheduleEntry {
   paidAmount: number;
   outstanding: number;
   isOverdue: boolean;
+  milestoneKey: string | null;        // set on rows a payment plan generated
+  percent: number | null;             // while set, the amount follows the booking's price
 }
 
 export type PaymentMode = "upi" | "neft" | "cheque" | "cash" | "card" | "other";
@@ -251,7 +336,25 @@ export interface Booking {
   tokenReference: string | null;
   bookingFormUrl: string | null;
   allotmentLetterUrl: string | null;
+  // The payment plan this booking took from its project (null = none / replaced by a manual plan). A milestone
+  // with no paymentSchedules row carrying its key is still to be raised.
+  paymentPlan: PlanMilestone[] | null;
   createdAt: string;
   updatedAt: string;
-  unit?: Pick<Unit, "id" | "unitNumber" | "floor" | "unitType" | "area" | "areaUnit" | "basePrice" | "status"> & { towerName: string; projectName: string };
+  unit?: Pick<
+    Unit,
+    | "id"
+    | "unitNumber"
+    | "floor"
+    | "unitType"
+    | "area"
+    | "carpetArea"
+    | "builtUpArea"
+    | "areaUnit"
+    | "basePrice"
+    | "status"
+    | "flatType"
+    | "configuration"
+    | "hasPlc"
+  > & { towerName: string; projectName: string };
 }

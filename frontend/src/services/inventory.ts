@@ -1,10 +1,17 @@
 import { apiClient } from "./http";
 import type {
+  FloorRiseBasis,
   GarageOption,
+  MilestoneReached,
+  ParkingType,
+  PlanMilestone,
+  PricingBasis,
   Project,
   ProjectMedia,
   ProjectPossessionRollup,
+  ProjectType,
   Tower,
+  TowerLayout,
   Unit,
   UnitStatus,
   UnitType,
@@ -29,6 +36,9 @@ interface ApiUnit {
   view: string | null;
   base_price: number | string;
   status: UnitStatus;
+  flat_type?: string | null;
+  configuration?: string | null;
+  has_plc?: boolean;
   updated_at: string;
 }
 
@@ -37,6 +47,7 @@ interface ApiTower {
   project_id: string;
   name: string;
   total_floors: number;
+  layout?: TowerLayout | null;
   units?: ApiUnit[];
 }
 
@@ -73,6 +84,16 @@ interface ApiProject {
   sinking_fund?: number | string | null;
   amenities_charges?: number | string | null;
   demand_schedule?: DemandMilestonePayload[] | null;
+  project_type?: string | null;
+  pricing_basis?: string | null;
+  floor_rise_rate?: number | string | null;
+  floor_rise_basis?: string | null;
+  floor_rise_from?: number | null;
+  plc_rate?: number | string | null;
+  amenities_rate?: number | string | null;
+  parking_prices?: Record<string, number | string> | null;
+  payment_plan?: (Omit<PlanMilestone, "percent"> & { percent: number | string })[] | null;
+  milestones_reached?: { key: string; tower_id: string | null; reached_on: string }[] | null;
   created_at: string;
   updated_at: string;
   towers?: ApiTower[];
@@ -121,8 +142,30 @@ function mapUnit(u: ApiUnit): Unit {
     view: u.view,
     basePrice: Number(u.base_price),
     status: u.status,
+    flatType: u.flat_type ?? null,
+    configuration: u.configuration ?? null,
+    hasPlc: Boolean(u.has_plc),
     updatedAt: u.updated_at,
   };
+}
+
+function mapParkingPrices(raw: Record<string, number | string> | null | undefined): Project["parkingPrices"] {
+  if (!raw) return null;
+  const out: Partial<Record<ParkingType, number>> = {};
+  for (const [type, price] of Object.entries(raw)) out[type as ParkingType] = Number(price);
+  return out;
+}
+
+export function mapPlan(raw: ApiProject["payment_plan"]): PlanMilestone[] | null {
+  if (!raw) return null;
+  return raw.map((m) => ({
+    key: m.key,
+    label: m.label,
+    percent: Number(m.percent),
+    due_on: m.due_on,
+    days: m.days ?? null,
+    due_date: m.due_date ?? null,
+  }));
 }
 
 function mapTower(t: ApiTower): Tower {
@@ -131,6 +174,7 @@ function mapTower(t: ApiTower): Tower {
     projectId: t.project_id,
     name: t.name,
     totalFloors: t.total_floors,
+    layout: t.layout ?? null,
     units: (t.units ?? []).map(mapUnit),
   };
 }
@@ -162,6 +206,20 @@ function mapProject(p: ApiProject): Project {
     sinkingFund: numOrNull(p.sinking_fund),
     amenitiesCharges: numOrNull(p.amenities_charges),
     demandSchedule: p.demand_schedule ?? null,
+    projectType: (p.project_type as ProjectType | null | undefined) ?? null,
+    pricingBasis: (p.pricing_basis as PricingBasis | null | undefined) ?? null,
+    floorRiseRate: numOrNull(p.floor_rise_rate),
+    floorRiseBasis: (p.floor_rise_basis as FloorRiseBasis | null | undefined) ?? null,
+    floorRiseFrom: p.floor_rise_from ?? null,
+    plcRate: numOrNull(p.plc_rate),
+    amenitiesRate: numOrNull(p.amenities_rate),
+    parkingPrices: mapParkingPrices(p.parking_prices),
+    paymentPlan: mapPlan(p.payment_plan),
+    milestonesReached: p.milestones_reached
+      ? p.milestones_reached.map(
+          (r): MilestoneReached => ({ key: r.key, towerId: r.tower_id ?? null, reachedOn: r.reached_on })
+        )
+      : null,
     towers,
     media: (p.media ?? []).map((m) => ({
       id: m.id,
@@ -204,6 +262,17 @@ export interface ProjectDetailsPayload {
   sinking_fund?: number | null;
   amenities_charges?: number | null;
   demand_schedule?: DemandMilestonePayload[] | null;
+  // --- Add Project wizard ---
+  project_type?: ProjectType | null;
+  pricing_basis?: PricingBasis | null;
+  floor_rise_rate?: number | null;
+  floor_rise_basis?: FloorRiseBasis | null;
+  floor_rise_from?: number | null;
+  plc_rate?: number | null;
+  amenities_rate?: number | null;
+  parking_prices?: Partial<Record<ParkingType, number>> | null;
+  // Writing a payment_plan clears the legacy demand_schedule on the server.
+  payment_plan?: PlanMilestone[] | null;
 }
 
 export interface ProjectCreatePayload extends ProjectDetailsPayload {
@@ -236,10 +305,18 @@ export interface ProjectTowerPayload {
   total_floors: number;
   unit_specs?: UnitBatchPayload[]; // several unit types per tower, each its own batch
   units?: UnitBatchPayload | null; // legacy single-spec (still accepted)
+  // The wizard's tower: flat types + shops/godowns. When sent, the server builds (and prices) the units from it
+  // and ignores unit_specs / units.
+  layout?: TowerLayout | null;
 }
 
-// Parking spots per type (MLP / CP / IP / OP), numbered per type across the whole project (CP01 …).
-export type ParkingCountsPayload = Partial<Record<GarageOption, number>>;
+// A wizard tower card on Edit: an existing tower (tower_id) or a new one.
+export interface ProjectTowerSyncPayload extends ProjectTowerPayload {
+  tower_id?: string | null;
+}
+
+// Parking spots per type (MLP / CP / IP / OP / DP), numbered per type across the whole project (CP01 …).
+export type ParkingCountsPayload = Partial<Record<ParkingType, number>>;
 
 export interface ProjectFullPayload extends ProjectCreatePayload {
   towers: ProjectTowerPayload[];
@@ -249,8 +326,107 @@ export interface ProjectFullPayload extends ProjectCreatePayload {
 // Edit project → Save: the page's tower cards (existing ones carry tower_id) + parking counts. The server adds
 // only what's missing — never changes or removes existing units.
 export interface ProjectInventoryPayload {
-  towers: TowerCardPayload[];
+  towers: (TowerCardPayload | ProjectTowerSyncPayload)[];
   parking: ParkingCountsPayload;
+}
+
+// Preview for an existing project: the page's towers + parking + its (unsaved) pricing.
+export interface ProjectInventoryPreviewPayload extends ProjectInventoryPayload {
+  pricing_basis?: PricingBasis | null;
+  rate_a?: number | null;
+  rate_b?: number | null;
+  rate_c?: number | null;
+  parking_prices?: Partial<Record<ParkingType, number>> | null;
+}
+
+// What Save would build (same planner as Save, nothing written).
+export interface PlannedUnit {
+  floor: number;
+  unitNumber: string;
+  unitType: UnitType;
+  flatType: string | null;
+  configuration: string | null;
+  area: number;
+  carpetArea: number | null;
+  builtUpArea: number | null;
+  basePrice: number | null;
+  hasPlc: boolean;
+}
+
+export interface InventoryPreview {
+  towers: { towerId: string | null; name: string; existingUnits: number; newUnits: PlannedUnit[] }[];
+  parking: { parkingType: ParkingType; existing: number; newNumbers: string[]; price: number | null }[];
+  notes: string[];
+  newUnits: number;
+  newParking: number;
+}
+
+interface ApiInventoryPreview {
+  towers: {
+    tower_id: string | null;
+    name: string;
+    existing_units: number;
+    new_units: {
+      floor: number;
+      unit_number: string;
+      unit_type: string;
+      flat_type: string | null;
+      configuration: string | null;
+      area: number | string;
+      carpet_area: number | string | null;
+      built_up_area: number | string | null;
+      base_price: number | string | null;
+      has_plc: boolean;
+    }[];
+  }[];
+  parking: { parking_type: ParkingType; existing: number; new_numbers: string[]; price: number | string | null }[];
+  notes: string[];
+  new_units: number;
+  new_parking: number;
+}
+
+function mapPreview(r: ApiInventoryPreview): InventoryPreview {
+  return {
+    towers: r.towers.map((t) => ({
+      towerId: t.tower_id,
+      name: t.name,
+      existingUnits: t.existing_units,
+      newUnits: t.new_units.map((u) => ({
+        floor: u.floor,
+        unitNumber: u.unit_number,
+        unitType: u.unit_type as UnitType,
+        flatType: u.flat_type,
+        configuration: u.configuration,
+        area: Number(u.area),
+        carpetArea: numOrNull(u.carpet_area),
+        builtUpArea: numOrNull(u.built_up_area),
+        basePrice: numOrNull(u.base_price),
+        hasPlc: u.has_plc,
+      })),
+    })),
+    parking: r.parking.map((p) => ({
+      parkingType: p.parking_type,
+      existing: p.existing,
+      newNumbers: p.new_numbers,
+      price: numOrNull(p.price),
+    })),
+    notes: r.notes,
+    newUnits: r.new_units,
+    newParking: r.new_parking,
+  };
+}
+
+export interface MilestoneReachedResult {
+  raised: number;
+  alreadyRaised: number;
+  amount: number;
+  project: Project;
+}
+
+export interface MilestoneUndoResult {
+  removed: number;
+  kept: number;
+  project: Project;
 }
 
 export interface ProjectInventoryResult {
@@ -282,6 +458,9 @@ export interface UnitUpdatePayload {
   facing?: string | null;
   view?: string | null;
   base_price?: number;
+  flat_type?: string | null;
+  configuration?: string | null;
+  has_plc?: boolean;
 }
 
 export const inventoryService = {
@@ -336,6 +515,51 @@ export const inventoryService = {
         payload
       )
       .then((r) => ({ project: mapProject(r.data.project), created: r.data.created, notes: r.data.notes }));
+  },
+
+  // The wizard's preview step: what Create would build (nothing is written).
+  previewNewProject(payload: ProjectFullPayload): Promise<InventoryPreview> {
+    return apiClient
+      .post<ApiInventoryPreview>("/inventory/projects/full/preview", payload)
+      .then((r) => mapPreview(r.data));
+  },
+
+  // The wizard's preview step on Edit: what Save would add to this project (nothing is written).
+  previewProjectInventory(projectId: string, payload: ProjectInventoryPreviewPayload): Promise<InventoryPreview> {
+    return apiClient
+      .post<ApiInventoryPreview>(`/inventory/projects/${projectId}/inventory/preview`, payload)
+      .then((r) => mapPreview(r.data));
+  },
+
+  // Mark an event milestone (stage done / possession / registration) reached — raises its demand on every live
+  // booking holding it, in the chosen towers (none = the whole project).
+  markMilestoneReached(
+    projectId: string,
+    key: string,
+    payload: { reached_on: string; tower_ids?: string[] | null }
+  ): Promise<MilestoneReachedResult> {
+    return apiClient
+      .post<{ raised: number; already_raised: number; amount: number | string; project: ApiProject }>(
+        `/inventory/projects/${projectId}/payment-plan/${encodeURIComponent(key)}/reached`,
+        payload
+      )
+      .then((r) => ({
+        raised: r.data.raised,
+        alreadyRaised: r.data.already_raised,
+        amount: Number(r.data.amount),
+        project: mapProject(r.data.project),
+      }));
+  },
+
+  // Undo a "reached" mark (towerId null = the whole-project mark): removes the demands it raised that have no
+  // payment or invoice yet.
+  undoMilestoneReached(projectId: string, key: string, towerId: string | null): Promise<MilestoneUndoResult> {
+    return apiClient
+      .delete<{ removed: number; kept: number; project: ApiProject }>(
+        `/inventory/projects/${projectId}/payment-plan/${encodeURIComponent(key)}/reached`,
+        { params: towerId ? { tower_id: towerId } : {} }
+      )
+      .then((r) => ({ removed: r.data.removed, kept: r.data.kept, project: mapProject(r.data.project) }));
   },
 
   createTower(projectId: string, payload: TowerCreatePayload): Promise<Tower> {

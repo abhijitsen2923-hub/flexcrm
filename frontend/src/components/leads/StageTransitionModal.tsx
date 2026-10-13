@@ -9,6 +9,7 @@ import type { Lead, LeadIntent, PipelineStage, User } from "../../types";
 import type { Booking, PaymentMode } from "../../types/realestate";
 import { extractErrorMessage } from "../../utils/errors";
 import { INTENT_LABEL, isIntentLocked } from "../../utils/leadIntent";
+import { unitOptionLabel } from "../../utils/unitLabel";
 import { IntentSlider } from "./IntentSlider";
 import {
   FIELD_ELEMENT_IDS,
@@ -149,14 +150,14 @@ export function StageTransitionModal({
     return () => { cancelled = true; };
   }, [open, isBookedStage, lead?.id]);
 
-  // Available units across all projects, labelled "Project · Tower · Unit".
+  // Available units across all projects, labelled "A-101 · Type A · 2 BHK · 1,250 sq ft · Tower A · Project".
   const availableUnits = useMemo(
     () =>
       projects.flatMap((p) =>
         p.towers.flatMap((t) =>
           t.units
             .filter((u) => u.status === "available")
-            .map((u) => ({ id: u.id, label: `${p.name} · ${t.name} · ${u.unitNumber}` }))
+            .map((u) => ({ id: u.id, label: unitOptionLabel({ ...u, towerName: t.name, projectName: p.name }) }))
         )
       ),
     [projects]

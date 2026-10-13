@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Archive, Building2, Download, Image, Pencil, Plus, Trash2, Upload } from "lucide-react";
 import { Button, Card, ConfirmDialog, DataTable, EmptyState, Modal, SelectField, TextField, useToast } from "../../components";
 import type { DataTableColumn } from "../../components";
@@ -6,32 +6,14 @@ import { useInventory } from "../../hooks/useInventory";
 import { usePermissions } from "../../hooks/usePermissions";
 import { inventoryService } from "../../services/inventory";
 import { exportsService } from "../../services/exports";
-import type { GarageOption, Project, ProjectMedia, ProjectPossessionRollup, Tower, Unit, UnitType } from "../../types/realestate";
+import type { Project, ProjectMedia, ProjectPossessionRollup, Tower, Unit, UnitType } from "../../types/realestate";
 import { LoadingBlock } from "../../components/ui/Spinner";
 import { extractErrorMessage } from "../../utils/errors";
 import { formatInr } from "../../utils/format";
-import {
-  EMPTY_PARKING_COUNTS,
-  applyRates,
-  cardPayload,
-  describeCreated,
-  initialCards,
-  initialParkingCounts,
-  isParkingBlock,
-  parkingCountsByType,
-  parkingPayload,
-  parkingTotal,
-  plannedAdds,
-  plannedParkingAdds,
-  syncCardsWithDetails,
-  totalOf,
-  validateLayout,
-  type LayoutDetails,
-  type ParkingCountsForm,
-  type ProjectRates,
-  type TowerCard,
-} from "../../utils/projectInventory";
-import { ProjectInventoryEditor } from "./components/ProjectInventoryEditor";
+import { isParkingBlock } from "../../utils/projectInventory";
+import { CONFIGURATION_SUGGESTIONS } from "../../utils/projectWizard";
+import { ProjectPaymentPlanPanel } from "./components/ProjectPaymentPlanPanel";
+import { ProjectWizard } from "./components/ProjectWizard";
 import "./ProjectsPage.css";
 
 const UNIT_TYPE_OPTIONS: { value: UnitType; label: string }[] = [
@@ -41,71 +23,23 @@ const UNIT_TYPE_OPTIONS: { value: UnitType; label: string }[] = [
   { value: "godown", label: "Godown / Warehouse" },
 ];
 
-interface ProjectFormState {
-  name: string;
-  builder_name: string;
-  location: string;
-  city: string;
-  rera_number: string;
-  // Project detail (Phase B) — numeric fields kept as strings for the inputs.
-  pin_code: string;
-  landmark: string;
-  total_towers: string;
-  total_floors: string;
-  flats_per_floor: string;
-  // Default box-price components.
-  rate_a: string;
-  rate_b: string;
-  rate_c: string;
-  parking_cost: string;
-  legal_fees: string;
-  overhead_cost: string;
-  other_charges: string;
-  sinking_fund: string;
-  amenities_charges: string;
+// "Type A · 2 BHK · PLC" for the units table (older units have no flat type).
+function flatTypeText(u: Unit): string {
+  const parts = [u.flatType ? `Type ${u.flatType}` : null, u.configuration, u.hasPlc ? "PLC" : null].filter(Boolean);
+  return parts.length ? parts.join(" · ") : "—";
 }
 
-const EMPTY_PROJECT_FORM: ProjectFormState = {
-  name: "",
-  builder_name: "",
-  location: "",
-  city: "",
-  rera_number: "",
-  pin_code: "",
-  landmark: "",
-  total_towers: "",
-  total_floors: "",
-  flats_per_floor: "",
-  rate_a: "",
-  rate_b: "",
-  rate_c: "",
-  parking_cost: "",
-  legal_fees: "",
-  overhead_cost: "",
-  other_charges: "",
-  sinking_fund: "",
-  amenities_charges: "",
-};
+// Floor by floor, then A-101, A-102 … (numbers compared as numbers, so A-110 comes after A-109).
+function byFloorAndNumber(a: Unit, b: Unit): number {
+  return a.floor - b.floor || a.unitNumber.localeCompare(b.unitNumber, undefined, { numeric: true });
+}
 
-// Parse a numeric input string → number, or null when blank / invalid.
-function numOrNull(s: string): number | null {
-  const t = s.trim();
+// Blank → null (clears it); anything else must be a size above 0.
+function areaOrNull(value: string): number | null | "invalid" {
+  const t = value.trim();
   if (t === "") return null;
   const n = Number(t);
-  return Number.isFinite(n) ? n : null;
-}
-function intOrNull(s: string): number | null {
-  const n = numOrNull(s);
-  return n === null ? null : Math.trunc(n);
-}
-
-// The Towers section follows these details (cards added / laid out as they change) and these rates (suggested
-// prices = size × rate).
-function detailsOf(form: ProjectFormState): LayoutDetails {
-  return { towers: intOrNull(form.total_towers), floors: intOrNull(form.total_floors), flatsPerFloor: intOrNull(form.flats_per_floor) };
-}
-function ratesOf(form: ProjectFormState): ProjectRates {
-  return { rateA: numOrNull(form.rate_a), rateB: numOrNull(form.rate_b), rateC: numOrNull(form.rate_c) };
+  return Number.isFinite(n) && n > 0 ? n : "invalid";
 }
 
 const MEDIA_TYPE_OPTIONS: { value: ProjectMedia["type"]; label: string }[] = [
@@ -239,173 +173,32 @@ export default function ProjectsPage() {
   const { has: hasPerm } = usePermissions();
   const canExport = hasPerm("EXPORT_DATA");
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
-  const [formOpen, setFormOpen] = useState(false);
-  const [editingProject, setEditingProject] = useState<Project | null>(null);
-  const [form, setForm] = useState<ProjectFormState>(EMPTY_PROJECT_FORM);
-  const [cards, setCards] = useState<TowerCard[]>([]);
-  const [parkingSelected, setParkingSelected] = useState<GarageOption[]>([]);
-  const [parkingCounts, setParkingCounts] = useState<ParkingCountsForm>(EMPTY_PARKING_COUNTS);
-  const [demandRows, setDemandRows] = useState<{ label: string; percent: string; due_date: string }[]>([]);
-  const [saving, setSaving] = useState(false);
-  const [formError, setFormError] = useState<string | null>(null);
-
-  // Total towers / floors / flats per floor drive the tower cards; the rates drive the suggested prices.
-  function setDetail(field: "total_towers" | "total_floors" | "flats_per_floor", value: string) {
-    const next = { ...form, [field]: value };
-    setForm(next);
-    setCards((prev) => syncCardsWithDetails(prev, detailsOf(next), ratesOf(next)));
-  }
-  function setRate(field: "rate_a" | "rate_b" | "rate_c", value: string) {
-    const next = { ...form, [field]: value };
-    setForm(next);
-    setCards((prev) => applyRates(prev, ratesOf(next)));
-  }
-  function setDemandRow(i: number, patch: Partial<{ label: string; percent: string; due_date: string }>) {
-    setDemandRows((prev) => prev.map((r, idx) => (idx === i ? { ...r, ...patch } : r)));
-  }
+  // The Add / Edit wizard: open with the project being edited (null = Add). `wizardRun` remounts it per opening so
+  // it always starts fresh.
+  const [wizard, setWizard] = useState<{ project: Project | null; run: number } | null>(null);
+  const wizardRun = useRef(0);
   const [archiveProject, setArchiveProject] = useState<Project | null>(null);
   const [archiving, setArchiving] = useState(false);
 
   // Keep the open detail modal in sync with refreshed data (after adding
   // towers/units) — selectedProject is a snapshot; re-point it at the fresh row.
+  // Only when the list changes: a newer copy set from the detail screen (e.g. a
+  // milestone marked reached) must not be swapped back for the older list row.
   useEffect(() => {
-    if (!selectedProject) return;
-    const fresh = projects.find((p) => p.id === selectedProject.id);
-    if (fresh && fresh !== selectedProject) setSelectedProject(fresh);
-  }, [projects, selectedProject]);
+    setSelectedProject((current) => {
+      if (!current) return current;
+      return projects.find((p) => p.id === current.id) ?? current;
+    });
+  }, [projects]);
 
   function openCreate() {
-    setEditingProject(null);
-    setForm(EMPTY_PROJECT_FORM);
-    setCards([]);
-    setParkingSelected([]);
-    setParkingCounts(EMPTY_PARKING_COUNTS);
-    setDemandRows([]);
-    setFormError(null);
-    setFormOpen(true);
+    wizardRun.current += 1;
+    setWizard({ project: null, run: wizardRun.current });
   }
 
   function openEdit(project: Project) {
-    setEditingProject(project);
-    const str = (v: number | null) => (v != null ? String(v) : "");
-    const next: ProjectFormState = {
-      name: project.name,
-      builder_name: project.builderName,
-      location: project.location,
-      city: project.city,
-      rera_number: project.reraNumber ?? "",
-      pin_code: project.pinCode ?? "",
-      landmark: project.landmark ?? "",
-      total_towers: str(project.totalTowers),
-      total_floors: str(project.totalFloors),
-      flats_per_floor: str(project.flatsPerFloor),
-      rate_a: str(project.rateA),
-      rate_b: str(project.rateB),
-      rate_c: str(project.rateC),
-      parking_cost: str(project.parkingCost),
-      legal_fees: str(project.legalFees),
-      overhead_cost: str(project.overheadCost),
-      other_charges: str(project.otherCharges),
-      sinking_fund: str(project.sinkingFund),
-      amenities_charges: str(project.amenitiesCharges),
-    };
-    setForm(next);
-    // Existing towers as they are (an unchanged Save adds nothing); a project with details but no towers yet
-    // gets cards laid out from its details.
-    setCards(initialCards(project.towers, detailsOf(next), ratesOf(next)));
-    const parking = initialParkingCounts(
-      parkingCountsByType(project.towers).byType,
-      project.garageOptions ?? [],
-      project.totalGarages
-    );
-    setParkingSelected(parking.selected);
-    setParkingCounts(parking.counts);
-    setDemandRows(
-      (project.demandSchedule ?? []).map((m) => ({ label: m.label, percent: String(m.percent), due_date: m.due_date })),
-    );
-    setFormError(null);
-    setFormOpen(true);
-  }
-
-  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setSaving(true);
-    setFormError(null);
-    const payload = {
-      name: form.name.trim(),
-      builder_name: form.builder_name.trim(),
-      location: form.location.trim(),
-      city: form.city.trim(),
-      rera_number: form.rera_number.trim() || null,
-      // Phase-B detail specs + default box-price components (blank → null).
-      pin_code: form.pin_code.trim() || null,
-      landmark: form.landmark.trim() || null,
-      total_towers: intOrNull(form.total_towers),
-      total_floors: intOrNull(form.total_floors),
-      flats_per_floor: intOrNull(form.flats_per_floor),
-      // The parking total is the sum of the per-type counts (kept as declared when none are entered).
-      total_garages: parkingTotal(parkingSelected, parkingCounts) || (editingProject?.totalGarages ?? null),
-      garage_options: parkingSelected.length ? parkingSelected : null,
-      rate_a: numOrNull(form.rate_a),
-      rate_b: numOrNull(form.rate_b),
-      rate_c: numOrNull(form.rate_c),
-      parking_cost: numOrNull(form.parking_cost),
-      legal_fees: numOrNull(form.legal_fees),
-      overhead_cost: numOrNull(form.overhead_cost),
-      other_charges: numOrNull(form.other_charges),
-      sinking_fund: numOrNull(form.sinking_fund),
-      amenities_charges: numOrNull(form.amenities_charges),
-      demand_schedule: (() => {
-        const rows = demandRows
-          .filter((r) => r.label.trim() && Number(r.percent) > 0 && r.due_date)
-          .map((r) => ({ label: r.label.trim(), percent: Number(r.percent), due_date: r.due_date }));
-        return rows.length ? rows : null;
-      })(),
-    };
-    // Check the towers before anything is sent, so a half-filled card never saves the project without them.
-    const existingTowers = editingProject?.towers ?? [];
-    const newUnits =
-      cards.reduce(
-        (sum, card) => sum + totalOf(plannedAdds(card, existingTowers.find((t) => t.id === card.towerId)?.units ?? [])),
-        0
-      ) +
-      totalOf(plannedParkingAdds(parkingSelected, parkingCounts, parkingCountsByType(existingTowers).byType));
-    const layoutError = validateLayout(cards, newUnits);
-    if (layoutError) {
-      setFormError(layoutError);
-      setSaving(false);
-      return;
-    }
-    const towersPayload = cards.map(cardPayload);
-    const parking = parkingPayload(parkingSelected, parkingCounts);
-    try {
-      if (editingProject) {
-        // Details first (the parking price comes from them), then build whatever the page adds.
-        await inventoryService.updateProject(editingProject.id, payload);
-        const result = await inventoryService.syncProjectInventory(editingProject.id, { towers: towersPayload, parking });
-        const added = result.created.towers + result.created.units + result.created.parking;
-        toast.success("Project updated", added ? `${payload.name} · ${describeCreated(result.created)}` : payload.name);
-        if (result.notes.length) toast.info("Existing units kept", result.notes.join(" "));
-      } else {
-        // One atomic call: project + towers + their units + parking.
-        const created = await inventoryService.createProjectFull({ ...payload, towers: towersPayload, parking });
-        const built = {
-          towers: created.towers.filter((t) => !isParkingBlock(t.name)).length,
-          units: created.totalUnits,
-          parking: created.totalParking,
-        };
-        const anyBuilt = built.towers + built.units + built.parking > 0;
-        toast.success("Project created", anyBuilt ? `${payload.name} · ${describeCreated(built)}` : payload.name);
-      }
-      setFormOpen(false);
-      await refresh();
-    } catch (err) {
-      setFormError(extractErrorMessage(err));
-      // An Edit whose details saved but whose inventory didn't: show the saved details on the list.
-      if (editingProject) void refresh();
-    } finally {
-      setSaving(false);
-    }
+    wizardRun.current += 1;
+    setWizard({ project, run: wizardRun.current });
   }
 
   async function confirmArchiveProject() {
@@ -498,166 +291,18 @@ export default function ProjectsPage() {
         </Card>
       )}
 
-      <Modal
-        open={formOpen}
-        title={editingProject ? "Edit project" : "Add project"}
-        size="lg"
-        onClose={() => setFormOpen(false)}
-        footer={
-          <>
-            <Button variant="secondary" onClick={() => setFormOpen(false)} disabled={saving}>
-              Cancel
-            </Button>
-            <Button type="submit" form="project-form" loading={saving}>
-              {editingProject ? "Save changes" : "Create project"}
-            </Button>
-          </>
-        }
-      >
-        <form id="project-form" className="stack" onSubmit={handleSubmit}>
-          <TextField
-            id="project-name"
-            label="Project name"
-            value={form.name}
-            onChange={(event) => setForm({ ...form, name: event.target.value })}
-            required
-            placeholder="e.g. Prestige Lakeside Habitat"
-          />
-          <TextField
-            id="project-builder"
-            label="Builder"
-            value={form.builder_name}
-            onChange={(event) => setForm({ ...form, builder_name: event.target.value })}
-            required
-            placeholder="e.g. Prestige Group"
-          />
-          <div className="form-grid">
-            <TextField
-              id="project-location"
-              label="Location / Area"
-              value={form.location}
-              onChange={(event) => setForm({ ...form, location: event.target.value })}
-              required
-              placeholder="e.g. Whitefield"
-            />
-            <TextField
-              id="project-city"
-              label="City"
-              value={form.city}
-              onChange={(event) => setForm({ ...form, city: event.target.value })}
-              required
-              placeholder="e.g. Bengaluru"
-            />
-          </div>
-          <TextField
-            id="project-rera"
-            label="RERA number"
-            value={form.rera_number}
-            onChange={(event) => setForm({ ...form, rera_number: event.target.value })}
-            placeholder="Optional"
-          />
-
-          {/* Project details (Phase B) — declared specs, all optional. */}
-          <div className="stack" style={{ gap: "0.6rem", borderTop: "1px solid var(--color-border)", paddingTop: "0.85rem" }}>
-            <strong>Project details</strong>
-            <div className="form-grid">
-              <TextField id="project-pincode" label="PIN code" value={form.pin_code} onChange={(e) => setForm({ ...form, pin_code: e.target.value })} placeholder="e.g. 560066" />
-              <TextField id="project-landmark" label="Landmark" value={form.landmark} onChange={(e) => setForm({ ...form, landmark: e.target.value })} placeholder="e.g. Near ITPL" />
-            </div>
-            <div className="form-grid">
-              <TextField id="project-total-towers" label="Total towers" type="number" min={0} max={100} value={form.total_towers} onChange={(e) => setDetail("total_towers", e.target.value)} />
-              <TextField id="project-total-floors" label="Total floors" type="number" min={0} max={200} value={form.total_floors} onChange={(e) => setDetail("total_floors", e.target.value)} />
-            </div>
-            <div className="form-grid">
-              <TextField id="project-flats-per-floor" label="Flats per floor" type="number" min={0} max={200} value={form.flats_per_floor} onChange={(e) => setDetail("flats_per_floor", e.target.value)} />
-            </div>
-          </div>
-
-          {/* Default pricing (Phase B) — seeds the booking Price Calculator. */}
-          <div className="stack" style={{ gap: "0.6rem", borderTop: "1px solid var(--color-border)", paddingTop: "0.85rem" }}>
-            <div>
-              <strong>Default pricing</strong>
-              <p className="muted text-xs" style={{ margin: "0.15rem 0 0" }}>
-                Optional — pre-fills the box-price calculator when booking a unit in this project.
-              </p>
-            </div>
-            <div className="form-grid">
-              <TextField id="project-rate-a" label="Rate A — Residential (₹/sqft)" type="number" min={0} value={form.rate_a} onChange={(e) => setRate("rate_a", e.target.value)} />
-              <TextField id="project-rate-b" label="Rate B — Shop / Commercial (₹/sqft)" type="number" min={0} value={form.rate_b} onChange={(e) => setRate("rate_b", e.target.value)} />
-            </div>
-            <div className="form-grid">
-              <TextField id="project-rate-c" label="Rate C — Godown / Other (₹/sqft)" type="number" min={0} value={form.rate_c} onChange={(e) => setRate("rate_c", e.target.value)} />
-              <TextField id="project-parking-cost" label="Garage / Parking (₹)" type="number" min={0} value={form.parking_cost} onChange={(e) => setForm({ ...form, parking_cost: e.target.value })} />
-            </div>
-            <div className="form-grid">
-              <TextField id="project-amenities" label="Amenities / Club (₹)" type="number" min={0} value={form.amenities_charges} onChange={(e) => setForm({ ...form, amenities_charges: e.target.value })} />
-              <TextField id="project-sinking-fund" label="Sinking Fund (₹)" type="number" min={0} value={form.sinking_fund} onChange={(e) => setForm({ ...form, sinking_fund: e.target.value })} />
-            </div>
-            <div className="form-grid">
-              <TextField id="project-legal-fees" label="Legal / Documentation (₹)" type="number" min={0} value={form.legal_fees} onChange={(e) => setForm({ ...form, legal_fees: e.target.value })} />
-              <TextField id="project-overhead" label="Overhead (₹)" type="number" min={0} value={form.overhead_cost} onChange={(e) => setForm({ ...form, overhead_cost: e.target.value })} />
-            </div>
-            <TextField id="project-other-charges" label="Other Charges (₹)" type="number" min={0} value={form.other_charges} onChange={(e) => setForm({ ...form, other_charges: e.target.value })} />
-          </div>
-
-          <div className="stack" style={{ gap: "0.6rem", borderTop: "1px solid var(--color-border)", paddingTop: "0.85rem" }}>
-            <div className="row row--between" style={{ alignItems: "center" }}>
-              <div>
-                <strong>Demand schedule</strong>
-                <p className="muted text-xs" style={{ margin: 0 }}>
-                  Payment milestones — % of the unit price on fixed dates. A unit booked in this project inherits these demands.
-                </p>
-              </div>
-              <Button
-                type="button"
-                size="sm"
-                variant="ghost"
-                icon={<Plus size={14} />}
-                onClick={() => setDemandRows([...demandRows, { label: "", percent: "", due_date: "" }])}
-              >
-                Add milestone
-              </Button>
-            </div>
-            {demandRows.length > 0 && (
-              <div className="muted text-xs">
-                Total: {demandRows.reduce((s, r) => s + (Number(r.percent) || 0), 0)}%
-              </div>
-            )}
-            {demandRows.map((r, i) => (
-              <div key={i} className="row" style={{ gap: "0.5rem", alignItems: "flex-end" }}>
-                <div style={{ flex: 2 }}>
-                  <TextField id={`dm-label-${i}`} label="Milestone" maxLength={120} value={r.label} onChange={(e) => setDemandRow(i, { label: e.target.value })} placeholder="e.g. On Booking / Plinth / Possession" />
-                </div>
-                <div style={{ flex: 1 }}>
-                  <TextField id={`dm-pct-${i}`} label="%" type="number" min={0} max={100} value={r.percent} onChange={(e) => setDemandRow(i, { percent: e.target.value })} />
-                </div>
-                <div style={{ flex: 1.4 }}>
-                  <TextField id={`dm-due-${i}`} label="Due date" type="date" value={r.due_date} onChange={(e) => setDemandRow(i, { due_date: e.target.value })} />
-                </div>
-                <button type="button" className="btn btn--ghost btn--icon" onClick={() => setDemandRows(demandRows.filter((_, idx) => idx !== i))} aria-label="Remove milestone">
-                  <Trash2 size={14} />
-                </button>
-              </div>
-            ))}
-          </div>
-          <ProjectInventoryEditor
-            cards={cards}
-            onCardsChange={setCards}
-            details={detailsOf(form)}
-            rates={ratesOf(form)}
-            existingTowers={editingProject?.towers ?? []}
-            parkingSelected={parkingSelected}
-            parkingCounts={parkingCounts}
-            onParkingChange={(selected, counts) => {
-              setParkingSelected(selected);
-              setParkingCounts(counts);
-            }}
-            existingParking={parkingCountsByType(editingProject?.towers ?? [])}
-            declaredGarages={editingProject?.totalGarages ?? null}
-          />
-          {formError && <div className="error-banner">{formError}</div>}
-        </form>
-      </Modal>
+      {wizard && (
+        <ProjectWizard
+          key={wizard.run}
+          project={wizard.project}
+          onClose={() => setWizard(null)}
+          onSaved={async () => {
+            setWizard(null);
+            await refresh();
+          }}
+          onPartlySaved={() => void refresh()}
+        />
+      )}
 
       {selectedProject && (
         <Modal
@@ -691,6 +336,15 @@ export default function ProjectsPage() {
                 const project = selectedProject;
                 setSelectedProject(null);
                 openEdit(project);
+              }}
+            />
+
+            <h3 className="project-detail__section-title">Payment plan</h3>
+            <ProjectPaymentPlanPanel
+              project={selectedProject}
+              onChanged={(updated) => {
+                setSelectedProject(updated);
+                void refresh();
               }}
             />
 
@@ -774,8 +428,13 @@ function TowerManager({
     unit_number: "",
     unit_type: "residential" as UnitType,
     area: "",
+    carpet_area: "",
+    built_up_area: "",
     base_price: "",
     facing: "",
+    flat_type: "",
+    configuration: "",
+    has_plc: false,
   });
   const [savingUnit, setSavingUnit] = useState(false);
   const [archiveItem, setArchiveItem] = useState<{ kind: "tower" | "unit"; id: string; label: string } | null>(null);
@@ -814,8 +473,13 @@ function TowerManager({
       unit_number: unit.unitNumber,
       unit_type: unit.unitType,
       area: String(unit.area),
+      carpet_area: unit.carpetArea != null ? String(unit.carpetArea) : "",
+      built_up_area: unit.builtUpArea != null ? String(unit.builtUpArea) : "",
       base_price: String(unit.basePrice),
       facing: unit.facing ?? "",
+      flat_type: unit.flatType ?? "",
+      configuration: unit.configuration ?? "",
+      has_plc: unit.hasPlc,
     });
   }
 
@@ -824,14 +488,32 @@ function TowerManager({
       toast.error("Unit number required");
       return;
     }
+    const carpet = areaOrNull(unitForm.carpet_area);
+    const builtUp = areaOrNull(unitForm.built_up_area);
+    if (carpet === "invalid" || builtUp === "invalid") {
+      toast.error("Check the areas", "Carpet and built-up must be above 0, or left blank.");
+      return;
+    }
+    const flatType = unitForm.flat_type.trim().toUpperCase();
+    const isFlat = unitForm.unit_type === "residential";
+    if (isFlat && flatType && !/^[A-Z]{1,2}$/.test(flatType)) {
+      toast.error("Check the flat type", "Use its letter, e.g. A (or AA).");
+      return;
+    }
     setSavingUnit(true);
     try {
       await inventoryService.updateUnit(unitId, {
         unit_number: unitForm.unit_number.trim(),
         unit_type: unitForm.unit_type,
         area: unitForm.area.trim() !== "" ? Number(unitForm.area) : undefined,
+        carpet_area: carpet,
+        built_up_area: builtUp,
         base_price: unitForm.base_price.trim() !== "" ? Number(unitForm.base_price) : undefined,
         facing: unitForm.facing.trim() || null,
+        // Flat type / configuration / PLC belong to flats; other kinds of unit leave them as they are.
+        ...(isFlat
+          ? { flat_type: flatType || null, configuration: unitForm.configuration.trim() || null, has_plc: unitForm.has_plc }
+          : {}),
       });
       toast.success("Unit updated", unitForm.unit_number.trim());
       setEditUnitId(null);
@@ -871,6 +553,12 @@ function TowerManager({
           Edit project
         </Button>
       </div>
+
+      <datalist id="unit-fix-configurations">
+        {CONFIGURATION_SUGGESTIONS.map((c) => (
+          <option key={c} value={c} />
+        ))}
+      </datalist>
 
       {project.towers.map((tower) => (
         <div key={tower.id} className="card" style={{ padding: "0.75rem 1rem" }}>
@@ -934,7 +622,8 @@ function TowerManager({
                     <tr>
                       <th style={{ textAlign: "left" }}>Unit</th>
                       <th style={{ textAlign: "left" }}>Floor</th>
-                      <th style={{ textAlign: "left" }}>Type</th>
+                      <th style={{ textAlign: "left" }}>Category</th>
+                      <th style={{ textAlign: "left" }}>Flat type</th>
                       <th style={{ textAlign: "right" }}>Area</th>
                       <th style={{ textAlign: "right" }}>Price</th>
                       <th style={{ textAlign: "left" }}>Status</th>
@@ -942,34 +631,83 @@ function TowerManager({
                     </tr>
                   </thead>
                   <tbody>
-                    {tower.units.map((u) =>
+                    {[...tower.units].sort(byFloorAndNumber).map((u) =>
                       editUnitId === u.id ? (
                         <tr key={u.id}>
-                          <td>
-                            <input className="input" value={unitForm.unit_number} onChange={(e) => setUnitForm({ ...unitForm, unit_number: e.target.value })} />
-                          </td>
-                          <td>{u.floor}</td>
-                          <td>
-                            <select className="input" value={unitForm.unit_type} onChange={(e) => setUnitForm({ ...unitForm, unit_type: e.target.value as UnitType })}>
-                              {UNIT_TYPE_OPTIONS.map((o) => (
-                                <option key={o.value} value={o.value}>{o.label}</option>
-                              ))}
-                            </select>
-                          </td>
-                          <td><input className="input" type="number" style={{ textAlign: "right" }} value={unitForm.area} onChange={(e) => setUnitForm({ ...unitForm, area: e.target.value })} /></td>
-                          <td><input className="input" type="number" style={{ textAlign: "right" }} value={unitForm.base_price} onChange={(e) => setUnitForm({ ...unitForm, base_price: e.target.value })} /></td>
-                          <td>{u.status}</td>
-                          <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>
-                            <button type="button" className="btn btn--ghost btn--icon" onClick={() => setEditUnitId(null)} aria-label="Cancel">✕</button>
-                            <Button size="sm" loading={savingUnit} onClick={() => void saveUnitEdit(u.id)}>Save</Button>
+                          <td colSpan={8} className="unit-fix__cell">
+                            <div className="unit-fix">
+                              <div>
+                                <strong>Correct {u.unitNumber}</strong>
+                                <span className="muted text-sm"> · floor {u.floor} · {u.status}</span>
+                              </div>
+                              <div className="unit-fix__grid">
+                                <TextField id={`uf-number-${u.id}`} label="Unit number" value={unitForm.unit_number} onChange={(e) => setUnitForm({ ...unitForm, unit_number: e.target.value })} />
+                                <SelectField
+                                  id={`uf-category-${u.id}`}
+                                  label="Category"
+                                  value={unitForm.unit_type}
+                                  options={UNIT_TYPE_OPTIONS}
+                                  onChange={(e) => setUnitForm({ ...unitForm, unit_type: e.target.value as UnitType })}
+                                />
+                                {unitForm.unit_type === "residential" && (
+                                  <>
+                                    <TextField
+                                      id={`uf-flat-type-${u.id}`}
+                                      label="Flat type"
+                                      value={unitForm.flat_type}
+                                      maxLength={2}
+                                      placeholder="e.g. A"
+                                      onChange={(e) => setUnitForm({ ...unitForm, flat_type: e.target.value.toUpperCase() })}
+                                    />
+                                    <TextField
+                                      id={`uf-config-${u.id}`}
+                                      label="Configuration"
+                                      list="unit-fix-configurations"
+                                      maxLength={32}
+                                      value={unitForm.configuration}
+                                      placeholder="e.g. 2 BHK"
+                                      onChange={(e) => setUnitForm({ ...unitForm, configuration: e.target.value })}
+                                    />
+                                  </>
+                                )}
+                                <TextField id={`uf-area-${u.id}`} label="Super built-up (sq ft)" type="number" min={0} value={unitForm.area} onChange={(e) => setUnitForm({ ...unitForm, area: e.target.value })} />
+                                <TextField id={`uf-carpet-${u.id}`} label="Carpet (sq ft)" type="number" min={0} value={unitForm.carpet_area} onChange={(e) => setUnitForm({ ...unitForm, carpet_area: e.target.value })} />
+                                <TextField id={`uf-built-${u.id}`} label="Built-up (sq ft)" type="number" min={0} value={unitForm.built_up_area} onChange={(e) => setUnitForm({ ...unitForm, built_up_area: e.target.value })} />
+                                <TextField id={`uf-price-${u.id}`} label="Price (₹)" type="number" min={0} value={unitForm.base_price} onChange={(e) => setUnitForm({ ...unitForm, base_price: e.target.value })} />
+                              </div>
+                              <div className="row row--between" style={{ alignItems: "center", gap: "0.5rem" }}>
+                                {unitForm.unit_type === "residential" ? (
+                                  <label className="row text-sm" style={{ gap: 6, cursor: "pointer" }}>
+                                    <input type="checkbox" checked={unitForm.has_plc} onChange={(e) => setUnitForm({ ...unitForm, has_plc: e.target.checked })} />
+                                    PLC — corner / view (adds the PLC charge)
+                                  </label>
+                                ) : (
+                                  <span />
+                                )}
+                                <div className="row" style={{ gap: "0.5rem" }}>
+                                  <Button variant="secondary" size="sm" onClick={() => setEditUnitId(null)}>Cancel</Button>
+                                  <Button size="sm" loading={savingUnit} onClick={() => void saveUnitEdit(u.id)}>Save</Button>
+                                </div>
+                              </div>
+                            </div>
                           </td>
                         </tr>
                       ) : (
                         <tr key={u.id}>
                           <td data-label="Unit"><strong>{u.unitNumber}</strong></td>
                           <td data-label="Floor">{u.floor}</td>
-                          <td data-label="Type">{u.unitType}</td>
-                          <td data-label="Area" style={{ textAlign: "right" }}>{u.area} {u.areaUnit}</td>
+                          <td data-label="Category">{UNIT_TYPE_OPTIONS.find((o) => o.value === u.unitType)?.label ?? u.unitType}</td>
+                          <td data-label="Flat type">{flatTypeText(u)}</td>
+                          <td data-label="Area" style={{ textAlign: "right" }}>
+                            {u.area} {u.areaUnit}
+                            {(u.carpetArea != null || u.builtUpArea != null) && (
+                              <div className="muted text-xs">
+                                {[u.carpetArea != null ? `Carpet ${u.carpetArea}` : null, u.builtUpArea != null ? `Built-up ${u.builtUpArea}` : null]
+                                  .filter(Boolean)
+                                  .join(" · ")}
+                              </div>
+                            )}
+                          </td>
                           <td data-label="Price" style={{ textAlign: "right" }}>{formatInr(u.basePrice)}</td>
                           <td data-label="Status">{u.status}</td>
                           <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>

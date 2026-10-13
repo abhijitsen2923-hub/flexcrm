@@ -1,10 +1,20 @@
 import { useEffect, useMemo, useState } from "react";
+import axios from "axios";
 import { FileDown, Plus, Trash2 } from "lucide-react";
 import { Badge, Button, Modal, SelectField, TextField, useToast } from "../../../components";
+import { usePermissions } from "../../../hooks/usePermissions";
 import { bookingsService } from "../../../services/bookings";
-import type { Booking, BookingInvoice, PaymentMode, PaymentScheduleEntry } from "../../../types/realestate";
+import type { Booking, BookingInvoice, PaymentMode, PaymentScheduleEntry, PlanMilestone } from "../../../types/realestate";
 import { extractErrorMessage } from "../../../utils/errors";
 import { formatDate, formatInr } from "../../../utils/format";
+import {
+  dueOnText,
+  formatPercent,
+  localIsoDate,
+  milestoneAmount,
+  pendingMilestones,
+  planBase,
+} from "../../../utils/paymentPlan";
 
 const MODE_OPTIONS: { value: PaymentMode; label: string }[] = [
   { value: "upi", label: "UPI" },
@@ -61,9 +71,21 @@ interface Props {
 
 export function PaymentPlanModal({ booking: initial, onClose, onChanged }: Props) {
   const toast = useToast();
+  const { has } = usePermissions();
+  const canRaise = has("FINANCE_RECORD_PAYMENT");
   const [booking, setBooking] = useState<Booking>(initial);
   const total = Number(booking.pricingSnapshot?.total ?? booking.unit?.basePrice ?? 0);
-  const hasPlan = booking.paymentSchedules.length > 0;
+  // A booking that took its project's payment plan has a plan even before any demand is raised (e.g. every
+  // milestone waits for a stage) — show the schedule view with what's still to come, not the plan builder.
+  const hasPlan = booking.paymentSchedules.length > 0 || (booking.paymentPlan?.length ?? 0) > 0;
+  const pending = pendingMilestones(booking.paymentPlan, booking.paymentSchedules);
+  // What plan percentages are taken of (box price + GST), for the "≈ ₹" estimates.
+  const base = planBase(booking.pricingSnapshot, booking.unit?.basePrice ?? 0);
+
+  // Raise-now state (a pending plan milestone raised on this booking).
+  const [raiseFor, setRaiseFor] = useState<PlanMilestone | null>(null);
+  const [raiseDate, setRaiseDate] = useState(localIsoDate());
+  const [raising, setRaising] = useState(false);
 
   // Plan builder state (shown when there is no plan yet).
   const [template, setTemplate] = useState<TemplateKey>("down_payment");
@@ -118,6 +140,7 @@ export function PaymentPlanModal({ booking: initial, onClose, onChanged }: Props
   }
 
   function openRecord(inst: PaymentScheduleEntry) {
+    setRaiseFor(null);
     setRecordFor(inst);
     setPayAmount(String(inst.outstanding));
     setPayDate(isoAfter(0));
@@ -149,6 +172,44 @@ export function PaymentPlanModal({ booking: initial, onClose, onChanged }: Props
       toast.error("Could not record payment", extractErrorMessage(e));
     } finally {
       setSaving(false);
+    }
+  }
+
+  function openRaise(milestone: PlanMilestone) {
+    setRecordFor(null);
+    setRaiseFor(milestone);
+    setRaiseDate(localIsoDate());
+  }
+
+  async function submitRaise() {
+    if (!raiseFor) return;
+    if (!raiseDate) {
+      toast.error("Pick the date this demand is due");
+      return;
+    }
+    setRaising(true);
+    try {
+      const updated = await bookingsService.raiseMilestone(booking.id, raiseFor.key, raiseDate);
+      setBooking(updated);
+      onChanged(updated);
+      const row = updated.paymentSchedules.find((p) => p.milestoneKey === raiseFor.key);
+      toast.success("Demand raised", row ? `${raiseFor.label} · ${formatInr(row.demandAmount)}` : raiseFor.label);
+      setRaiseFor(null);
+    } catch (e) {
+      toast.error("Could not raise the demand", extractErrorMessage(e));
+      // Someone raised it meanwhile (or the project marked it reached) — show the booking as it is now.
+      if (axios.isAxiosError(e) && e.response?.status === 409) {
+        try {
+          const fresh = await bookingsService.get(booking.id);
+          setBooking(fresh);
+          onChanged(fresh);
+          setRaiseFor(null);
+        } catch {
+          /* keep the current view */
+        }
+      }
+    } finally {
+      setRaising(false);
     }
   }
 
@@ -321,9 +382,18 @@ export function PaymentPlanModal({ booking: initial, onClose, onChanged }: Props
                 </tr>
               </thead>
               <tbody>
+                {booking.paymentSchedules.length === 0 && (
+                  <tr>
+                    <td colSpan={6} className="muted text-sm">No demands raised yet — the plan's milestones are listed below.</td>
+                  </tr>
+                )}
                 {booking.paymentSchedules.map((p) => (
                   <tr key={p.id}>
-                    <td data-label="Installment">{p.installmentName}</td>
+                    <td data-label="Installment">
+                      {p.installmentName}
+                      {/* A plan row keeps following the booking's price until it's paid, invoiced or edited. */}
+                      {p.percent != null && <div className="muted text-xs">{formatPercent(p.percent)} of price</div>}
+                    </td>
                     <td data-label="Due">
                       {formatDate(p.dueDate)} {p.isOverdue && <Badge tone="danger">Overdue</Badge>}
                     </td>
@@ -362,6 +432,59 @@ export function PaymentPlanModal({ booking: initial, onClose, onChanged }: Props
                 <div className="row" style={{ justifyContent: "flex-end", gap: "0.5rem", marginTop: "0.6rem" }}>
                   <Button variant="secondary" onClick={() => setRecordFor(null)}>Cancel</Button>
                   <Button loading={saving} onClick={() => void submitPayment()}>Save payment</Button>
+                </div>
+              </div>
+            )}
+
+            {pending.length > 0 && (
+              <div>
+                <div className="muted text-xs" style={{ textTransform: "uppercase", letterSpacing: ".04em", margin: "0.5rem 0" }}>
+                  Still to be raised
+                </div>
+                <p className="muted text-xs" style={{ margin: "0 0 0.5rem" }}>
+                  From the project's payment plan. Stage, possession and registration milestones are raised on every
+                  booking when they're marked reached on the project page{canRaise ? " — or raise one here for this booking" : ""}.
+                </p>
+                <div className="stack" style={{ gap: "0.4rem" }}>
+                  {pending.map((ms) => (
+                    <div
+                      key={ms.key}
+                      className="row row--between"
+                      style={{ alignItems: "center", flexWrap: "wrap", gap: "0.5rem", padding: "0.4rem 0.6rem", border: "1px dashed var(--color-border)", borderRadius: "var(--radius-sm)" }}
+                    >
+                      <span className="text-sm">
+                        <strong>{ms.label}</strong> · {formatPercent(ms.percent)}{" "}
+                        <span className="muted">
+                          · {dueOnText(ms, formatDate)}
+                          {base > 0 ? ` · ≈ ${formatInr(milestoneAmount(ms.percent, base))}` : ""}
+                        </span>
+                      </span>
+                      {canRaise && booking.status !== "cancelled" && (
+                        <Button size="sm" variant="secondary" onClick={() => openRaise(ms)}>
+                          Raise now
+                        </Button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {raiseFor && (
+              <div className="card" style={{ padding: "0.85rem 1rem" }}>
+                <div style={{ fontWeight: 600, marginBottom: "0.5rem" }}>
+                  Raise demand — {raiseFor.label} ({formatPercent(raiseFor.percent)})
+                </div>
+                <div className="form-grid">
+                  <TextField id="raise-due" label="Due on" type="date" value={raiseDate} onChange={(e) => setRaiseDate(e.target.value)} required />
+                </div>
+                <p className="muted text-xs" style={{ margin: "0.4rem 0 0" }}>
+                  {formatPercent(raiseFor.percent)} of the booking's price (box price + GST)
+                  {base > 0 ? ` ≈ ${formatInr(milestoneAmount(raiseFor.percent, base))}` : ""}.
+                </p>
+                <div className="row" style={{ justifyContent: "flex-end", gap: "0.5rem", marginTop: "0.6rem" }}>
+                  <Button variant="secondary" onClick={() => setRaiseFor(null)} disabled={raising}>Cancel</Button>
+                  <Button loading={raising} onClick={() => void submitRaise()}>Raise demand</Button>
                 </div>
               </div>
             )}

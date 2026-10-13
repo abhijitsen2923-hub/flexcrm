@@ -10,13 +10,14 @@ import { bookingsService } from "../../services/bookings";
 import { inventoryService } from "../../services/inventory";
 import { exportsService } from "../../services/exports";
 import { LoadingBlock } from "../../components/ui/Spinner";
-import { BookingWizard } from "./components/BookingWizard";
+import { BookingWizard, type BookingWizardUnit } from "./components/BookingWizard";
 import { PaymentPlanModal } from "./components/PaymentPlanModal";
 import type { PriceDefaults } from "../inventory/components/PriceCalculator";
 import { priceDefaultsForProject } from "../../utils/priceDefaults";
 import type { Booking, PaymentMode, Unit, UnitStatus } from "../../types/realestate";
 import { extractErrorMessage } from "../../utils/errors";
 import { formatDate, formatInr } from "../../utils/format";
+import { matchesUnitSearch, unitOptionParts } from "../../utils/unitLabel";
 import "./BookingsPage.css";
 
 const STATUS_TONE = {
@@ -25,12 +26,11 @@ const STATUS_TONE = {
   cancelled: "neutral",
 } as const;
 
-type WizardUnit = Pick<Unit, "id" | "unitNumber" | "floor" | "area" | "basePrice" | "status"> & {
-  towerName: string;
-  projectName: string;
-  // Project box-price defaults for this unit's type (Phase B) — seeds the calculator.
-  priceDefaults?: PriceDefaults | null;
-};
+type WizardUnit = BookingWizardUnit &
+  Pick<Unit, "status"> & {
+    // Project box-price defaults for this unit's type (Phase B) — seeds the calculator.
+    priceDefaults?: PriceDefaults | null;
+  };
 
 export default function BookingsPage() {
   const [searchParams] = useSearchParams();
@@ -343,7 +343,11 @@ export default function BookingsPage() {
               setPayBooking(b);
             }}
           >
-            {b.paymentSchedules.length === 0 ? "Set up" : `${formatInr(paid)} / ${formatInr(demand)}`}
+            {b.paymentSchedules.length === 0
+              ? (b.paymentPlan?.length ?? 0) > 0
+                ? "View plan" // took the project's plan; nothing raised yet (e.g. every milestone waits for a stage)
+                : "Set up"
+              : `${formatInr(paid)} / ${formatInr(demand)}`}
           </Button>
         );
       },
@@ -358,12 +362,8 @@ export default function BookingsPage() {
 
   if (loading && bookings.length === 0) return <LoadingBlock label="Loading bookings…" />;
 
-  const unitSearch = unitQuery.trim().toLowerCase();
-  const filteredUnits = unitSearch
-    ? availableUnits.filter((u) =>
-        `${u.unitNumber} ${u.projectName} ${u.towerName} floor ${u.floor}`.toLowerCase().includes(unitSearch)
-      )
-    : availableUnits;
+  // Matches number, project, tower, floor, flat type and configuration ("2 BHK", "type b").
+  const filteredUnits = availableUnits.filter((u) => matchesUnitSearch(u, unitQuery));
 
   return (
     <div className="bookings-page">
@@ -423,7 +423,7 @@ export default function BookingsPage() {
               autoFocus
               value={unitQuery}
               onChange={(e) => setUnitQuery(e.target.value)}
-              placeholder="Search unit, project, tower, floor…"
+              placeholder="Search unit, type (e.g. 2 BHK), tower, project, floor…"
               aria-label="Search available units"
             />
             {filteredUnits.length === 0 ? (
@@ -450,7 +450,7 @@ export default function BookingsPage() {
                     >
                       <span>
                         <strong>{u.unitNumber}</strong>{" "}
-                        <span className="muted text-xs">· {u.projectName} · {u.towerName} · Floor {u.floor}</span>
+                        <span className="muted text-xs">· {[...unitOptionParts(u), `Floor ${u.floor}`].join(" · ")}</span>
                       </span>
                       <span className="muted text-sm">{formatInr(u.basePrice)}</span>
                     </button>

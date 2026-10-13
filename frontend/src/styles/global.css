@@ -2429,3 +2429,120 @@ body.has-import-pill .app-content { padding-bottom: 72px; }
 .kpi__link { color: inherit; text-decoration: none; }
 .kpi__link:hover { color: var(--color-primary-hover); text-decoration: underline; }
 .kpi--assigned .kpi__hint .kpi__link { color: var(--color-text-subtle); font-weight: 600; }
+
+/* ============================================================ Stepper (multi-step forms) */
+
+.stepper { width: 100%; }
+.stepper__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  align-items: flex-start;
+}
+.stepper__item {
+  position: relative;
+  flex: 1 1 0;
+  min-width: 0;
+}
+/* The line to the next step (green once this step is done). */
+.stepper__item:not(:last-child)::after {
+  content: "";
+  position: absolute;
+  top: 15px;
+  left: calc(50% + 19px);
+  right: calc(-50% + 19px);
+  height: 2px;
+  border-radius: 2px;
+  background: var(--color-border-strong);
+}
+.stepper__item.is-done:not(:last-child)::after { background: var(--color-success); }
+.stepper__btn {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0 0.25rem;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.stepper__btn:disabled { cursor: default; }
+.stepper__btn:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
+.stepper__circle {
+  position: relative;
+  z-index: 1;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  border: 2px solid var(--color-border-strong);
+  background: var(--color-surface);
+  color: var(--color-text-muted);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.8rem;
+  font-weight: 700;
+  transition: background 150ms, border-color 150ms, color 150ms, box-shadow 150ms;
+}
+.stepper__btn:not(:disabled):hover .stepper__circle { border-color: var(--color-primary); color: var(--color-text); }
+.stepper__item.is-active .stepper__circle {
+  border-color: var(--color-primary);
+  background: var(--color-primary);
+  color: var(--color-on-primary);
+  box-shadow: 0 0 0 4px var(--color-primary-soft);
+}
+.stepper__item.is-done .stepper__circle {
+  border-color: var(--color-success);
+  background: var(--color-success);
+  color: var(--color-text-inverse);
+}
+.stepper__label {
+  font-size: 0.72rem;
+  font-weight: 600;
+  line-height: 1.25;
+  text-align: center;
+  color: var(--color-text-muted);
+}
+.stepper__item.is-active .stepper__label,
+.stepper__item.is-done .stepper__label { color: var(--color-text); }
+.stepper__current {
+  display: none;
+  margin: 0.5rem 0 0;
+  text-align: center;
+  font-size: 0.8rem;
+  color: var(--color-text-muted);
+}
+.stepper__current strong { color: var(--color-text); }
+
+/* ============================================================ Extra-large modal (multi-step workspaces) */
+
+.modal--xl {
+  max-width: 1080px;
+  /* A steady height so the footer doesn't jump as steps change. */
+  height: min(900px, calc(100vh - var(--space-8)));
+}
+.modal--xl .modal__body {
+  flex: 1;
+  min-height: 0;
+}
+
+@media (max-width: 639px) {
+  .stepper__label { display: none; }
+  .stepper__current { display: block; }
+  .stepper__circle { width: 26px; height: 26px; font-size: 0.72rem; }
+  .stepper__item:not(:last-child)::after { top: 13px; left: calc(50% + 15px); right: calc(-50% + 15px); }
+
+  /* Full-height sheet on phones. */
+  .modal.modal--xl {
+    height: 100vh;
+    height: 100dvh;
+    max-height: 100vh;
+    max-height: 100dvh;
+    border-radius: 0;
+  }
+}

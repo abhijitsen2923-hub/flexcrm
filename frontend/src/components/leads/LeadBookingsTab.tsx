@@ -6,19 +6,27 @@ import { BookingWizard } from "../../pages/bookings/components/BookingWizard";
 import { PaymentPlanModal } from "../../pages/bookings/components/PaymentPlanModal";
 import type { PriceDefaults } from "../../pages/inventory/components/PriceCalculator";
 import { leadsService } from "../../services/leads";
-import type { Booking, PaymentMode } from "../../types/realestate";
+import type { Booking, PaymentMode, UnitType } from "../../types/realestate";
 import type { BrokeragePayout } from "../../types/partner";
 import { priceDefaultsForProject } from "../../utils/priceDefaults";
 import { extractErrorMessage } from "../../utils/errors";
 import { formatDate, formatInr } from "../../utils/format";
+import { matchesUnitSearch, unitOptionParts } from "../../utils/unitLabel";
 
 type WizardUnit = {
   id: string;
   unitNumber: string;
   floor: number;
   area: number;
+  carpetArea: number | null;
+  builtUpArea: number | null;
+  areaUnit: "sqft" | "sqmt";
   basePrice: number;
   status: string;
+  unitType: UnitType;
+  flatType: string | null;
+  configuration: string | null;
+  hasPlc: boolean;
   towerName: string;
   projectName: string;
   priceDefaults?: PriceDefaults | null;
@@ -113,8 +121,15 @@ export function LeadBookingsTab({ leadId, customerId, refreshKey }: Props) {
               unitNumber: u.unitNumber,
               floor: u.floor,
               area: u.area,
+              carpetArea: u.carpetArea,
+              builtUpArea: u.builtUpArea,
+              areaUnit: u.areaUnit,
               basePrice: u.basePrice,
               status: u.status,
+              unitType: u.unitType,
+              flatType: u.flatType,
+              configuration: u.configuration,
+              hasPlc: u.hasPlc,
               towerName: t.name,
               projectName: p.name,
               priceDefaults: priceDefaultsForProject(p, u.unitType),
@@ -211,12 +226,8 @@ export function LeadBookingsTab({ leadId, customerId, refreshKey }: Props) {
 
   if (loading) return <LoadingBlock label="Loading bookings…" />;
 
-  const unitSearch = unitQuery.trim().toLowerCase();
-  const filteredUnits = unitSearch
-    ? availUnits.filter((u) =>
-        `${u.unitNumber} ${u.projectName} ${u.towerName} floor ${u.floor}`.toLowerCase().includes(unitSearch)
-      )
-    : availUnits;
+  // Matches number, project, tower, floor, flat type and configuration ("2 BHK", "type b").
+  const filteredUnits = availUnits.filter((u) => matchesUnitSearch(u, unitQuery));
 
   return (
     <div className="stack" style={{ gap: "0.75rem" }}>
@@ -374,7 +385,7 @@ export function LeadBookingsTab({ leadId, customerId, refreshKey }: Props) {
                 autoFocus
                 value={unitQuery}
                 onChange={(e) => setUnitQuery(e.target.value)}
-                placeholder="Search unit, project, tower, floor…"
+                placeholder="Search unit, type (e.g. 2 BHK), tower, project, floor…"
                 aria-label="Search available units"
               />
               {filteredUnits.length === 0 ? (
@@ -390,7 +401,7 @@ export function LeadBookingsTab({ leadId, customerId, refreshKey }: Props) {
                       >
                         <span>
                           <strong>{u.unitNumber}</strong>{" "}
-                          <span className="muted text-xs">· {u.projectName} · {u.towerName} · Floor {u.floor}</span>
+                          <span className="muted text-xs">· {[...unitOptionParts(u), `Floor ${u.floor}`].join(" · ")}</span>
                         </span>
                         <span className="muted text-sm">{formatInr(u.basePrice)}</span>
                       </button>

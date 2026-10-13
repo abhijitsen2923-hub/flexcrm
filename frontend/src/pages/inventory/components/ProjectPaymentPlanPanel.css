@@ -1,0 +1,150 @@
+/* Project detail → Payment plan: the milestones in order, with "reached" marks for stage / possession /
+   registration milestones. Rows stack their action under the text on phones (no horizontal scroll). */
+.project-plan {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.project-plan__empty,
+.project-plan__note {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--color-text-muted);
+}
+
+.project-plan__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+}
+
+.project-plan__row {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+}
+.project-plan__row + .project-plan__row {
+  border-top: 1px solid var(--color-border);
+}
+
+.project-plan__num {
+  flex-shrink: 0;
+  width: 1.5rem;
+  height: 1.5rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: var(--color-surface-muted);
+  color: var(--color-text-muted);
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.project-plan__main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.project-plan__head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+.project-plan__name {
+  overflow-wrap: anywhere;
+}
+.project-plan__pct {
+  font-weight: 600;
+  color: var(--color-primary);
+}
+
+.project-plan__due {
+  font-size: 0.85rem;
+  color: var(--color-text-muted);
+}
+
+.project-plan__marks {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: var(--space-1);
+  font-size: 0.8rem;
+}
+.project-plan__mark {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  color: var(--color-text);
+}
+.project-plan__pending {
+  color: var(--color-text-subtle);
+}
+
+.project-plan__action {
+  flex-shrink: 0;
+}
+
+.project-plan__foot {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 0.8rem;
+  color: var(--color-text-muted);
+}
+.project-plan__foot strong {
+  color: var(--color-text);
+}
+
+/* Mark-reached dialog */
+.project-plan__scope {
+  margin: 0;
+  padding: 0;
+  border: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.project-plan__choice {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  cursor: pointer;
+  font-size: 0.9rem;
+}
+.project-plan__towers {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  max-height: 180px;
+  overflow-y: auto;
+  margin-left: var(--space-6);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+}
+.project-plan__confirm {
+  margin: 0;
+  font-size: 0.9rem;
+}
+
+@media (max-width: 560px) {
+  .project-plan__row {
+    flex-wrap: wrap;
+    padding: var(--space-3);
+  }
+  .project-plan__action {
+    flex-basis: 100%;
+    padding-left: calc(1.5rem + var(--space-3));
+  }
+}

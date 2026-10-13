@@ -1,4 +1,5 @@
 import { apiClient } from "./http";
+import { mapPlan } from "./inventory";
 import type {
   Booking,
   BookingInvoice,
@@ -6,6 +7,7 @@ import type {
   BookingStatus,
   BookingStep,
   PaymentMode,
+  PlanMilestone,
   PricingSnapshot,
   UnitStatus,
   UnitType,
@@ -100,6 +102,7 @@ interface ApiBooking {
   token_received_on?: string | null;
   token_mode?: PaymentMode | null;
   token_reference?: string | null;
+  payment_plan?: (Omit<PlanMilestone, "percent"> & { percent: number | string })[] | null;
   created_at: string;
   updated_at: string;
   unit?: {
@@ -108,9 +111,14 @@ interface ApiBooking {
     floor: number;
     unit_type: string;
     area: number | string;
+    carpet_area?: number | string | null;
+    built_up_area?: number | string | null;
     area_unit: string;
     base_price: number | string;
     status: string;
+    flat_type?: string | null;
+    configuration?: string | null;
+    has_plc?: boolean;
     tower_name: string | null;
     project_name: string | null;
   } | null;
@@ -124,6 +132,8 @@ interface ApiBooking {
     paid_amount: number | string;
     outstanding: number | string;
     is_overdue: boolean;
+    milestone_key?: string | null;
+    percent?: number | string | null;
   }[];
   payment_receipts?: {
     id: string;
@@ -174,6 +184,8 @@ function mapBooking(b: ApiBooking): Booking {
       paidAmount: Number(p.paid_amount),
       outstanding: Number(p.outstanding),
       isOverdue: p.is_overdue,
+      milestoneKey: p.milestone_key ?? null,
+      percent: p.percent != null && p.percent !== "" ? Number(p.percent) : null,
     })),
     paymentReceipts: (b.payment_receipts ?? []).map((r) => ({
       id: r.id,
@@ -220,15 +232,22 @@ function mapBooking(b: ApiBooking): Booking {
           floor: b.unit.floor,
           unitType: b.unit.unit_type as UnitType,
           area: Number(b.unit.area),
+          carpetArea: b.unit.carpet_area != null && b.unit.carpet_area !== "" ? Number(b.unit.carpet_area) : null,
+          builtUpArea:
+            b.unit.built_up_area != null && b.unit.built_up_area !== "" ? Number(b.unit.built_up_area) : null,
           areaUnit: b.unit.area_unit as "sqft" | "sqmt",
           basePrice: Number(b.unit.base_price),
           status: b.unit.status as UnitStatus,
+          flatType: b.unit.flat_type ?? null,
+          configuration: b.unit.configuration ?? null,
+          hasPlc: Boolean(b.unit.has_plc),
           towerName: b.unit.tower_name ?? "",
           projectName: b.unit.project_name ?? "",
         }
       : undefined,
     bookingFormUrl: null,
     allotmentLetterUrl: null,
+    paymentPlan: mapPlan(b.payment_plan),
     createdAt: b.created_at,
     updatedAt: b.updated_at,
   };
@@ -318,6 +337,14 @@ export const bookingsService = {
   createPaymentPlan(bookingId: string, installments: PaymentPlanInstallmentPayload[]): Promise<Booking> {
     return apiClient
       .post<ApiBooking>(`/bookings/${bookingId}/payment-plan`, { installments })
+      .then((r) => mapBooking(r.data));
+  },
+
+  // Raise one payment-plan milestone on this booking now (e.g. its registration, or a stage the project hasn't
+  // marked reached yet), due on `dueDate`. 409 when it's already raised.
+  raiseMilestone(bookingId: string, key: string, dueDate: string): Promise<Booking> {
+    return apiClient
+      .post<ApiBooking>(`/bookings/${bookingId}/payment-plan/${encodeURIComponent(key)}/raise`, { due_date: dueDate })
       .then((r) => mapBooking(r.data));
   },
 
