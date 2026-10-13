@@ -31,12 +31,14 @@ import { CHART_AXIS, CHART_GRID, CHART_PALETTE, CHART_PRIMARY } from "../config/
 import { useOrg } from "../context/OrgContext";
 import { usePipelines } from "../context/PipelineContext";
 import { useDashboard } from "../hooks/useDashboard";
+import { useLocalDay } from "../hooks/useLocalDay";
 import { usePermissions } from "../hooks/usePermissions";
 import { useRealtimeRefresh } from "../realtime";
 import { channelPartnersService } from "../services/channelPartners";
 import { leadsService } from "../services/leads";
 import type { Lead, LeadIndustry, PipelineStage } from "../types";
 import type { ChannelPartnerListItem } from "../types/partner";
+import { assignedDayQuery } from "../utils/assignedDay";
 import { telHref } from "../utils/contactLinks";
 import { formatCurrency, formatInr, formatNumber, formatRelative } from "../utils/format";
 
@@ -85,6 +87,27 @@ export default function DashboardPage() {
     loadFollowUps();
   }, [loadFollowUps]);
 
+  // "Assigned today" tile: leads handed to their current owner today / yesterday (in the browser's own day),
+  // scoped by the server like the leads list (a rep counts only their own). Opens the filtered Leads list.
+  const canViewLeads = has("LEAD_VIEW");
+  // Flips at midnight, so a dashboard left open overnight recounts for the new day.
+  const today = useLocalDay();
+  const [assigned, setAssigned] = useState<{ today: number | null; yesterday: number | null } | null>(null);
+  const loadAssigned = useCallback(() => {
+    if (!canViewLeads) return;
+    const count = (day: "today" | "yesterday") =>
+      leadsService
+        .list({ ...assignedDayQuery(day), page_size: 1 })
+        .then((res) => res.pagination.total)
+        .catch(() => null);
+    void Promise.all([count("today"), count("yesterday")]).then(([todayCount, yesterdayCount]) =>
+      setAssigned({ today: todayCount, yesterday: yesterdayCount })
+    );
+  }, [canViewLeads, today]);
+  useEffect(() => {
+    loadAssigned();
+  }, [loadAssigned]);
+
   // Segregated dashboard (FR-5): the Channel-Partner overview renders only for
   // users who can view partners in a real-estate org. Direct-lead users (no
   // USER_VIEW) and non-real-estate orgs never see it; brokers get their own
@@ -114,10 +137,11 @@ export default function DashboardPage() {
 
   const refresh = useCallback(() => {
     loadFollowUps();
+    loadAssigned();
     void dashboard.refresh().catch(() => {
       toast.error("Failed to refresh dashboard.");
     });
-  }, [dashboard, toast, loadFollowUps]);
+  }, [dashboard, toast, loadFollowUps, loadAssigned]);
 
   useEffect(() => {
     if (dashboard.error) {
@@ -138,6 +162,7 @@ export default function DashboardPage() {
     () => {
       void dashboard.refresh();
       loadFollowUps();
+      loadAssigned();
     },
   );
 
@@ -209,6 +234,19 @@ export default function DashboardPage() {
       <div className="kpi-grid">
         <KpiCard label="Customers" value={formatNumber(summary.total_customers)} />
         <KpiCard label="Active leads" value={formatNumber(summary.active_leads)} />
+        {canViewLeads && (
+          <div className="kpi kpi--assigned">
+            <div className="kpi__label">Assigned today</div>
+            <Link className="kpi__value kpi__link" to="/leads?assigned=today" title="Open today's assigned leads">
+              {assigned?.today != null ? formatNumber(assigned.today) : "—"}
+            </Link>
+            <div className="kpi__hint">
+              <Link className="kpi__link" to="/leads?assigned=yesterday" title="Open yesterday's assigned leads">
+                Yesterday: {assigned?.yesterday != null ? formatNumber(assigned.yesterday) : "—"}
+              </Link>
+            </div>
+          </div>
+        )}
         {FEATURES.deals && (
           <KpiCard label="Open pipeline" value={formatCurrency(summary.open_deals_value)} />
         )}

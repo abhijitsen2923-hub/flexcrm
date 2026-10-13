@@ -1,5 +1,6 @@
-import { CheckSquare, Download, LayoutGrid, List as ListIcon, Plus, RefreshCw, SlidersHorizontal, Upload, X } from "lucide-react";
-import { useEffect, useMemo, useRef, useState, type ChangeEvent, type DragEvent, type FormEvent } from "react";
+import { CalendarDays, CheckSquare, Download, LayoutGrid, List as ListIcon, Plus, RefreshCw, SlidersHorizontal, Upload, X } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type DragEvent, type FormEvent } from "react";
+import { useSearchParams } from "react-router-dom";
 
 import {
   Badge,
@@ -25,12 +26,13 @@ import { useAuth } from "../hooks/useAuth";
 import { useCampaignOptions } from "../hooks/useCampaignOptions";
 import { leadImportJob, startLeadImport, useLeadImportJob } from "../hooks/useLeadImport";
 import { useLeads } from "../hooks/useLeads";
+import { useLocalDay } from "../hooks/useLocalDay";
 import { useMediaQuery } from "../hooks/useMediaQuery";
 import { usePermissions } from "../hooks/usePermissions";
 import { useRealtimeRefresh } from "../realtime";
 import { exportsService } from "../services/exports";
 import { channelPartnersService, type PartnerOption } from "../services/channelPartners";
-import { leadsService, type LeadDuplicate } from "../services/leads";
+import { leadsService, type LeadDuplicate, type LeadListQuery } from "../services/leads";
 import { organizationsService } from "../services/organizations";
 import { siteVisitsService } from "../services/site-visits";
 import { usersService } from "../services/users";
@@ -44,6 +46,16 @@ import {
   cleanCampaignName,
   findCampaignByKey
 } from "../utils/campaigns";
+import {
+  assignedDayDate,
+  assignedDayLabel,
+  assignedDayPhrase,
+  assignedDayQuery,
+  countByStage,
+  isPickableDay,
+  parseAssignedParam,
+  type AssignedDay
+} from "../utils/assignedDay";
 import { localDayRange } from "../utils/dateRange";
 import { extractErrorMessage } from "../utils/errors";
 import { formatCurrency } from "../utils/format";
@@ -163,6 +175,26 @@ export default function LeadsPage() {
   const [campaignFilter, setCampaignFilter] = useState<string>("");
   // Intent: "high,medium" / "none" (not rated) — the quick chips by the search box + the Filters panel.
   const [intentFilter, setIntentFilter] = useState<string>("");
+  // "Assigned today / yesterday / on a day" — when the CURRENT owner got the lead. Opens from the dashboard
+  // tile's ?assigned= link and keeps the URL in step (a refresh keeps the view).
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [assignedDay, setAssignedDay] = useState<AssignedDay>(() => parseAssignedParam(searchParams.get("assigned")));
+  const assignedParam = parseAssignedParam(searchParams.get("assigned"));
+  // The URL is the source of truth: Back / the sidebar's plain /leads link / a dashboard link update the filter…
+  useEffect(() => {
+    setAssignedDay((prev) => (prev === assignedParam ? prev : assignedParam));
+  }, [assignedParam]);
+  // …and a chip tap updates the URL (replace — chip taps don't pile up history entries).
+  useEffect(() => {
+    if (assignedParam === assignedDay) return;
+    const next = new URLSearchParams(searchParams);
+    if (assignedDay) next.set("assigned", assignedDay);
+    else next.delete("assigned");
+    setSearchParams(next, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [assignedDay]);
+  // Today's local date — flips at midnight, so "Assigned today" in a tab left open overnight means today.
+  const today = useLocalDay();
   // Raw search box value + its debounced counterpart (the latter drives the query
   // so typing doesn't fire a request per keystroke).
   const [searchInput, setSearchInput] = useState("");
@@ -242,13 +274,21 @@ export default function LeadsPage() {
       source: sourceFilter || undefined,
       campaign: campaignFilter || undefined,
       intent: intentFilter || undefined,
+      // Assigned on a day: newest assignment first, so the latest hand-offs lead the list.
+      ...assignedDayQuery(assignedDay),
+      ...(assignedDay ? { sort_by: "assigned_at", sort_order: "desc" as const } : {}),
       // "__unassigned__" is a sentinel (an empty string would be stripped by
       // buildQueryString): map it to the backend `unassigned` flag, not an owner id.
       assigned_to_id: ownerFilter && ownerFilter !== "__unassigned__" ? ownerFilter : undefined,
       unassigned: ownerFilter === "__unassigned__" ? true : undefined,
       search: search || undefined
     };
-  }, [page, pageSize, industryFilter, stageFilter, nextActionOn, stageChangedFrom, stageChangedTo, leadDateFrom, leadDateTo, sourceFilter, campaignFilter, intentFilter, ownerFilter, search]);
+  }, [page, pageSize, industryFilter, stageFilter, nextActionOn, stageChangedFrom, stageChangedTo, leadDateFrom, leadDateTo, sourceFilter, campaignFilter, intentFilter, assignedDay, today, ownerFilter, search]);
+
+  function chooseAssignedDay(day: AssignedDay) {
+    setAssignedDay((prev) => (prev === day ? "" : day));
+    setPage(1);
+  }
 
   function toggleIntent(token: IntentFilterToken) {
     setIntentFilter((prev) => toggleIntentFilter(prev, token));
@@ -267,6 +307,7 @@ export default function LeadsPage() {
     setSourceFilter("");
     setCampaignFilter("");
     setIntentFilter("");
+    setAssignedDay("");
     setOwnerFilter("");
     setNextActionOn("");
     setStageChangedFrom("");
@@ -279,8 +320,60 @@ export default function LeadsPage() {
     setPage(1);
   }
 
-  const { leads, pagination, loading, refresh, createLead, transitionLead } = useLeads(query);
+  const { leads, pagination, loading, refresh: refreshList, createLead, transitionLead } = useLeads(query);
   const { byIndustry, stages: allStages, getStage } = usePipelines();
+
+  // "18 assigned yesterday — Call 6 · Follow-up 5 …": where that day's hand-offs stand now. Counts every stage
+  // (ignores the Stage filter, so picking a stage below doesn't hide the others); up to 200 leads. Fetched when
+  // the filter's CONTENT changes (not on paging / stage taps) and whenever the list is refreshed.
+  const [summaryTick, setSummaryTick] = useState(0);
+  const refresh = useCallback(async () => {
+    setSummaryTick((tick) => tick + 1);
+    await refreshList();
+  }, [refreshList]);
+  const summaryKey = useMemo(
+    () => (assignedDay ? JSON.stringify({ ...query, stage_code: undefined, page: 1, page_size: 200 }) : null),
+    [query, assignedDay]
+  );
+  const [summaryData, setSummaryData] = useState<{
+    key: string;
+    total: number;
+    items: { stage_code: string; industry: LeadIndustry }[];
+  } | null>(null);
+  useEffect(() => {
+    if (!summaryKey) {
+      setSummaryData(null);
+      return;
+    }
+    let cancelled = false;
+    void leadsService
+      .list(JSON.parse(summaryKey) as LeadListQuery)
+      .then((res) => {
+        if (cancelled) return;
+        setSummaryData({
+          key: summaryKey,
+          total: res.pagination.total,
+          items: res.items.map((l) => ({ stage_code: l.stage_code, industry: l.industry })),
+        });
+      })
+      .catch(() => {
+        if (!cancelled) setSummaryData(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [summaryKey, summaryTick]);
+  // Only ever shown for the CURRENT filter — never the previous day's counts under the new day's wording.
+  const assignedSummary = useMemo(() => {
+    if (!summaryData || summaryData.key !== summaryKey) return null;
+    const ind = industryFilter || inheritedIndustry || summaryData.items[0]?.industry;
+    const stages = ind ? byIndustry[ind] ?? [] : allStages;
+    return {
+      total: summaryData.total,
+      counts: countByStage(summaryData.items, stages),
+      partial: summaryData.total > summaryData.items.length,
+    };
+  }, [summaryData, summaryKey, industryFilter, inheritedIndustry, byIndustry, allStages]);
   const { has: hasPerm } = usePermissions();
   const canManage = hasPerm("LEAD_MANAGE");
   const canImport = hasPerm("LEAD_IMPORT");
@@ -328,6 +421,7 @@ export default function LeadsPage() {
     (sourceFilter ? 1 : 0) +
     (campaignFilter ? 1 : 0) +
     (intentFilter ? 1 : 0) +
+    (assignedDay ? 1 : 0) +
     (ownerFilter ? 1 : 0) +
     (nextActionOn ? 1 : 0) +
     (stageChangedFrom ? 1 : 0) +
@@ -548,6 +642,7 @@ export default function LeadsPage() {
           return; // finally resets `submitting`; wait for "Create anyway"
         }
       }
+      setSummaryTick((tick) => tick + 1);
       await createLead({
         // Industry is PINNED to the org's business_type by the backend (an org is
         // single-industry). We never send it — trusting a client-supplied industry
@@ -971,7 +1066,8 @@ export default function LeadsPage() {
         </div>
 
         {/* One-tap intent filter next to the search box (several at once; "Not rated" is in Filters). */}
-        <div className="leads-intent-row intent-chips" role="group" aria-label="Filter by intent">
+        <div className="leads-intent-row leads-quick-row">
+        <div className="intent-chips" role="group" aria-label="Filter by intent">
           <span className="intent-chips__label">Intent</span>
           {(["high", "medium", "low"] as const).map((key) => (
             <button
@@ -985,6 +1081,50 @@ export default function LeadsPage() {
               {INTENT_LABEL[key]}
             </button>
           ))}
+        </div>
+        {/* Fresh hand-offs: leads given to their current owner today / yesterday / on a day. */}
+        <div className="intent-chips" role="group" aria-label="Filter by the day leads were assigned">
+          <span className="intent-chips__label">Assigned</span>
+          {(["today", "yesterday"] as const).map((day) => (
+            <button
+              key={day}
+              type="button"
+              className="assigned-chip"
+              aria-pressed={assignedDay === day}
+              onClick={() => chooseAssignedDay(day)}
+            >
+              {day === "today" ? "Today" : "Yesterday"}
+            </button>
+          ))}
+          <label
+            className={`assigned-day-pick${assignedDay && assignedDay !== "today" && assignedDay !== "yesterday" ? " is-active" : ""}`}
+            title="Assigned on a day"
+          >
+            <CalendarDays size={14} aria-hidden="true" />
+            <span className="assigned-day-pick__text">Day</span>
+            <input
+              type="date"
+              className="assigned-day-input"
+              aria-label="Assigned on a day"
+              max={today}
+              value={assignedDay && assignedDay !== "today" && assignedDay !== "yesterday" ? assignedDay : ""}
+              onChange={(event) => {
+                const value = event.target.value;
+                // Cleared → off; half-typed years ("0002-…") and out-of-range days are ignored until complete.
+                if (!value) {
+                  if (assignedDayDate(assignedDay) && assignedDay !== "today" && assignedDay !== "yesterday") {
+                    setAssignedDay("");
+                    setPage(1);
+                  }
+                  return;
+                }
+                if (!isPickableDay(value)) return;
+                setAssignedDay(value);
+                setPage(1);
+              }}
+            />
+          </label>
+        </div>
         </div>
 
         {/* Active-filter summary chips — each removable; mirrors the panel. */}
@@ -1020,6 +1160,12 @@ export default function LeadsPage() {
                 <X size={12} aria-hidden="true" />
               </button>
             )}
+            {assignedDay && (
+              <button type="button" className="active-filter" onClick={() => { setAssignedDay(""); setPage(1); }}>
+                Assigned: {assignedDayLabel(assignedDay)}
+                <X size={12} aria-hidden="true" />
+              </button>
+            )}
             {canAssign && ownerFilter && (
               <button type="button" className="active-filter" onClick={() => { setOwnerFilter(""); setPage(1); }}>
                 Owner: {ownerFilter === "__unassigned__"
@@ -1049,6 +1195,34 @@ export default function LeadsPage() {
             <button type="button" className="active-filter active-filter--clear" onClick={clearAllFilters}>
               Clear all
             </button>
+          </div>
+        )}
+
+        {assignedDay && assignedSummary && (
+          <div className="assigned-summary" role="status">
+            <strong>
+              {assignedSummary.total} lead{assignedSummary.total === 1 ? "" : "s"} assigned {assignedDayPhrase(assignedDay)}
+            </strong>
+            {assignedSummary.counts.length > 0 && <span className="muted" aria-hidden="true">—</span>}
+            {assignedSummary.counts.map((c) => {
+              const active = stageFilter.length === 1 && stageFilter[0] === c.code;
+              return (
+                <button
+                  key={c.code}
+                  type="button"
+                  className={`assigned-summary__stage${active ? " is-active" : ""}`}
+                  aria-pressed={active}
+                  title={active ? "Show every stage" : `Show only ${c.name}`}
+                  onClick={() => {
+                    setStageFilter(active ? [] : [c.code]);
+                    setPage(1);
+                  }}
+                >
+                  {c.name} <b>{c.count}</b>
+                </button>
+              );
+            })}
+            {assignedSummary.partial && <span className="muted text-xs">Counts cover the latest 200.</span>}
           </div>
         )}
 
@@ -1726,6 +1900,7 @@ export default function LeadsPage() {
           // records the token + promotes).
           const { site_visits, ...transitionPayload } = payload;
           await transitionLead(transitionLeadState.id, transitionPayload);
+          setSummaryTick((tick) => tick + 1);
           // When moving to the Site Visit stage, book one visit per selected site.
           const visits = site_visits ?? [];
           let bookedCount = 0;

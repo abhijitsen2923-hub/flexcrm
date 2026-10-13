@@ -346,6 +346,8 @@ export interface Lead {
   next_action_date?: string | null;
   stage_changed_at?: string | null;
   assigned_to_id: string | null;
+  // When the lead was given to its current owner (null = unassigned, or assigned before 27 Sep 2026).
+  assigned_at?: string | null;
   // Channel partner (broker) who referred this lead, if any.
   partner_id: string | null;
   // Real-estate specific (null for other verticals). Numeric fields arrive as

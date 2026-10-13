@@ -37,6 +37,9 @@ export interface LeadListQuery extends PaginationQuery, SearchSortQuery {
   // Local-day UTC boundaries for a From–To range on when the lead came in (its Created / enquiry date).
   created_from?: string;
   created_to?: string;
+  // Local-day UTC boundaries on when the lead was given to its current owner ("Assigned today / yesterday").
+  assigned_from?: string;
+  assigned_to?: string;
 }
 
 export interface LeadCreatePayload {
