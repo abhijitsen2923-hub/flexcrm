@@ -141,6 +141,9 @@ def render_booking_document(
     floor = unit.floor if unit else "—"
     area = f"{unit.area} {unit.area_unit}" if unit else "—"  # super built-up (saleable)
     carpet = f"{unit.carpet_area} {unit.area_unit}" if unit and unit.carpet_area is not None else None
+    # Flat type / configuration (project wizard, t048) — only on units that have them; older units read as before.
+    flat_type = f"Type {unit.flat_type}" if unit and unit.flat_type else None
+    configuration = unit.configuration if unit and unit.configuration else None
     base_price = _inr(unit.base_price) if unit else "—"
 
     cust_name = customer.contact_name if customer else "—"
@@ -158,6 +161,8 @@ def render_booking_document(
         _row("Tower", tower_name),
         _row("Unit No.", unit_no),
         _row("Floor", floor),
+        *([_row("Flat Type", flat_type)] if flat_type else []),
+        *([_row("Configuration", configuration)] if configuration else []),
         _row("Super Built-up Area", area),
         *([_row("Carpet Area", carpet)] if carpet else []),
         _row("Base Price", base_price),

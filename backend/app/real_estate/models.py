@@ -19,6 +19,7 @@ from sqlalchemy import (
     UniqueConstraint,
     Uuid,
     func,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -62,8 +63,30 @@ class Project(TenantBase, UUIDPrimaryKeyMixin, TimestampMixin, TenantAuditMixin,
 
     # Builder's demand/payment plan — a list of {label, percent, due_date}. A unit booked
     # in this project auto-generates these installments (percent of the unit's price, on
-    # the builder's fixed calendar dates).
+    # the builder's fixed calendar dates). Superseded by `payment_plan` (t048): once a project
+    # has a payment_plan this column is cleared and no longer read.
     demand_schedule: Mapped[list | None] = mapped_column(JSON, nullable=True)
+
+    # --- Add Project wizard (t048) ---
+    # residential / commercial / mixed — validated app-side (schemas.ProjectType).
+    project_type: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    # Which area a unit's basic price is worked out on: super_built_up (default, = Unit.area) / built_up / carpet.
+    pricing_basis: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    # Floor rise: `floor_rise_rate` ₹ per sq ft per floor (basis "per_sqft") or ₹ per floor ("per_floor"), charged
+    # for every floor from `floor_rise_from` up (floor_rise_from=2 → floor 2 pays 1 step, floor 10 pays 9).
+    floor_rise_rate: Mapped[Decimal | None] = mapped_column(Numeric(12, 2), nullable=True)
+    floor_rise_basis: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    floor_rise_from: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # ₹ per sq ft (of the pricing-basis area). PLC applies only to units with has_plc.
+    plc_rate: Mapped[Decimal | None] = mapped_column(Numeric(12, 2), nullable=True)
+    # ₹ per sq ft — NOT amenities_charges, which is a lump sum live projects already use.
+    amenities_rate: Mapped[Decimal | None] = mapped_column(Numeric(12, 2), nullable=True)
+    # Price of one parking spot per type, e.g. {"CP": 400000, "DP": 350000}. parking_cost stays the fallback.
+    parking_prices: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    # The builder's payment plan: [{key, label, percent, due_on, days?, due_date?}] (schemas.PlanMilestone).
+    payment_plan: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    # Event milestones the builder has marked reached: [{key, tower_id|None, reached_on}] — None = whole project.
+    milestones_reached: Mapped[list | None] = mapped_column(JSON, nullable=True)
 
     towers: Mapped[list["Tower"]] = relationship(
         "Tower", back_populates="project", cascade="all, delete-orphan"
@@ -112,6 +135,9 @@ class Tower(TenantBase, UUIDPrimaryKeyMixin, TimestampMixin, TenantSoftDeleteMix
     )
     name: Mapped[str] = mapped_column(String(100), nullable=False)
     total_floors: Mapped[int] = mapped_column(Integer, nullable=False)
+    # The layout last saved from the project wizard (schemas.TowerLayout: unit-number prefix, flat types
+    # A/B/C…, shops/godowns). NULL for towers set up before t048 — those are laid out from their units.
+    layout: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
     project: Mapped["Project"] = relationship("Project", back_populates="towers")
     units: Mapped[list["Unit"]] = relationship(
@@ -151,6 +177,12 @@ class Unit(TenantBase, UUIDPrimaryKeyMixin, TimestampMixin, TenantSoftDeleteMixi
         nullable=False,
         default=UnitStatus.available,
     )
+    # Flat type within its tower ("A", "B" … — one unit of each type per floor) and its configuration
+    # ("2 BHK"). NULL on units set up before t048 and on parking / shops / godowns.
+    flat_type: Mapped[str | None] = mapped_column(String(8), nullable=True)
+    configuration: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    # Preferential location (corner / view): the booking price adds the project's PLC rate × area.
+    has_plc: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=text("false"))
 
     tower: Mapped["Tower"] = relationship("Tower", back_populates="units")
     bookings: Mapped[list["Booking"]] = relationship("Booking", back_populates="unit")
@@ -237,6 +269,9 @@ class Booking(TenantBase, UUIDPrimaryKeyMixin, TimestampMixin, TenantAuditMixin,
     token_received_on: Mapped[date | None] = mapped_column(Date, nullable=True)
     token_mode: Mapped[str | None] = mapped_column(String(20), nullable=True)  # upi/neft/cheque/cash/card/other
     token_reference: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    # The project's payment plan as it stood when this booking took it (t048) — the buyer's terms. Milestones
+    # due on an event become PaymentSchedule rows (milestone_key) only when that event is reached / raised.
+    payment_plan: Mapped[list | None] = mapped_column(JSON, nullable=True)
 
     unit: Mapped["Unit"] = relationship("Unit", back_populates="bookings")
     # Read-only link to the customer for display (name on lists/trackers/docs).
@@ -284,6 +319,15 @@ class PaymentSchedule(TenantBase, UUIDPrimaryKeyMixin, TimestampMixin):
     __tablename__ = "payment_schedules"
     __table_args__ = (
         Index("ix_payment_schedules_booking_due_date", "booking_id", "due_date"),
+        # One demand per (booking, plan milestone): raising a milestone twice can't double-bill.
+        Index(
+            "uq_payment_schedules_booking_milestone",
+            "booking_id",
+            "milestone_key",
+            unique=True,
+            postgresql_where=text("milestone_key IS NOT NULL"),
+            sqlite_where=text("milestone_key IS NOT NULL"),
+        ),
         {"schema": "tenant"},
     )
 
@@ -296,6 +340,11 @@ class PaymentSchedule(TenantBase, UUIDPrimaryKeyMixin, TimestampMixin):
     paid_amount: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False, default=0)
     outstanding: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False, default=0)
     is_overdue: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # Set on rows a payment plan generated (t048): which milestone, and its % of the booking total. While
+    # `percent` is set the amount follows the booking's price (re-worked when pricing is saved, unless money was
+    # paid or an invoice raised); editing the amount by hand clears it.
+    milestone_key: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    percent: Mapped[Decimal | None] = mapped_column(Numeric(7, 3), nullable=True)
 
     booking: Mapped["Booking"] = relationship("Booking", back_populates="payment_schedules")
 

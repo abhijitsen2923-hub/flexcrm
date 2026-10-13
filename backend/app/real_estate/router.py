@@ -1,4 +1,6 @@
 """Real estate API routes — inventory, site visits, bookings."""
+from collections import Counter
+from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from decimal import Decimal, InvalidOperation
 from uuid import UUID
@@ -28,10 +30,17 @@ from app.real_estate.documents import (
 from app.real_estate.inventory_layout import (
     MAX_NEW_UNITS_PER_SAVE,
     PARKING_BLOCK_NAME,
+    PARKING_TYPES,
     ExistingUnit,
+    LayoutError,
+    LayoutPricing,
     NewUnit,
+    ParkingPlan,
+    TowerPlan,
     is_parking_block,
+    layout_specs,
     number_units,
+    parking_type_of,
     plan_parking,
     plan_tower_units,
 )
@@ -48,6 +57,7 @@ from app.real_estate.models import (
     Tower,
     Unit,
 )
+from app.real_estate.payment_plan import apply_payment_plan, reprice_plan_rows
 from app.services.customer_lifecycle import recompute_ltv
 from app.services.email import EmailService
 from app.services.notifications import NotificationService
@@ -64,11 +74,16 @@ from app.real_estate.schemas import (
     BookingStepAdvance,
     BookingTokenUpdate,
     CollectionLedgerEntry,
+    InventoryPreview,
+    InventoryPreviewRequest,
     PaymentPlanCreate,
     PaymentReceiptCreate,
     PaymentScheduleCreate,
     PaymentScheduleRead,
     PaymentScheduleUpdate,
+    PlannedParking,
+    PlannedTower,
+    PlannedUnit,
     PossessionChecklistUpdate,
     PricingUpdate,
     ProjectCreate,
@@ -178,15 +193,43 @@ def _json_demand_schedule(value):
     return out
 
 
+def _json_safe(value):
+    """Decimals → plain JSON numbers (whole ones as ints) and dates → ISO strings, recursively, for the JSON
+    columns (parking prices, payment plan, tower layout). Numbers rather than strings, because the browser reads
+    a tower's layout back exactly as it is stored."""
+    if isinstance(value, Decimal):
+        return int(value) if value == value.to_integral_value() else float(value)
+    if isinstance(value, date):
+        return value.isoformat()
+    if isinstance(value, dict):
+        return {key: _json_safe(item) for key, item in value.items()}
+    if isinstance(value, list | tuple):
+        return [_json_safe(item) for item in value]
+    return value
+
+
+def _project_columns(data: dict) -> dict:
+    """A create / PATCH payload's project fields, ready for their columns: the JSON ones made JSON-safe, and a
+    written payment plan clears the legacy demand schedule so bookings follow the plan alone from now on. (A plan
+    written as null clears the plan and leaves the demand schedule as sent.) Parking types only ever reach
+    parking_prices — garage_options keeps the four types older builds can read (its schema refuses DP)."""
+    if "demand_schedule" in data:
+        data["demand_schedule"] = _json_demand_schedule(data["demand_schedule"])
+    for column in ("parking_prices", "payment_plan"):
+        if column in data:
+            data[column] = _json_safe(data[column])
+    if data.get("payment_plan") is not None:
+        data["demand_schedule"] = None
+    return data
+
+
 @router.post("/inventory/projects", response_model=ProjectRead, status_code=status.HTTP_201_CREATED)
 async def create_project(
     payload: ProjectCreate,
     _: object = Depends(require_permissions(PermissionCode.LEAD_MANAGE)),
     session: AsyncSession = Depends(get_db_session),
 ):
-    data = payload.model_dump()
-    data["demand_schedule"] = _json_demand_schedule(data.get("demand_schedule"))
-    project = Project(**data)
+    project = Project(**_project_columns(payload.model_dump()))
     session.add(project)
     await session.commit()
     await session.refresh(project)
@@ -204,35 +247,47 @@ async def create_project_full(
     form). All-or-nothing: a failure rolls the whole thing back."""
     # Everything except the nested towers/parking maps 1:1 onto Project columns (incl. the
     # Phase-B detail + default box-price fields).
-    data = payload.model_dump(exclude={"towers", "parking"})
-    data["demand_schedule"] = _json_demand_schedule(data.get("demand_schedule"))
-    _check_tower_names([t.name for t in payload.towers])
-    tower_plans = [(t, plan_tower_units(t.name.strip(), _tower_specs(t), [])) for t in payload.towers]
-    planned_numbers = {n.unit_number for _, plan in tower_plans for n in plan.new}
-    parking_plan = plan_parking(payload.parking, [], planned_numbers)
-    _check_new_unit_cap(sum(len(plan.new) for _, plan in tower_plans) + len(parking_plan.new))
+    data = _project_columns(payload.model_dump(exclude={"towers", "parking"}))
+    plan = await _plan_inventory(session, None, payload.towers, payload.parking, _pricing_of(payload), for_save=True)
 
     project = Project(**data)
     session.add(project)
     await session.flush()
-    for tspec, plan in tower_plans:
-        tower = Tower(project_id=project.id, name=tspec.name.strip(), total_floors=tspec.total_floors)
+    for planned in plan.towers:
+        tower = Tower(
+            project_id=project.id,
+            name=planned.name,
+            total_floors=planned.card.total_floors,
+            layout=_layout_column(planned.card),
+        )
         session.add(tower)
         await session.flush()
-        _add_units(session, project.id, tower.id, plan.new)
-    if parking_plan.new:
+        _add_units(session, project.id, tower.id, planned.plan.new)
+    if plan.parking.new:
         block = Tower(project_id=project.id, name=PARKING_BLOCK_NAME, total_floors=1)
         session.add(block)
         await session.flush()
-        _add_parking(session, project, block.id, parking_plan.new)
+        _add_parking(session, project, block.id, plan.parking.new)
     _apply_built_totals(
         project,
-        [t.total_floors for t in payload.towers],
-        len(parking_plan.new)
-        + sum(1 for _, plan in tower_plans for n in plan.new if n.spec.unit_type == UnitType.parking),
+        [planned.card.total_floors for planned in plan.towers],
+        len(plan.parking.new)
+        + sum(1 for planned in plan.towers for n in planned.plan.new if n.spec.unit_type == UnitType.parking),
     )
     await session.commit()
     return await _load_project_with_inventory(session, project.id)
+
+
+@router.post("/inventory/projects/full/preview", response_model=InventoryPreview)
+async def preview_project_full(
+    payload: ProjectFullCreate,
+    _: object = Depends(require_permissions(PermissionCode.LEAD_MANAGE)),
+    session: AsyncSession = Depends(get_db_session),
+):
+    """The wizard's preview on Create: every unit and parking spot Create would build for this page — the same
+    planner as Save, nothing written."""
+    plan = await _plan_inventory(session, None, payload.towers, payload.parking, _pricing_of(payload), for_save=False)
+    return _preview(plan, payload.parking, payload.parking_prices, payload.parking_cost)
 
 
 @router.post("/inventory/projects/{project_id}/inventory", response_model=ProjectInventorySyncResult)
@@ -246,7 +301,8 @@ async def sync_project_inventory(
 
     Additive and idempotent (see inventory_layout): saving the same page twice creates nothing the second time,
     and existing units — with any booking on them — are never changed or removed. Tower cards are matched by
-    `tower_id`, else by name, so a double-click or a stale tab can't create a second copy of a tower."""
+    `tower_id`, else by name, so a double-click or a stale tab can't create a second copy of a tower. Units of a
+    card with a layout are priced from the project's saved pricing (the wizard saves the project first)."""
     # Lock the project row: two Saves at once (double-click, two tabs) would both see the same gap and fill it.
     project = (
         await session.execute(select(Project).where(Project.id == project_id).with_for_update())
@@ -254,116 +310,310 @@ async def sync_project_inventory(
     if not project or project.is_deleted:
         raise HTTPException(status_code=404, detail="Project not found")
 
-    towers = list(
-        (
-            await session.execute(
-                select(Tower)
-                .where(Tower.project_id == project_id, Tower.is_deleted.is_(False))
-                .order_by(Tower.created_at, Tower.name)
-            )
-        ).scalars()
+    plan = await _plan_inventory(
+        session, project, payload.towers, payload.parking, _pricing_of(project), for_save=True
     )
-    # Every unit of the project, archived ones included (they count toward the layout and keep their numbers).
-    units = (
-        await session.execute(
-            select(Unit.tower_id, Unit.unit_number, Unit.unit_type, Unit.floor, Unit.is_deleted).where(
-                Unit.project_id == project_id
-            )
-        )
-    ).all()
-    by_id = {t.id: t for t in towers}
-    live_tower_ids = set(by_id)
-
-    _check_tower_names([card.name for card in payload.towers])
-    claimed: set[UUID] = set()
-    for card in payload.towers:
-        if card.tower_id is None:
-            continue
-        tower = by_id.get(card.tower_id)
-        if tower is None or is_parking_block(tower.name):
-            raise HTTPException(
-                status_code=404,
-                detail="A tower on this page no longer exists (it may have been archived). Reload the page and try again.",
-            )
-        if card.tower_id in claimed:
-            raise HTTPException(status_code=422, detail=f"The tower “{tower.name}” appears twice on this page.")
-        claimed.add(card.tower_id)
-    unclaimed_by_name = {
-        t.name.strip().casefold(): t for t in towers if t.id not in claimed and not is_parking_block(t.name)
-    }
-
-    def existing_in(tower_id: UUID) -> list[ExistingUnit]:
-        return [
-            ExistingUnit(unit_number=u.unit_number, unit_type=u.unit_type, floor=u.floor, archived=u.is_deleted)
-            for u in units
-            if u.tower_id == tower_id
-        ]
-
-    plans = []
-    for card in payload.towers:
-        name = card.name.strip()
-        tower = by_id[card.tower_id] if card.tower_id else unclaimed_by_name.pop(name.casefold(), None)
-        plans.append((card, tower, plan_tower_units(name, _tower_specs(card), existing_in(tower.id) if tower else [])))
-
-    project_numbers = {u.unit_number for u in units} | {n.unit_number for _, _, plan in plans for n in plan.new}
-    parking_plan = plan_parking(
-        payload.parking,
-        [
-            ExistingUnit(unit_number=u.unit_number, unit_type=u.unit_type, floor=u.floor, archived=u.is_deleted)
-            for u in units
-            if u.unit_type == UnitType.parking.value and u.tower_id in live_tower_ids
-        ],
-        project_numbers,
-    )
-    new_tower_units = sum(len(plan.new) for _, _, plan in plans)
-    _check_new_unit_cap(new_tower_units + len(parking_plan.new))
-
-    notes: list[str] = []
+    towers = plan.project_towers
     created_towers = 0
-    for card, tower, plan in plans:
-        name = card.name.strip()
+    for planned in plan.towers:
+        tower = planned.tower
         if tower is None:
-            tower = Tower(project_id=project.id, name=name, total_floors=card.total_floors)
+            tower = Tower(
+                project_id=project.id,
+                name=planned.name,
+                total_floors=planned.card.total_floors,
+                layout=_layout_column(planned.card),
+            )
             session.add(tower)
             await session.flush()
             towers.append(tower)
             created_towers += 1
         else:
-            top_floor = max((u.floor for u in units if u.tower_id == tower.id and not u.is_deleted), default=0)
-            if card.total_floors < top_floor:
-                notes.append(f"{name}: kept {top_floor} floors — it has units up to floor {top_floor}.")
-            tower.name = name
-            tower.total_floors = max(card.total_floors, top_floor)
-        notes.extend(plan.notes)
-        _add_units(session, project.id, tower.id, plan.new)
+            tower.name = planned.name
+            tower.total_floors = max(planned.card.total_floors, planned.top_floor)
+            if planned.card.layout is not None:
+                tower.layout = _layout_column(planned.card)
+        _add_units(session, project.id, tower.id, planned.plan.new)
 
-    notes.extend(parking_plan.notes)
-    if parking_plan.new:
+    if plan.parking.new:
         block = next((t for t in towers if is_parking_block(t.name)), None)
         if block is None:
             block = Tower(project_id=project.id, name=PARKING_BLOCK_NAME, total_floors=1)
             session.add(block)
             await session.flush()
             towers.append(block)
-        _add_parking(session, project, block.id, parking_plan.new)
+        _add_parking(session, project, block.id, plan.parking.new)
 
     parking_spots = (
         sum(
             1
-            for u in units
-            if u.unit_type == UnitType.parking.value and not u.is_deleted and u.tower_id in live_tower_ids
+            for u in plan.units
+            if u.unit_type == UnitType.parking.value and not u.is_deleted and u.tower_id in plan.live_tower_ids
         )
-        + sum(1 for _, _, plan in plans for n in plan.new if n.spec.unit_type == UnitType.parking)
-        + len(parking_plan.new)
+        + sum(1 for planned in plan.towers for n in planned.plan.new if n.spec.unit_type == UnitType.parking)
+        + len(plan.parking.new)
     )
     _apply_built_totals(project, [t.total_floors for t in towers if not is_parking_block(t.name)], parking_spots)
     await session.commit()
 
     return {
         "project": ProjectWithTowersRead.model_validate(await _load_project_with_inventory(session, project.id)),
-        "created": {"towers": created_towers, "units": new_tower_units, "parking": len(parking_plan.new)},
-        "notes": notes,
+        "created": {"towers": created_towers, "units": plan.new_tower_units, "parking": len(plan.parking.new)},
+        "notes": plan.notes,
     }
+
+
+@router.post("/inventory/projects/{project_id}/inventory/preview", response_model=InventoryPreview)
+async def preview_project_inventory(
+    project_id: UUID,
+    payload: InventoryPreviewRequest,
+    _: object = Depends(require_permissions(PermissionCode.LEAD_MANAGE)),
+    session: AsyncSession = Depends(get_db_session),
+):
+    """The wizard's preview on Edit: what Save would add to this project for the page's towers and parking, priced
+    with the page's (unsaved) pricing — the same planner as Save, nothing written (so no lock either)."""
+    project = await session.get(Project, project_id)
+    if not project or project.is_deleted:
+        raise HTTPException(status_code=404, detail="Project not found")
+    sent = payload.model_fields_set
+
+    def page_or_project(name: str):
+        # A pricing field the page sent (even empty) is what Save will use — the wizard saves it first.
+        return getattr(payload if name in sent else project, name)
+
+    pricing = LayoutPricing(
+        basis=page_or_project("pricing_basis"),
+        flat_rate=page_or_project("rate_a"),
+        shop_rate=page_or_project("rate_b"),
+        godown_rate=page_or_project("rate_c"),
+    )
+    plan = await _plan_inventory(session, project, payload.towers, payload.parking, pricing, for_save=False)
+    return _preview(plan, payload.parking, page_or_project("parking_prices"), project.parking_cost)
+
+
+@dataclass
+class _PlannedTower:
+    card: ProjectTowerCreate          # the page's tower card (a ProjectTowerSync on Edit)
+    name: str                         # its name, trimmed
+    tower: Tower | None               # the existing tower it maps to on Edit; None = a new tower
+    plan: TowerPlan
+    unpriced: dict[int, str]          # id(spec) → why its price can't be worked out (only the preview gets here)
+    existing_units: int               # live units already in the tower
+    top_floor: int                    # highest floor with a live unit (0 = none)
+
+
+@dataclass
+class _InventoryPlan:
+    """What Save would build for a page. Made by ONE function (_plan_inventory) for Save and the preview, on Create
+    and on Edit, so what the preview shows is what Save does."""
+    towers: list[_PlannedTower]
+    parking: ParkingPlan
+    parking_existing: Counter         # live spots per parking type
+    notes: list[str]
+    project_towers: list[Tower]       # the project's live towers (Edit), its parking block included
+    units: list                       # every unit row of the project (Edit), archived ones included
+    live_tower_ids: set[UUID]
+
+    @property
+    def new_tower_units(self) -> int:
+        return sum(len(planned.plan.new) for planned in self.towers)
+
+
+async def _plan_inventory(
+    session: AsyncSession,
+    project: Project | None,
+    cards: list[ProjectTowerCreate],
+    parking: dict[str, int],
+    pricing: LayoutPricing,
+    *,
+    for_save: bool,
+) -> _InventoryPlan:
+    """The towers, units and parking Save adds for the page's tower cards (`project` None = a new project).
+
+    Save and the preview get the same answers and the same 4xx (tower names, a tower that no longer exists, a
+    layout that can't be built, the 5,000 cap). Only Save refuses a unit it can't price — the preview lists it
+    unpriced — and a stale tab's card without flat types for a tower that has them (409: an old page would add
+    untyped copies of its flats)."""
+    towers: list[Tower] = []
+    units: list = []
+    if project is not None:
+        towers = list(
+            (
+                await session.execute(
+                    select(Tower)
+                    .where(Tower.project_id == project.id, Tower.is_deleted.is_(False))
+                    .order_by(Tower.created_at, Tower.name)
+                )
+            ).scalars()
+        )
+        # Every unit of the project, archived ones included (they count toward the layout and keep their numbers).
+        units = (
+            await session.execute(
+                select(Unit.tower_id, Unit.unit_number, Unit.unit_type, Unit.floor, Unit.is_deleted, Unit.flat_type)
+                .where(Unit.project_id == project.id)
+            )
+        ).all()
+    by_id = {t.id: t for t in towers}
+    live_tower_ids = set(by_id)
+
+    _check_tower_names([card.name for card in cards])
+    claimed: set[UUID] = set()
+    for card in cards:
+        tower_id = getattr(card, "tower_id", None)
+        if tower_id is None:
+            continue
+        tower = by_id.get(tower_id)
+        if tower is None or is_parking_block(tower.name):
+            raise HTTPException(
+                status_code=404,
+                detail="A tower on this page no longer exists (it may have been archived). Reload the page and try again.",
+            )
+        if tower_id in claimed:
+            raise HTTPException(status_code=422, detail=f"The tower “{tower.name}” appears twice on this page.")
+        claimed.add(tower_id)
+    unclaimed_by_name = {
+        t.name.strip().casefold(): t for t in towers if t.id not in claimed and not is_parking_block(t.name)
+    }
+
+    def existing_in(tower_id: UUID) -> list[ExistingUnit]:
+        return [
+            ExistingUnit(
+                unit_number=u.unit_number,
+                unit_type=u.unit_type,
+                floor=u.floor,
+                archived=u.is_deleted,
+                flat_type=u.flat_type,
+            )
+            for u in units
+            if u.tower_id == tower_id
+        ]
+
+    planned_towers: list[_PlannedTower] = []
+    notes: list[str] = []
+    for card in cards:
+        name = card.name.strip()
+        tower_id = getattr(card, "tower_id", None)
+        tower = by_id[tower_id] if tower_id else unclaimed_by_name.pop(name.casefold(), None)
+        if for_save and tower is not None and tower.layout is not None and card.layout is None:
+            raise HTTPException(
+                status_code=409, detail="This tower was set up with flat types — reload the page to edit it."
+            )
+        specs, unpriced = _card_specs(name, card, pricing)
+        existing = existing_in(tower.id) if tower is not None else []
+        live = [u for u in existing if not u.archived]
+        top_floor = max((u.floor for u in live), default=0)
+        if tower is not None and card.total_floors < top_floor:
+            notes.append(f"{name}: kept {top_floor} floors — it has units up to floor {top_floor}.")
+        plan = plan_tower_units(name, specs, existing)
+        # Save never writes a unit it can't price; a type whose flats all exist already needs no price.
+        problem = next((unpriced[id(new.spec)] for new in plan.new if id(new.spec) in unpriced), None)
+        if for_save and problem:
+            raise HTTPException(status_code=422, detail=problem)
+        notes.extend(plan.notes)
+        planned_towers.append(
+            _PlannedTower(
+                card=card,
+                name=name,
+                tower=tower,
+                plan=plan,
+                unpriced=unpriced,
+                existing_units=len(live),
+                top_floor=top_floor,
+            )
+        )
+
+    existing_parking = [
+        ExistingUnit(unit_number=u.unit_number, unit_type=u.unit_type, floor=u.floor, archived=u.is_deleted)
+        for u in units
+        if u.unit_type == UnitType.parking.value and u.tower_id in live_tower_ids
+    ]
+    project_numbers = {u.unit_number for u in units} | {
+        n.unit_number for planned in planned_towers for n in planned.plan.new
+    }
+    parking_plan = plan_parking(parking, existing_parking, project_numbers)
+    notes.extend(parking_plan.notes)
+    _check_new_unit_cap(sum(len(planned.plan.new) for planned in planned_towers) + len(parking_plan.new))
+    return _InventoryPlan(
+        towers=planned_towers,
+        parking=parking_plan,
+        parking_existing=Counter(parking_type_of(u.unit_number) for u in existing_parking if not u.archived),
+        notes=notes,
+        project_towers=towers,
+        units=units,
+        live_tower_ids=live_tower_ids,
+    )
+
+
+def _pricing_of(source) -> LayoutPricing:
+    """The pricing a layout's units are priced from: a project row, or a create payload (same field names)."""
+    return LayoutPricing(
+        basis=source.pricing_basis, flat_rate=source.rate_a, shop_rate=source.rate_b, godown_rate=source.rate_c
+    )
+
+
+def _card_specs(
+    name: str, card: ProjectTowerCreate, pricing: LayoutPricing
+) -> tuple[list[UnitBatchCreate], dict[int, str]]:
+    """A tower card's unit batches, and the ones that couldn't be priced. With a layout the server builds (and
+    prices) them from it and the card's unit_specs / units are ignored; without one, the card's own specs, as
+    before flat types."""
+    if card.layout is None:
+        return _tower_specs(card), {}
+    try:
+        built = layout_specs(name, card.total_floors, card.layout, pricing)
+    except LayoutError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return built.specs, built.unpriced
+
+
+def _layout_column(card: ProjectTowerCreate) -> dict | None:
+    return _json_safe(card.layout.model_dump()) if card.layout is not None else None
+
+
+def _preview(
+    plan: _InventoryPlan, parking: dict[str, int], parking_prices: dict | None, parking_cost: Decimal | None
+) -> InventoryPreview:
+    new_spots: dict[str, list[str]] = {}
+    for parking_type, number in plan.parking.new:
+        new_spots.setdefault(parking_type, []).append(number)
+    return InventoryPreview(
+        towers=[
+            PlannedTower(
+                tower_id=planned.tower.id if planned.tower is not None else None,
+                name=planned.name,
+                existing_units=planned.existing_units,
+                new_units=[
+                    PlannedUnit(
+                        floor=new.floor,
+                        unit_number=new.unit_number,
+                        unit_type=new.spec.unit_type.value,
+                        flat_type=new.spec.flat_type,
+                        configuration=new.spec.configuration,
+                        area=new.spec.area,
+                        carpet_area=new.spec.carpet_area,
+                        built_up_area=new.spec.built_up_area,
+                        base_price=None if id(new.spec) in planned.unpriced else new.spec.base_price,
+                        has_plc=new.spec.has_plc,
+                    )
+                    for new in planned.plan.new
+                ],
+            )
+            for planned in plan.towers
+        ],
+        parking=[
+            PlannedParking(
+                parking_type=parking_type,
+                existing=plan.parking_existing[parking_type],
+                new_numbers=new_spots.get(parking_type, []),
+                price=_parking_price(parking_prices, parking_cost, parking_type),
+            )
+            for parking_type in PARKING_TYPES
+            if parking.get(parking_type, 0) > 0 or plan.parking_existing[parking_type]
+        ],
+        notes=plan.notes,
+        new_units=plan.new_tower_units,
+        new_parking=len(plan.parking.new),
+    )
 
 
 def _tower_specs(card: ProjectTowerCreate) -> list[UnitBatchCreate]:
@@ -414,14 +664,25 @@ def _add_units(session: AsyncSession, project_id: UUID, tower_id: UUID, new_unit
                 base_price=spec.base_price,
                 area_unit=spec.area_unit,
                 facing=spec.facing,
+                flat_type=spec.flat_type,
+                configuration=spec.configuration,
+                has_plc=spec.has_plc,
                 status=UnitStatus.available,
             )
         )
 
 
+def _parking_price(prices: dict | None, parking_cost: Decimal | None, parking_type: str) -> Decimal:
+    """A new spot's price: the project's price for its parking type, else its parking cost, else 0."""
+    price = (prices or {}).get(parking_type)
+    if price is not None:
+        return Decimal(str(price))
+    return parking_cost or Decimal("0")
+
+
 def _add_parking(session: AsyncSession, project: Project, block_id: UUID, spots: list[tuple[str, str]]) -> None:
-    # A spot has no area; its price is the project's parking cost (editable per spot later).
-    for _parking_type, number in spots:
+    # A spot has no area; its price is its type's price (else the project's parking cost) — editable per spot later.
+    for parking_type, number in spots:
         session.add(
             Unit(
                 project_id=project.id,
@@ -430,7 +691,7 @@ def _add_parking(session: AsyncSession, project: Project, block_id: UUID, spots:
                 unit_number=number,
                 unit_type=UnitType.parking.value,
                 area=Decimal("0"),
-                base_price=project.parking_cost or Decimal("0"),
+                base_price=_parking_price(project.parking_prices, project.parking_cost, parking_type),
                 area_unit="sqft",
                 status=UnitStatus.available,
             )
@@ -566,6 +827,24 @@ async def get_project_possession(
 # Inventory — project media (brochures / floor plans / images)
 # ---------------------------------------------------------------------------
 
+# A project image (e.g. the wizard's cover) must be a JPG or PNG of at most 5 MB. The declared type AND the file's
+# first bytes are checked, so a renamed file of another kind is refused too.
+_IMAGE_SIGNATURES = {"image/jpeg": b"\xff\xd8\xff", "image/png": b"\x89PNG\r\n\x1a\n"}
+_MAX_IMAGE_BYTES = 5 * 1024 * 1024
+
+
+async def _read_image(file: UploadFile) -> bytes:
+    signature = _IMAGE_SIGNATURES.get((file.content_type or "").split(";")[0].strip().lower())
+    if signature is None:
+        raise HTTPException(status_code=415, detail="Upload a JPG or PNG image.")
+    data = await file.read(_MAX_IMAGE_BYTES + 1)  # never more than the limit + 1 byte in memory
+    if len(data) > _MAX_IMAGE_BYTES:
+        raise HTTPException(status_code=413, detail="The image is larger than 5 MB.")
+    if not data.startswith(signature):
+        raise HTTPException(status_code=415, detail="Upload a JPG or PNG image.")
+    return data
+
+
 @router.post(
     "/inventory/projects/{project_id}/media",
     response_model=ProjectMediaRead,
@@ -580,9 +859,9 @@ async def upload_project_media(
     session: AsyncSession = Depends(get_db_session),
 ):
     project = await session.get(Project, project_id)
-    if not project:
+    if not project or project.is_deleted:
         raise HTTPException(status_code=404, detail="Project not found")
-    data = await file.read()
+    data = await _read_image(file) if media_type == "image" else await file.read()
     # Create the row first (flush → id), then upload under a key derived from
     # that id, then persist the key. If the upload 503s (storage unconfigured),
     # the uncommitted row rolls back with the request — no orphan.
@@ -737,9 +1016,7 @@ async def update_project(
     project = await session.get(Project, project_id)
     if not project or project.is_deleted:
         raise HTTPException(status_code=404, detail="Project not found")
-    for field, value in payload.model_dump(exclude_unset=True).items():
-        if field == "demand_schedule":
-            value = _json_demand_schedule(value)
+    for field, value in _project_columns(payload.model_dump(exclude_unset=True)).items():
         setattr(project, field, value)
     await session.commit()
     await session.refresh(project)
@@ -839,6 +1116,10 @@ async def update_unit(
         ut = data.pop("unit_type")
         if ut is not None:
             unit.unit_type = ut.value if hasattr(ut, "value") else ut
+    if data.get("has_plc", False) is None:
+        data.pop("has_plc")  # a required yes/no: an explicit null leaves it as it is
+    if isinstance(data.get("configuration"), str):
+        data["configuration"] = data["configuration"].strip() or None
     for field, value in data.items():
         setattr(unit, field, value)
     await session.commit()
@@ -1047,10 +1328,20 @@ async def create_booking(
     booking = Booking(**payload.model_dump())
     session.add(booking)
     await session.flush()  # need booking.id to attach schedules
-    # Auto-apply the project's demand schedule: % of the unit price on the builder's
+    # Read under a share lock: a "milestone reached" mark running at the same moment waits for this booking
+    # (and then raises on it) instead of missing it.
+    project = (
+        await session.get(Project, unit.project_id, with_for_update={"read": True}, populate_existing=True)
+        if unit.project_id else None
+    )
+    # The project's payment plan (t048): the booking keeps its own copy (the buyer's terms) and gets a demand
+    # for each milestone due on booking / N days after / a date; stage, possession and registration milestones
+    # wait until they are marked reached. A manual payment plan (create_payment_plan) later replaces it.
+    if project is not None and project.payment_plan:
+        await apply_payment_plan(session, booking, unit, project, date.today())
+    # Otherwise auto-apply the project's legacy demand schedule: % of the unit price on the builder's
     # fixed dates. A manual payment plan (create_payment_plan) later overrides this.
-    project = await session.get(Project, unit.project_id) if unit.project_id else None
-    schedule = getattr(project, "demand_schedule", None) if project else None
+    schedule = getattr(project, "demand_schedule", None) if project and not project.payment_plan else None
     if schedule:
         total = unit.base_price or Decimal("0")
         today = date.today()
@@ -1106,7 +1397,8 @@ async def advance_booking_step(
     _: object = Depends(require_permissions(PermissionCode.LEAD_MANAGE)),
     session: AsyncSession = Depends(get_db_session),
 ):
-    booking = await session.get(Booking, booking_id)
+    # Locked: a price save re-works the plan's demands, which must not interleave with another save.
+    booking = await session.get(Booking, booking_id, with_for_update={"key_share": True}, populate_existing=True)
     if not booking or booking.is_deleted:
         raise HTTPException(status_code=404, detail="Booking not found")
     if step not in range(1, 5):
@@ -1122,6 +1414,9 @@ async def advance_booking_step(
         ps = PaymentSchedule(booking_id=booking.id, **ps_data.model_dump())
         ps.outstanding = ps.demand_amount - ps.paid_amount
         session.add(ps)
+    if payload.pricing_snapshot is not None:
+        # Payment-plan demands follow the booking's price until money is paid or an invoice raised on them.
+        await reprice_plan_rows(session, booking, await session.get(Unit, booking.unit_id))
 
     # An EXPLICIT confirm (step 4 + confirm flag) finalizes the booking and marks
     # the unit Booked. Saving the registration date for a document preview passes
@@ -1196,10 +1491,13 @@ async def update_booking_pricing(
     _: object = Depends(require_permissions(PermissionCode.LEAD_MANAGE)),
     session: AsyncSession = Depends(get_db_session),
 ):
-    booking = await session.get(Booking, booking_id)
+    # Locked: a price save re-works the plan's demands, which must not interleave with another save.
+    booking = await session.get(Booking, booking_id, with_for_update={"key_share": True}, populate_existing=True)
     if not booking or booking.is_deleted:
         raise HTTPException(status_code=404, detail="Booking not found")
     booking.pricing_snapshot = payload.pricing_snapshot
+    # Payment-plan demands follow the booking's price until money is paid or an invoice raised on them.
+    await reprice_plan_rows(session, booking, await session.get(Unit, booking.unit_id))
     await session.commit()
     stmt = (
         select(Booking)
@@ -1396,16 +1694,29 @@ async def create_payment_plan(
     stmt = (
         select(Booking)
         .where(Booking.id == booking_id)
-        .options(selectinload(Booking.payment_schedules), selectinload(Booking.unit))
+        .options(selectinload(Booking.unit))
+        .with_for_update(key_share=True)
+        .execution_options(populate_existing=True)
     )
     booking = (await session.execute(stmt)).scalar_one_or_none()
     if not booking or booking.is_deleted:
         raise HTTPException(status_code=404, detail="Booking not found")
-    if any((ps.paid_amount or Decimal("0")) > 0 for ps in booking.payment_schedules):
+    # Rows locked before the paid check, so a payment landing at the same moment can't be deleted with its row.
+    schedules = (
+        await session.scalars(
+            select(PaymentSchedule)
+            .where(PaymentSchedule.booking_id == booking_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+    ).all()
+    if any((ps.paid_amount or Decimal("0")) > 0 for ps in schedules):
         raise HTTPException(status_code=409, detail="Payments already recorded; cannot replace the plan.")
 
-    for ps in list(booking.payment_schedules):
+    for ps in schedules:
         await session.delete(ps)
+    # A manual plan replaces the project's payment plan entirely — no milestone stays pending to be raised later.
+    booking.payment_plan = None
 
     total = _booking_total(booking)
     today = date.today()
@@ -1479,7 +1790,7 @@ async def update_payment_schedule(
     """Edit an individual demand row (label / due date / amount) after it was
     generated. Recorded payments are untouched; outstanding + overdue are
     recomputed. A demand can't be lowered below what's already been paid."""
-    ps = await session.get(PaymentSchedule, schedule_id)
+    ps = await session.get(PaymentSchedule, schedule_id, with_for_update=True, populate_existing=True)
     if not ps or ps.booking_id != booking_id:
         raise HTTPException(status_code=404, detail="Installment not found")
     data = payload.model_dump(exclude_unset=True)
@@ -1493,6 +1804,9 @@ async def update_payment_schedule(
                 status_code=409,
                 detail="Demand can't be less than the amount already paid.",
             )
+        if data["demand_amount"] != ps.demand_amount:
+            # An amount set by hand no longer follows the booking's price (a price save won't re-work it).
+            ps.percent = None
         ps.demand_amount = data["demand_amount"]
     ps.outstanding = max(Decimal("0"), ps.demand_amount - (ps.paid_amount or Decimal("0")))
     ps.is_overdue = ps.outstanding > 0 and ps.due_date < date.today()
@@ -1513,7 +1827,7 @@ async def delete_payment_schedule(
 ):
     """Remove a demand row. Blocked once any payment has been recorded against it
     (delete the receipts first via a refund flow if truly needed)."""
-    ps = await session.get(PaymentSchedule, schedule_id)
+    ps = await session.get(PaymentSchedule, schedule_id, with_for_update=True, populate_existing=True)
     if not ps or ps.booking_id != booking_id:
         raise HTTPException(status_code=404, detail="Installment not found")
     if (ps.paid_amount or Decimal("0")) > 0:
@@ -1538,7 +1852,8 @@ async def record_payment(
         raise HTTPException(status_code=404, detail="Booking not found")
 
     if payload.schedule_id is not None:
-        ps = await session.get(PaymentSchedule, payload.schedule_id)
+        # Locked: a price save re-works unpaid plan rows — the payment must see (and be seen by) that change.
+        ps = await session.get(PaymentSchedule, payload.schedule_id, with_for_update=True, populate_existing=True)
         if not ps or ps.booking_id != booking_id:
             raise HTTPException(status_code=404, detail="Installment not found")
         ps.paid_amount = (ps.paid_amount or Decimal("0")) + payload.amount
@@ -1675,7 +1990,10 @@ async def create_booking_invoice(
     amount = payload.amount
     due_date = payload.due_date
     if payload.schedule_id is not None:
-        schedule = await session.get(PaymentSchedule, payload.schedule_id)
+        # Locked: the invoice copies the row's amount, which a price save may be re-working at the same moment.
+        schedule = await session.get(
+            PaymentSchedule, payload.schedule_id, with_for_update=True, populate_existing=True
+        )
         if not schedule or schedule.booking_id != booking_id:
             raise HTTPException(status_code=404, detail="Installment not found for this booking")
         installment_name = installment_name or schedule.installment_name

@@ -165,15 +165,19 @@ async def export_inventory(
         .order_by(Unit.created_at.desc())
     )
     units = (await session.execute(stmt)).scalars().all()
+    # flat_type / configuration (project wizard, t048) are appended at the end so a sheet that reads the older
+    # columns by position keeps working; both are blank for units set up before flat types.
     header = [
         "project", "tower", "unit_number", "floor", "unit_type",
         "area", "area_unit", "base_price", "status", "facing",
+        "flat_type", "configuration",
     ]
     rows = [
         [
             u.project_name or "", u.tower_name or "", u.unit_number, str(u.floor),
             u.unit_type, str(u.area), u.area_unit, str(u.base_price),
             u.status.value, u.facing or "",
+            u.flat_type or "", u.configuration or "",
         ]
         for u in units
     ]

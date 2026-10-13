@@ -4,7 +4,7 @@ from decimal import Decimal
 from typing import Annotated, Literal
 from uuid import UUID
 
-from pydantic import Field, computed_field
+from pydantic import Field, computed_field, field_validator, model_validator
 
 from app.database.enums import BookingStatus, InvoiceStatus, SiteVisitFeedback, UnitStatus, UnitType
 from app.schemas.common import ORMModel
@@ -29,6 +29,9 @@ class UnitRead(ORMModel):
     view: str | None = None
     base_price: Decimal
     status: UnitStatus
+    flat_type: str | None = None
+    configuration: str | None = None
+    has_plc: bool = False
     created_at: datetime
     updated_at: datetime
 
@@ -42,13 +45,83 @@ class TowerRead(ORMModel):
     project_id: UUID
     name: str
     total_floors: int
+    # The layout last saved from the project wizard (TowerLayout shape) — read back as a plain dict so a later
+    # change to the layout schema can never make an older tower unreadable. None for pre-t048 towers.
+    layout: dict | None = None
     units: list[UnitRead] = []
     created_at: datetime
     updated_at: datetime
 
 
-# Garage / parking types a project offers (Multi-Level, Covered, Independent, Open).
+# Garage / parking types a project offers (Multi-Level, Covered, Independent, Open). Kept to the original four:
+# `garage_options` is also READ by builds older than t048, which would reject anything else.
 GarageOption = Literal["MLP", "CP", "IP", "OP"]
+# Every parking type a spot can be (adds Dependent Parking). Used for counts and prices — never written into
+# garage_options.
+ParkingType = Literal["MLP", "CP", "IP", "OP", "DP"]
+
+ProjectType = Literal["residential", "commercial", "mixed"]
+# The area a unit's basic price is worked out on. None/absent = super_built_up (= Unit.area), as before t048.
+PricingBasis = Literal["super_built_up", "built_up", "carpet"]
+FloorRiseBasis = Literal["per_sqft", "per_floor"]
+
+# When a payment-plan milestone falls due. on_booking / days_after_booking / on_date get a date when the booking
+# takes the plan; the EVENT ones (on_stage / on_possession / on_registration) only when the builder marks them
+# reached (whole project or per tower) or raises them on one booking.
+PlanDueOn = Literal["on_booking", "days_after_booking", "on_date", "on_stage", "on_possession", "on_registration"]
+EVENT_DUE_ON: frozenset[str] = frozenset({"on_stage", "on_possession", "on_registration"})
+MAX_PLAN_MILESTONES = 40
+
+
+class PlanMilestone(ORMModel):
+    """One milestone of a project's payment plan. The name is the builder's own (free text); `percent` is a share
+    of the booking's price (box price + GST)."""
+    key: str = Field(min_length=1, max_length=40, pattern=r"^[A-Za-z0-9_-]+$")
+    label: str = Field(min_length=1, max_length=120)
+    percent: Decimal = Field(gt=0, le=100)
+    due_on: PlanDueOn
+    days: int | None = Field(default=None, ge=1, le=3650)   # days_after_booking only
+    due_date: date | None = None                             # on_date only
+
+    @field_validator("label", mode="before")
+    @classmethod
+    def _strip_label(cls, value):
+        return value.strip() if isinstance(value, str) else value
+
+    @model_validator(mode="after")
+    def _check_due(self):
+        if self.due_on == "days_after_booking" and self.days is None:
+            raise ValueError(f"“{self.label}”: say within how many days of booking it is due.")
+        if self.due_on == "on_date" and self.due_date is None:
+            raise ValueError(f"“{self.label}”: pick the date it is due.")
+        if self.due_on != "days_after_booking":
+            self.days = None
+        if self.due_on != "on_date":
+            self.due_date = None
+        return self
+
+
+def check_payment_plan(plan: list[PlanMilestone] | None) -> list[PlanMilestone] | None:
+    """A plan (when it has milestones) must add up to 100% and use each key once. Used by the WRITE schemas only,
+    so a stored plan is never re-judged on read."""
+    if not plan:
+        return plan
+    if len(plan) > MAX_PLAN_MILESTONES:
+        raise ValueError(f"A payment plan can have at most {MAX_PLAN_MILESTONES} milestones.")
+    keys = [m.key for m in plan]
+    if len(set(keys)) != len(keys):
+        raise ValueError("Two milestones share the same key — reload the page and try again.")
+    total = sum((m.percent for m in plan), Decimal("0"))
+    if abs(total - Decimal("100")) > Decimal("0.01"):
+        raise ValueError(f"The payment plan adds up to {total.normalize():f}% — it must add up to 100%.")
+    return plan
+
+
+class MilestoneReached(ORMModel):
+    """An event milestone the builder marked reached — for one tower, or the whole project (tower_id None)."""
+    key: str
+    tower_id: UUID | None = None
+    reached_on: date
 
 
 class DemandMilestone(ORMModel):
@@ -79,8 +152,19 @@ class ProjectDetailsMixin(ORMModel):
     other_charges: Decimal | None = Field(default=None, ge=0)
     sinking_fund: Decimal | None = Field(default=None, ge=0)
     amenities_charges: Decimal | None = Field(default=None, ge=0)
-    # Builder's demand schedule (% of unit price on fixed dates), inherited by bookings.
+    # Builder's demand schedule (% of unit price on fixed dates), inherited by bookings. Legacy: superseded by
+    # payment_plan (writing a payment_plan clears it).
     demand_schedule: list[DemandMilestone] | None = None
+    # --- Add Project wizard (t048) — all optional; absent = unchanged on PATCH. ---
+    project_type: ProjectType | None = None
+    pricing_basis: PricingBasis | None = None
+    floor_rise_rate: Decimal | None = Field(default=None, ge=0)
+    floor_rise_basis: FloorRiseBasis | None = None
+    floor_rise_from: int | None = Field(default=None, ge=1, le=200)
+    plc_rate: Decimal | None = Field(default=None, ge=0)
+    amenities_rate: Decimal | None = Field(default=None, ge=0)
+    parking_prices: dict[ParkingType, Annotated[Decimal, Field(ge=0)]] | None = None
+    payment_plan: list[PlanMilestone] | None = None
 
 
 class ProjectRead(ProjectDetailsMixin):
@@ -90,6 +174,7 @@ class ProjectRead(ProjectDetailsMixin):
     location: str
     city: str
     rera_number: str | None = None
+    milestones_reached: list[MilestoneReached] | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -143,6 +228,11 @@ class ProjectCreate(ProjectDetailsMixin):
     city: str = Field(min_length=1, max_length=100)
     rera_number: str | None = Field(default=None, max_length=64)
 
+    @field_validator("payment_plan")
+    @classmethod
+    def _check_plan(cls, plan):
+        return check_payment_plan(plan)
+
 
 class ProjectUpdate(ProjectDetailsMixin):
     name: str | None = Field(default=None, min_length=1, max_length=255)
@@ -150,6 +240,11 @@ class ProjectUpdate(ProjectDetailsMixin):
     location: str | None = Field(default=None, min_length=1, max_length=255)
     city: str | None = Field(default=None, min_length=1, max_length=100)
     rera_number: str | None = Field(default=None, max_length=64)
+
+    @field_validator("payment_plan")
+    @classmethod
+    def _check_plan(cls, plan):
+        return check_payment_plan(plan)
 
 
 class TowerCreate(ORMModel):
@@ -172,6 +267,9 @@ class UnitUpdate(ORMModel):
     facing: str | None = Field(default=None, max_length=50)
     view: str | None = Field(default=None, max_length=100)
     base_price: Decimal | None = Field(default=None, ge=0)
+    flat_type: str | None = Field(default=None, pattern=r"^[A-Z]{1,2}$")
+    configuration: str | None = Field(default=None, max_length=32)
+    has_plc: bool | None = None
 
 
 class FloorUnits(ORMModel):
@@ -192,21 +290,86 @@ class UnitBatchCreate(ORMModel):
     area_unit: str = Field(default="sqft", max_length=20)
     facing: str | None = Field(default=None, max_length=50)
     unit_prefix: str | None = Field(default=None, max_length=8)
+    # Flat type (one unit of it per floor — its number ends in the type's position: A → 01, B → 02 …),
+    # configuration and PLC flag, copied onto every unit of the batch.
+    flat_type: str | None = Field(default=None, pattern=r"^[A-Z]{1,2}$")
+    configuration: str | None = Field(default=None, max_length=32)
+    has_plc: bool = False
+
+
+MAX_FLAT_TYPES_PER_TOWER = 99  # positions 01..99 on a floor
+
+
+class FlatTypeSpec(ORMModel):
+    """One flat type of a tower: ONE unit of it on every floor in its range (4 types = 4 flats per floor). The code
+    (A, B … Z, AA …) is the type's identity and fixes its position on the floor (A → x01, B → x02 …)."""
+    code: str = Field(pattern=r"^[A-Z]{1,2}$")
+    configuration: str | None = Field(default=None, max_length=32)
+    carpet_area: Decimal | None = Field(default=None, gt=0)
+    built_up_area: Decimal | None = Field(default=None, gt=0)
+    super_built_up_area: Decimal = Field(gt=0)
+    has_plc: bool = False
+    floor_from: int | None = Field(default=None, ge=0, le=200)  # default 1
+    floor_to: int | None = Field(default=None, ge=0, le=200)    # default the tower's top floor
+
+    @field_validator("configuration", mode="before")
+    @classmethod
+    def _strip_configuration(cls, value):
+        if isinstance(value, str):
+            value = value.strip()
+            return value or None
+        return value
+
+
+class OtherUnitSpec(ORMModel):
+    """Shops / godowns in a tower: `per_floor` of them on each floor of the range (ground floor = 0)."""
+    unit_type: Literal["shop", "godown"]
+    per_floor: int = Field(ge=1, le=200)
+    floor_from: int = Field(ge=0, le=200)
+    floor_to: int = Field(ge=0, le=200)
+    area: Decimal = Field(gt=0)  # super built-up
+    carpet_area: Decimal | None = Field(default=None, gt=0)
+    built_up_area: Decimal | None = Field(default=None, gt=0)
+    unit_prefix: str | None = Field(default=None, max_length=8)
+
+
+class TowerLayout(ORMModel):
+    """A tower as the project wizard describes it. The server turns it into unit batches and prices each unit
+    from the project's pricing (basis area × base rate)."""
+    unit_prefix: str = Field(default="", max_length=8)
+    flat_types: list[FlatTypeSpec] = Field(default_factory=list, max_length=MAX_FLAT_TYPES_PER_TOWER)
+    others: list[OtherUnitSpec] = Field(default_factory=list, max_length=20)
+
+    @field_validator("unit_prefix", mode="before")
+    @classmethod
+    def _strip_prefix(cls, value):
+        return value.strip() if isinstance(value, str) else value
+
+    @model_validator(mode="after")
+    def _unique_codes(self):
+        codes = [t.code for t in self.flat_types]
+        if len(set(codes)) != len(codes):
+            raise ValueError("Two flat types in one tower share the same letter.")
+        return self
 
 
 class ProjectTowerCreate(ORMModel):
     """One tower + its unit batches, for the combined Add-Project form. A tower can
     hold SEVERAL unit types (residential flats + shop/commercial + parking + godown),
-    each its own batch with its own count + sizes + price."""
+    each its own batch with its own count + sizes + price.
+
+    `layout` (the project wizard, t048) describes the tower as flat types + shops/godowns instead; when it is
+    sent the server builds the batches from it (priced from the project) and `unit_specs` / `units` are ignored."""
     name: str = Field(min_length=1, max_length=100)
     total_floors: int = Field(ge=1, le=200)
     unit_specs: list[UnitBatchCreate] = Field(default_factory=list)
     units: UnitBatchCreate | None = None  # legacy single-spec — still honoured
+    layout: TowerLayout | None = None
 
 
-# Parking spots per type (Multi-Level / Covered / Independent / Open), numbered per type across the whole
-# project (CP01, CP02 … OP01 …) regardless of tower.
-ParkingCounts = dict[GarageOption, Annotated[int, Field(ge=0, le=5000)]]
+# Parking spots per type (Multi-Level / Covered / Independent / Open / Dependent), numbered per type across the
+# whole project (CP01, CP02 … OP01 … DP01 …) regardless of tower.
+ParkingCounts = dict[ParkingType, Annotated[int, Field(ge=0, le=5000)]]
 
 
 class ProjectFullCreate(ProjectCreate):
@@ -239,6 +402,53 @@ class ProjectInventorySyncResult(ORMModel):
     project: ProjectWithTowersRead
     created: InventoryCreatedCounts
     notes: list[str] = []
+
+
+class PlannedUnit(ORMModel):
+    """A unit Save would create (the wizard's inventory preview)."""
+    floor: int
+    unit_number: str
+    unit_type: str
+    flat_type: str | None = None
+    configuration: str | None = None
+    area: Decimal
+    carpet_area: Decimal | None = None
+    built_up_area: Decimal | None = None
+    base_price: Decimal | None = None  # None when the project has no rate for it yet
+    has_plc: bool = False
+
+
+class PlannedTower(ORMModel):
+    tower_id: UUID | None = None
+    name: str
+    existing_units: int = 0          # live units already in the tower (archived ones not counted)
+    new_units: list[PlannedUnit] = []
+
+
+class PlannedParking(ORMModel):
+    parking_type: ParkingType
+    existing: int = 0
+    new_numbers: list[str] = []
+    price: Decimal | None = None
+
+
+class InventoryPreview(ORMModel):
+    """What Save would build — the same planner, nothing written."""
+    towers: list[PlannedTower] = []
+    parking: list[PlannedParking] = []
+    notes: list[str] = []
+    new_units: int = 0
+    new_parking: int = 0
+
+
+class InventoryPreviewRequest(ProjectInventorySync):
+    """Preview for an existing project: the page's towers + parking, plus the page's (unsaved) pricing so the
+    preview prices match what Save will use."""
+    pricing_basis: PricingBasis | None = None
+    rate_a: Decimal | None = Field(default=None, ge=0)
+    rate_b: Decimal | None = Field(default=None, ge=0)
+    rate_c: Decimal | None = Field(default=None, ge=0)
+    parking_prices: dict[ParkingType, Annotated[Decimal, Field(ge=0)]] | None = None
 
 
 class SiteVisitProjectMini(ORMModel):
@@ -308,6 +518,8 @@ class PaymentScheduleRead(ORMModel):
     demand_amount: Decimal
     paid_amount: Decimal
     outstanding: Decimal
+    milestone_key: str | None = None   # set on rows a payment plan generated
+    percent: Decimal | None = None     # while set, the amount follows the booking's price
     created_at: datetime
 
     # Overdue is time-dependent — derive it at read time from the parsed fields
@@ -403,6 +615,9 @@ class BookingUnitInfo(ORMModel):
     area_unit: str
     base_price: Decimal
     status: UnitStatus
+    flat_type: str | None = None
+    configuration: str | None = None
+    has_plc: bool = False
     tower_name: str | None = None
     project_name: str | None = None
 
@@ -425,6 +640,9 @@ class BookingRead(ORMModel):
     token_received_on: date | None = None
     token_mode: str | None = None
     token_reference: str | None = None
+    # The payment plan this booking took from its project (PlanMilestone shape, as stored). Milestones with no
+    # schedule row carrying their key are still to be raised.
+    payment_plan: list[dict] | None = None
     created_at: datetime
     updated_at: datetime
     customer: CustomerCompact | None = None
@@ -495,6 +713,31 @@ class BookingInvoiceStatusUpdate(ORMModel):
 
 class PricingUpdate(ORMModel):
     pricing_snapshot: dict
+
+
+class MilestoneReachedCreate(ORMModel):
+    """Mark an event milestone reached — raises its demand on every live booking that holds it (in the chosen
+    towers, or the whole project when tower_ids is empty / absent)."""
+    reached_on: date
+    tower_ids: list[UUID] | None = None
+
+
+class MilestoneReachedResult(ORMModel):
+    raised: int = 0                 # bookings that got the demand now
+    already_raised: int = 0         # bookings that already had it
+    amount: Decimal = Decimal("0")  # total demanded now
+    project: ProjectRead
+
+
+class MilestoneRaise(ORMModel):
+    """Raise one milestone on one booking (e.g. its registration), due on `due_date`."""
+    due_date: date
+
+
+class MilestoneUndoResult(ORMModel):
+    removed: int = 0   # unpaid, un-invoiced demands removed
+    kept: int = 0      # demands kept because money was paid or an invoice raised
+    project: ProjectRead
 
 
 class PossessionChecklistUpdate(ORMModel):

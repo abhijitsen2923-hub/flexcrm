@@ -457,10 +457,13 @@ class StageTransitionService(ServiceBase):
         Raises (rolling back the whole transition) if a new unit isn't available.
         Returns the Booking. Local imports avoid a circular import at module load
         (real_estate models register with the same metadata)."""
+        from datetime import date
+
         from sqlalchemy import select as _select
 
         from app.database.enums import BookingStatus
-        from app.real_estate.models import Booking, Unit
+        from app.real_estate.models import Booking, Project, Unit
+        from app.real_estate.payment_plan import apply_payment_plan
 
         existing = (
             await self.session.execute(
@@ -490,6 +493,15 @@ class StageTransitionService(ServiceBase):
             self.session.add(booking)
             unit.status = UnitStatus.hold
             held_unit = (str(unit.id), str(unit.project_id))
+            # A booking started here takes the project's payment plan too — the same code as the Bookings page
+            # (a reused booking keeps the demands it already has). Flush first: its demands need its id. The
+            # project is read under a share lock so a "milestone reached" mark can't miss this booking.
+            await self.session.flush()
+            project = await self.session.get(
+                Project, unit.project_id, with_for_update={"read": True}, populate_existing=True
+            )
+            if project is not None and project.payment_plan:
+                await apply_payment_plan(self.session, booking, unit, project, date.today())
 
         booking.token_amount = capture.token_amount
         booking.token_received_on = capture.token_received_on

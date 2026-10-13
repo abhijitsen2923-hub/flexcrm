@@ -29,6 +29,7 @@ from app.api.v1.endpoints import (
 from app.finance.router import router as finance_router
 from app.hr.router import router as hr_router
 from app.real_estate.router import router as real_estate_router
+from app.real_estate.payment_plan import router as real_estate_payment_plan_router
 from app.customer_portal.router import router as customer_portal_router
 from app.api.v1.endpoints.custom_roles import router as custom_roles_router
 
@@ -61,6 +62,8 @@ api_router.include_router(finance_router, prefix="/finance", tags=["Finance"])
 api_router.include_router(hr_router, prefix="/hr", tags=["HR"])
 api_router.include_router(exports.router, prefix="/exports", tags=["Exports"])
 api_router.include_router(real_estate_router, tags=["Real Estate"])
+# Payment-plan milestones (mark reached / raise on a booking) — same prefix-less paths as the router above.
+api_router.include_router(real_estate_payment_plan_router, tags=["Real Estate"])
 api_router.include_router(customer_portal_router, prefix="/customer", tags=["Customer Portal"])
 api_router.include_router(channel_partners.router, prefix="/channel-partners", tags=["Channel Partners"])
 api_router.include_router(partner_portal.router, prefix="/partner", tags=["Partner Portal"])
