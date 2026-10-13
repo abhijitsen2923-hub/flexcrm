@@ -187,6 +187,8 @@ export interface SalesOrder {
   customer_id: string;
   primary_owner_id: string | null;
   title: string;
+  // The buyer's name (older backends don't send it — fall back to the title).
+  customer_name?: string | null;
   deal_value: string;
   currency: string;
   payment_status: PaymentStatus;

@@ -185,6 +185,7 @@ export interface ManualIncomeWritePayload extends GstInput {
 export interface FinanceBreakdownRow {
   label: string;
   value: string;
+  count?: number | null;
 }
 
 export interface FinanceSummary {
@@ -201,6 +202,9 @@ export interface FinanceSummary {
   net_position: string;
   expense_by_category: FinanceBreakdownRow[];
   income_by_category: FinanceBreakdownRow[];
+  // Money received on bookings, by the instalment it paid (older backends don't send it).
+  collections_by_purpose?: FinanceBreakdownRow[];
+  collections_total?: string;
 }
 
 // ---- Per-customer demand ledger (Phase 3a) ----

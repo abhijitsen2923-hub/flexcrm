@@ -111,7 +111,7 @@ export default function FinancePage() {
 
   const orderColumns: DataTableColumn<SalesOrder>[] = [
     { key: "order", header: "Order", render: (row) => <strong>{row.order_number}</strong> },
-    { key: "title", header: "Title", render: (row) => row.title },
+    { key: "name", header: "Name", render: (row) => row.customer_name || row.title },
     {
       key: "value",
       header: "Value",

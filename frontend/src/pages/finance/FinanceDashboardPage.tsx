@@ -7,6 +7,7 @@ import { financeService } from "../../services/finance";
 import type { FinanceSummary } from "../../types/finance";
 import { extractErrorMessage } from "../../utils/errors";
 import { formatCurrency } from "../../utils/format";
+import "./FinanceDashboardPage.css";
 
 export default function FinanceDashboardPage() {
   const toast = useToast();
@@ -31,6 +32,10 @@ export default function FinanceDashboardPage() {
   const expenseData = summary.expense_by_category
     .map((r) => ({ label: r.label, value: Number(r.value) }))
     .filter((r) => r.value > 0);
+  const collections = (summary.collections_by_purpose ?? [])
+    .map((r) => ({ label: r.label, value: Number(r.value), count: r.count ?? 0 }))
+    .filter((r) => r.value > 0);
+  const collectionsTotal = collections.reduce((sum, r) => sum + r.value, 0);
 
   return (
     <>
@@ -58,6 +63,39 @@ export default function FinanceDashboardPage() {
         />
         <KpiCard label="Pending approvals" value={String(summary.expense_pending_approval)} />
       </div>
+
+      <Card
+        title="Collections by purpose"
+        subtitle={
+          collections.length
+            ? `${formatCurrency(collectionsTotal, "INR")} received on bookings, by what it was paid for`
+            : "Money received on bookings, by what it was paid for"
+        }
+      >
+        {collections.length === 0 ? (
+          <EmptyState title="No booking payments yet" description="Payments recorded on bookings appear here." />
+        ) : (
+          <ul className="collections-list">
+            {collections.map((r) => (
+              <li key={r.label} className="collections-list__row">
+                <div className="collections-list__head">
+                  <span className="collections-list__label">{r.label}</span>
+                  <span className="collections-list__value">
+                    {formatCurrency(r.value, "INR")}
+                    <span className="muted text-xs">
+                      {" "}
+                      · {r.count} {r.count === 1 ? "payment" : "payments"} · {Math.round((r.value / collectionsTotal) * 100)}%
+                    </span>
+                  </span>
+                </div>
+                <div className="collections-list__bar" aria-hidden="true">
+                  <div style={{ width: `${(r.value / collectionsTotal) * 100}%` }} />
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </Card>
 
       <Card title="Expenses by category">
         {expenseData.length === 0 ? (
