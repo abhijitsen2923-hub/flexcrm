@@ -547,9 +547,13 @@ export function renameTower(tower: TowerForm, name: string): TowerForm {
   return { ...tower, name, prefix: tower.prefixTouched ? tower.prefix : guessPrefix(name) };
 }
 
-/** Add a flat type with the lowest free letter (null when the tower already has the most a floor can hold). */
+/** Add a flat type with the lowest free letter (null when the tower already has the most a floor can hold). A letter
+ * whose flats still exist (a type removed from the page) is not free: reusing it would hand those flats a blank type. */
 export function addFlatType(tower: TowerForm): TowerForm | null {
-  const code = nextFreeCode(tower.flatTypes.map((t) => t.code));
+  const code = nextFreeCode([
+    ...tower.flatTypes.map((t) => t.code),
+    ...removedTypesWithUnits(tower).map((t) => t.code),
+  ]);
   if (!code) return null;
   return { ...tower, flatTypes: byPosition([...tower.flatTypes, blankFlatType(code)]) };
 }
@@ -956,8 +960,10 @@ export function initialParkingForm(project: Project | null, existing: ExistingPa
       price: price != null ? String(price) : "",
     };
   }
-  // An older project that only declared a total for its one parking type: start from that total.
-  const anyBuilt = WIZARD_PARKING_TYPES.some((t) => (existing.byType[t] ?? 0) > 0);
+  // An older project that only declared a total for its one parking type (and has built no spots, typed or not):
+  // start from that total. Older untyped spots count — the server only counts typed ones, so prefilling the total
+  // on top of them would build a second set.
+  const anyBuilt = existing.untyped > 0 || WIZARD_PARKING_TYPES.some((t) => (existing.byType[t] ?? 0) > 0);
   const on = WIZARD_PARKING_TYPES.filter((t) => form[t].on);
   const declared = project?.totalGarages ?? null;
   if (!anyBuilt && on.length === 1 && declared != null && declared > 0) form[on[0]].count = String(declared);
@@ -1056,9 +1062,10 @@ export function samplePlan(): PlanRowForm[] {
   return rows;
 }
 
-/** The plan's total %, to 2 decimals. */
+/** The plan's total %, to 2 decimals — the sum of each row as it is SENT (rounded to 2 decimals), so a plan of
+ * 33.333 + 33.333 + 33.334 reads 99.99 here, as the server will see it. */
 export function planTotal(rows: PlanRowForm[]): number {
-  return Math.round(rows.reduce((sum, r) => sum + (toNum(r.percent) ?? 0), 0) * 100) / 100;
+  return rows.reduce((sum, r) => sum + Math.round((toNum(r.percent) ?? 0) * 100), 0) / 100;
 }
 
 /** The plan the wizard opens with: the project's plan, else its older dated schedule as "On a date" rows. */
@@ -1395,7 +1402,7 @@ export function validatePlan(rows: PlanRowForm[], opts: { dirty: boolean; legacy
     if (r.dueOn === "on_date" && !/^\d{4}-\d{2}-\d{2}$/.test(r.dueDate)) fields[fieldKey.milestone(r.key, "date")] = "Pick the date.";
   }
   const total = planTotal(rows);
-  if (rows.length > 0 && Math.abs(total - 100) > 0.01) {
+  if (rows.length > 0 && Math.round(total * 100) !== 10000) {
     general.push(`The milestones add up to ${total}% — they must add up to exactly 100%.`);
   }
   return { fields, general };

@@ -168,6 +168,16 @@ export function ProjectWizard({ project, onClose, onSaved, onPartlySaved }: Proj
       show(bad);
       return;
     }
+    // The preview runs the same checks as Save: if it was refused (e.g. too many units in one save), Save would be
+    // too — and on Edit only after the project's details had already been saved. Stop here instead.
+    if (currentPreview.status === "error") {
+      setSaveError(`Fix this first: ${currentPreview.message}`);
+      return;
+    }
+    if (currentPreview.status === "loading") {
+      setSaveError("Wait for the preview to finish, then save.");
+      return;
+    }
     setSaving(true);
     setSaveError(null);
     let projectId = project?.id ?? null;

@@ -510,10 +510,11 @@ function TowerManager({
         built_up_area: builtUp,
         base_price: unitForm.base_price.trim() !== "" ? Number(unitForm.base_price) : undefined,
         facing: unitForm.facing.trim() || null,
-        // Flat type / configuration / PLC belong to flats; other kinds of unit leave them as they are.
+        // Flat type / configuration / PLC belong to flats: a unit re-categorised as a shop, godown or parking spot
+        // drops them (else it would still read "Type C · 2 BHK" and the price calculator would add PLC).
         ...(isFlat
           ? { flat_type: flatType || null, configuration: unitForm.configuration.trim() || null, has_plc: unitForm.has_plc }
-          : {}),
+          : { flat_type: null, configuration: null, has_plc: false }),
       });
       toast.success("Unit updated", unitForm.unit_number.trim());
       setEditUnitId(null);

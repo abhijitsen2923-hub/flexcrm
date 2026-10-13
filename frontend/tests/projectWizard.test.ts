@@ -356,6 +356,13 @@ test("parking on Edit: existing spots tick their type; the count can't go below 
   // An older project with one type and only a declared total starts from that total.
   const declared = initialParkingForm(project({ garageOptions: ["CP"], totalGarages: 112 }), NO_EXISTING_PARKING);
   assert.equal(declared.CP.count, "112");
+  // …but not when older untyped spots already exist: the server counts only typed spots, so the total would build a
+  // second set on top of them.
+  const withOlder = initialParkingForm(project({ garageOptions: ["CP"], totalGarages: 40 }), {
+    byType: { MLP: 0, CP: 0, IP: 0, OP: 0, DP: 0 },
+    untyped: 40,
+  });
+  assert.equal(withOlder.CP.count, "");
 });
 
 // --- payment plan -----------------------------------------------------------------------------------------------
@@ -390,6 +397,10 @@ test("payment plan: total must be exactly 100 %, empty is fine, rows are checked
   assert.equal(fields[fieldKey.milestone(bad[2].key, "percent")], "Above 0, up to 100.");
   assert.equal(fields[fieldKey.milestone(bad[3].key, "date")], "Pick the date.");
   assert.equal(planTotal([{ ...sample[0], percent: "33.33" }, { ...sample[1], percent: "33.33" }, { ...sample[2], percent: "33.34" }]), 100);
+  // Checked as sent (each row to 2 decimals): 33.333 + 33.333 + 33.334 is 99.99, not 100 — and is refused.
+  const thirds = [{ ...sample[0], percent: "33.333" }, { ...sample[1], percent: "33.333" }, { ...sample[2], percent: "33.334" }];
+  assert.equal(planTotal(thirds), 99.99);
+  assert.ok(!isStepOk(validatePlan(thirds, { dirty: true, legacy: false })));
 });
 
 test("milestone keys are stable and unique; older dated schedules open as 'On a date'", () => {
@@ -476,6 +487,8 @@ test("a tower with flat types opens from its layout; removed types and lowered f
   assert.deepEqual(estimateAdds(twoMore), { flats: 4, shops: 0, godowns: 0 }); // A + C on floors 4–5
   const withoutC = { ...form, flatTypes: form.flatTypes.filter((t) => t.code !== "C") };
   assert.deepEqual(removedTypesWithUnits(withoutC), [{ code: "C", units: 3 }]);
+  // "Add flat type" must not hand C's existing flats a blank type: it skips C and takes D.
+  assert.deepEqual(addFlatType(withoutC)!.flatTypes.map((t) => t.code), ["A", "B", "D"]);
 });
 
 // --- requests ---------------------------------------------------------------------------------------------------
