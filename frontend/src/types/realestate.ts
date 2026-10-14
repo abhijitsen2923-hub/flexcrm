@@ -63,6 +63,7 @@ export interface TowerLayout {
   unit_prefix: string;                // "A-" → A-101
   flat_types: FlatTypeLayout[];
   others: OtherUnitLayout[];
+  skip_floors?: number[];             // floors with no flats (refuge floors …); absent on older layouts = none
 }
 export type UnitFacing = "north" | "south" | "east" | "west" | "north_east" | "north_west" | "south_east" | "south_west";
 export type SiteVisitFeedback = "hot" | "warm" | "cold";
@@ -281,6 +282,8 @@ export interface PaymentReceipt {
   mode: PaymentMode;
   reference: string | null;
   notes: string | null;
+  // The token / booking amount, recorded as a receipt (one per booking) — counted once, never on top of tokenAmount.
+  isToken: boolean;
   createdAt: string;
 }
 

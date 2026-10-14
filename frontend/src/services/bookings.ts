@@ -144,6 +144,7 @@ interface ApiBooking {
     mode: PaymentMode;
     reference: string | null;
     notes: string | null;
+    is_token?: boolean; // absent from a backend older than token receipts → false
     created_at: string;
   }[];
   refunds?: {
@@ -196,6 +197,7 @@ function mapBooking(b: ApiBooking): Booking {
       mode: r.mode,
       reference: r.reference,
       notes: r.notes,
+      isToken: r.is_token === true,
       createdAt: r.created_at,
     })),
     refunds: (b.refunds ?? []).map((r) => ({

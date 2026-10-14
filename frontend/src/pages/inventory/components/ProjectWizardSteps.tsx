@@ -296,7 +296,7 @@ export function PricingStep({ state, update, check, project }: StepProps) {
             error={err("rateShops")}
           />
           {(anyGodowns || pricing.rateGodowns.trim() !== "") &&
-            money("rateGodowns", "Godown rate (₹/sq ft)", "Blank uses the shops rate.")}
+            money("rateGodowns", "Godown rate (₹/sq ft)", "Blank or 0 uses the shops rate.")}
         </div>
       </WizardCard>
 

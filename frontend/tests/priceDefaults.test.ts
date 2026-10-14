@@ -165,7 +165,9 @@ test("priceDefaultsForProject: rate per category (godown falls back to the comme
   assert.equal(priceDefaultsForProject(project, "shop").rate, 9000);
   assert.equal(priceDefaultsForProject(project, "godown").rate, 9000);
   assert.equal(priceDefaultsForProject({ ...project, rateC: 7000 } as Project, "godown").rate, 7000);
-  const d = priceDefaultsForProject(project, "residential");
+  // A godown rate of 0 is a cleared field, not free godowns — the commercial rate, as the server prices them.
+  assert.equal(priceDefaultsForProject({ ...project, rateC: 0 } as Project, "godown").rate, 9000);
+  const d =priceDefaultsForProject(project, "residential");
   assert.equal(d.pricingBasis, "built_up");
   assert.equal(d.floorRiseFrom, 3);
   assert.equal(d.plcRate, 100);

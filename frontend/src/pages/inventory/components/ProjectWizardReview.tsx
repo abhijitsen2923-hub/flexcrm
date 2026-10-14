@@ -19,15 +19,18 @@ import {
   WIZARD_PARKING_TYPES,
   dueOnText,
   flatsSummary,
+  floorsText,
   isEditableTower,
   legacySummary,
   parkingTotal,
   planTotal,
   positionOfCode,
   pricingNumbers,
+  skipFloorsOf,
   toInt,
   toNum,
   type ExistingParking,
+  type TowerForm,
   type WizardState,
 } from "../../../utils/projectWizard";
 import { Note, StepIntro, WizardCard, rupees, sqft } from "./ProjectWizardParts";
@@ -70,7 +73,17 @@ function unitTitle(u: PlannedUnit): string {
 // Step 6 — Preview
 // ---------------------------------------------------------------------------------------------------------------
 
-export function PreviewStep({ preview, onRetry, editing }: { preview: PreviewState; onRetry: () => void; editing: boolean }) {
+export function PreviewStep({
+  preview,
+  onRetry,
+  editing,
+  towers,
+}: {
+  preview: PreviewState;
+  onRetry: () => void;
+  editing: boolean;
+  towers: TowerForm[]; // the page's towers — for their floors with no flats, shown in each tower's grid
+}) {
   return (
     <div className="pw-step">
       <StepIntro title="Preview">
@@ -87,13 +100,17 @@ export function PreviewStep({ preview, onRetry, editing }: { preview: PreviewSta
           </div>
         </div>
       )}
-      {preview.status === "ok" && <PreviewResult data={preview.data} />}
+      {preview.status === "ok" && <PreviewResult data={preview.data} towers={towers} />}
     </div>
   );
 }
 
-function PreviewResult({ data }: { data: InventoryPreview }) {
+function PreviewResult({ data, towers }: { data: InventoryPreview; towers: TowerForm[] }) {
   const parking = data.parking.filter((p) => p.newNumbers.length > 0 || p.existing > 0);
+  // Tower names are unique on the page (the Towers step checks), and the server returns each one trimmed.
+  const noFlatsByName = new Map(
+    towers.filter(isEditableTower).map((t) => [t.name.trim().toLowerCase(), t.flatTypes.length ? skipFloorsOf(t) : []])
+  );
   if (data.newUnits === 0 && data.newParking === 0) {
     return (
       <>
@@ -114,7 +131,7 @@ function PreviewResult({ data }: { data: InventoryPreview }) {
         <KpiCard label="New parking spots" value={data.newParking.toLocaleString("en-IN")} />
       </div>
       {data.towers.map((tower) => (
-        <TowerPreview key={tower.towerId ?? tower.name} tower={tower} />
+        <TowerPreview key={tower.towerId ?? tower.name} tower={tower} noFlats={noFlatsByName.get(tower.name.trim().toLowerCase()) ?? []} />
       ))}
       {parking.length > 0 && (
         <WizardCard title="Parking" icon={<Car size={16} />}>
@@ -158,7 +175,7 @@ function NotesCard({ notes }: { notes: string[] }) {
   );
 }
 
-function TowerPreview({ tower }: { tower: InventoryPreview["towers"][number] }) {
+function TowerPreview({ tower, noFlats }: { tower: InventoryPreview["towers"][number]; noFlats: number[] }) {
   const [page, setPage] = useState(0);
   const units = tower.newUnits;
   const flats = units.filter((u) => u.unitType === "residential");
@@ -176,7 +193,11 @@ function TowerPreview({ tower }: { tower: InventoryPreview["towers"][number] }) 
     ...(shops ? [{ key: "shops", label: "Shops", match: (u: PlannedUnit) => u.unitType === "shop" }] : []),
     ...(godowns ? [{ key: "godowns", label: "Godowns", match: (u: PlannedUnit) => u.unitType === "godown" }] : []),
   ];
-  const floors = [...new Set(units.map((u) => u.floor))].sort((a, b) => b - a); // top floor first
+  // Floors with no flats between the floors that get new units show as their own row, so the grid reads true.
+  const unitFloors = new Set(units.map((u) => u.floor));
+  const gaps = noFlats.filter((f) => !unitFloors.has(f) && units.some((u) => u.floor < f) && units.some((u) => u.floor > f));
+  const gapSet = new Set(gaps);
+  const floors = [...unitFloors, ...gaps].sort((a, b) => b - a); // top floor first
   const pages = Math.max(1, Math.ceil(floors.length / FLOORS_PER_PAGE));
   const current = Math.min(page, pages - 1);
   const shown = floors.slice(current * FLOORS_PER_PAGE, (current + 1) * FLOORS_PER_PAGE);
@@ -192,6 +213,7 @@ function TowerPreview({ tower }: { tower: InventoryPreview["towers"][number] }) 
     `${count(flats.length, "new flat", "new flats")}${codes.length ? ` (${typesText(codes)})` : ""}`,
     ...(shops ? [count(shops, "new shop", "new shops")] : []),
     ...(godowns ? [count(godowns, "new godown", "new godowns")] : []),
+    ...(gaps.length ? [`no flats on ${floorsText(gaps)}`] : []),
     `${tower.existingUnits.toLocaleString("en-IN")} existing`,
   ];
 
@@ -216,22 +238,31 @@ function TowerPreview({ tower }: { tower: InventoryPreview["towers"][number] }) 
                 </tr>
               </thead>
               <tbody>
-                {shown.map((floor) => (
-                  <tr key={floor}>
-                    <th scope="row">{floor === 0 ? "Ground" : floor}</th>
-                    {columns.map((c) => (
-                      <td key={c.key}>
-                        <div className="pw-units">
-                          {(byCell.get(`${floor}|${c.key}`) ?? []).map((u) => (
-                            <span key={u.unitNumber} className={`pw-unit${u.hasPlc ? " pw-unit--plc" : ""}`} title={unitTitle(u)}>
-                              {u.unitNumber}
-                            </span>
-                          ))}
-                        </div>
+                {shown.map((floor) =>
+                  gapSet.has(floor) ? (
+                    <tr key={floor}>
+                      <th scope="row">{floor}</th>
+                      <td colSpan={columns.length} className="pw-grid-none">
+                        No flats on this floor
                       </td>
-                    ))}
-                  </tr>
-                ))}
+                    </tr>
+                  ) : (
+                    <tr key={floor}>
+                      <th scope="row">{floor === 0 ? "Ground" : floor}</th>
+                      {columns.map((c) => (
+                        <td key={c.key}>
+                          <div className="pw-units">
+                            {(byCell.get(`${floor}|${c.key}`) ?? []).map((u) => (
+                              <span key={u.unitNumber} className={`pw-unit${u.hasPlc ? " pw-unit--plc" : ""}`} title={unitTitle(u)}>
+                                {u.unitNumber}
+                              </span>
+                            ))}
+                          </div>
+                        </td>
+                      ))}
+                    </tr>
+                  )
+                )}
               </tbody>
             </table>
           </div>
@@ -365,6 +396,7 @@ export function ReviewStep({
                   <li key={t.key}>
                     <strong>{t.name.trim()}</strong> — {count(toInt(t.floors) ?? 0, "floor", "floors")} · {count(t.flatTypes.length, "type", "types")} ·{" "}
                     {perFloor} per floor · {count(s.flats, "flat", "flats")}
+                    {s.skipped.length ? ` (none on ${floorsText(s.skipped)})` : ""}
                     {s.shops ? ` · ${count(s.shops, "shop", "shops")}` : ""}
                     {s.godowns ? ` · ${count(s.godowns, "godown", "godowns")}` : ""}
                     <span className="muted"> · {t.prefix.trim()}101 …</span>
@@ -379,10 +411,11 @@ export function ReviewStep({
           <dl className="pw-dl">
             <Row label="Basis">{PRICING_BASIS_OPTIONS.find((o) => o.value === pricing.basis)?.label}</Row>
             <Row label="Flats">{p.rateFlats != null ? `${rupees(p.rateFlats)} / sq ft` : "—"}</Row>
-            {(p.rateShops != null || p.rateGodowns != null) && (
+            {(p.rateShops != null || !!p.rateGodowns) && (
               <Row label="Shops / godowns">
                 {p.rateShops != null ? `${rupees(p.rateShops)} / sq ft` : "—"}
-                {p.rateGodowns != null ? ` · godowns ${rupees(p.rateGodowns)} / sq ft` : ""}
+                {/* A godown rate of 0 is a cleared field — godowns use the shop rate, so it isn't shown. */}
+                {p.rateGodowns ? ` · godowns ${rupees(p.rateGodowns)} / sq ft` : ""}
               </Row>
             )}
             <Row label="Floor rise">

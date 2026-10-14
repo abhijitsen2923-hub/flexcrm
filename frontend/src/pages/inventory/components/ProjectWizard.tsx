@@ -291,7 +291,7 @@ export function ProjectWizard({ project, onClose, onSaved, onPartlySaved }: Proj
           {step === STEP_PRICING && <PricingStep {...stepProps} check={stepCheck(STEP_PRICING)} />}
           {step === STEP_PARKING && <ParkingStep {...stepProps} check={stepCheck(STEP_PARKING)} existing={existingParking} />}
           {step === STEP_PLAN && <PlanStep {...stepProps} check={stepCheck(STEP_PLAN)} />}
-          {step === STEP_PREVIEW && <PreviewStep preview={currentPreview} onRetry={() => setRetry((n) => n + 1)} editing={editing} />}
+          {step === STEP_PREVIEW && <PreviewStep preview={currentPreview} onRetry={() => setRetry((n) => n + 1)} editing={editing} towers={state.towers} />}
           {step === STEP_REVIEW && (
             <ReviewStep
               state={state}

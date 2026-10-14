@@ -3,18 +3,12 @@ import { Badge, Button, Card, EmptyState, LoadingBlock, Modal, SelectField, useT
 import { useBookings } from "../../hooks/useBookings";
 import { useInventory } from "../../hooks/useInventory";
 import { bookingsService } from "../../services/bookings";
+import { POSSESSION_CHECKLIST } from "../../utils/purchaseProgress";
 import { groupByProject, locateUnit, unitLocationLabel } from "../../utils/unitLocation";
 import "./PossessionTrackerPage.css";
 
-const CHECKLIST = [
-  "Demand note issued",
-  "Final payment received",
-  "Registration stamp duty paid",
-  "Sub-registrar appointment scheduled",
-  "Possession letter issued",
-  "Key handover done",
-  "Society paperwork filed",
-];
+// One list for this page and the Customer drawer's Purchases card (every item ticked = possession complete).
+const CHECKLIST = POSSESSION_CHECKLIST;
 
 type CheckedMap = Record<string, boolean[]>;
 

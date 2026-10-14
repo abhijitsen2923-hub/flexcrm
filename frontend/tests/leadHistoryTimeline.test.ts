@@ -5,7 +5,9 @@ import { test } from "node:test";
 import {
   actorName,
   assignmentSourceLabel,
+  AUTO_MOVE_COMMENT_PREFIX,
   buildLeadTimeline,
+  transitionActorText,
 } from "../src/components/leads/leadHistoryTimeline.ts";
 import type { LeadAssignmentEvent, LeadIntentChange, StageTransition } from "../src/types/crm.ts";
 
@@ -63,6 +65,25 @@ test("actorName: full, partial, blank and missing names", () => {
   assert.equal(actorName({ first_name: null, last_name: null }, "Unassigned"), "Unassigned");
   assert.equal(actorName(null, "Unassigned"), "Unassigned");
   assert.equal(actorName(undefined, "Unassigned"), "Unassigned");
+});
+
+test("stage move 'by' line: the person who moved it, else System for an automatic move", () => {
+  const comment = "Called, will visit Sunday.";
+  const auto = "Auto: ₹5,00,000 received on unit R202 — recorded by Asha Roy.";
+  assert.equal(transitionActorText({ performed_by_id: "u-1", performed_by: { first_name: "Asha", last_name: "Roy" }, comment }), "by Asha Roy");
+  assert.equal(transitionActorText({ performed_by_id: "u-1", performed_by: { first_name: "Ravi", last_name: null }, comment }), "by Ravi");
+  assert.equal(transitionActorText({ performed_by_id: "u-1", performed_by: { first_name: " ", last_name: null }, comment }), "by a team member");
+  // An automatic move after a payment / registration / possession checklist is recorded with no user.
+  assert.ok(auto.startsWith(AUTO_MOVE_COMMENT_PREFIX)); // backend real_estate/lead_sync.py comments
+  assert.equal(transitionActorText({ performed_by_id: null, performed_by: null, comment: auto }), "by System");
+  assert.equal(transitionActorText({ performed_by_id: null, comment: "Auto: unit R202 registered — recorded by Asha Roy." }), "by System");
+  // No user but not an automatic move (its user was purged by the archival job): say nothing, never "System".
+  assert.equal(transitionActorText({ performed_by_id: null, performed_by: null, comment }), "");
+  assert.equal(transitionActorText({ performed_by_id: null, comment: null }), "");
+  // A person's move keeps their name even if they typed "Auto:" themselves.
+  assert.equal(transitionActorText({ performed_by_id: "u-1", performed_by: { first_name: "Asha", last_name: "Roy" }, comment: auto }), "by Asha Roy");
+  // A user id whose name didn't come back: say nothing rather than guess.
+  assert.equal(transitionActorText({ performed_by_id: "u-1", performed_by: null, comment: auto }), "");
 });
 
 test("source labels, with a safe fallback for unknown sources", () => {

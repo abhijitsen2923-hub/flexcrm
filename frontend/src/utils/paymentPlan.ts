@@ -61,6 +61,26 @@ export function planTotal(plan: Pick<PlanMilestone, "percent">[] | null | undefi
   return Math.round(sum * 100) / 100;
 }
 
+/**
+ * The milestone key of the paid "Booking amount" row the server makes to hold the token on a booking that has no
+ * instalments yet (backend real_estate/schemas.py TOKEN_MILESTONE_KEY, used by token_receipts.py).
+ */
+export const TOKEN_MILESTONE_KEY = "__token__";
+
+/**
+ * Only the token is on the booking so far: its rows are just the token's fully paid "Booking amount" row and it took
+ * no project plan. Such a booking still needs a payment plan — that row only holds the token, and creating a plan
+ * moves the token onto the new plan's first instalment. A token row with something still owed on it was given a
+ * bigger demand by hand, so it is a real instalment to collect against, not "no plan yet".
+ */
+export function isTokenOnlySchedule(
+  plan: readonly PlanMilestone[] | null | undefined,
+  schedules: readonly Pick<PaymentScheduleEntry, "milestoneKey" | "outstanding">[]
+): boolean {
+  if ((plan?.length ?? 0) > 0 || schedules.length === 0) return false;
+  return schedules.every((s) => s.milestoneKey === TOKEN_MILESTONE_KEY && !(Number(s.outstanding) > 0));
+}
+
 /** The booking's plan milestones that have no demand row yet (still to be raised), in plan order. */
 export function pendingMilestones(
   plan: PlanMilestone[] | null | undefined,

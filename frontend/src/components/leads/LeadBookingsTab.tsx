@@ -4,6 +4,7 @@ import { bookingsService } from "../../services/bookings";
 import { inventoryService } from "../../services/inventory";
 import { BookingWizard } from "../../pages/bookings/components/BookingWizard";
 import { PaymentPlanModal } from "../../pages/bookings/components/PaymentPlanModal";
+import { RegisterBookingModal } from "../../pages/bookings/components/RegisterBookingModal";
 import type { PriceDefaults } from "../../pages/inventory/components/PriceCalculator";
 import { leadsService } from "../../services/leads";
 import type { Booking, PaymentMode, UnitType } from "../../types/realestate";
@@ -70,10 +71,8 @@ export function LeadBookingsTab({ leadId, customerId, refreshKey }: Props) {
   const [unitQuery, setUnitQuery] = useState("");
   const [wizardUnit, setWizardUnit] = useState<WizardUnit | null>(null);
 
-  // Registration.
+  // Registration (the form is RegisterBookingModal, shared with the Customer drawer).
   const [registerTarget, setRegisterTarget] = useState<Booking | null>(null);
-  const [regForm, setRegForm] = useState({ date: "", number: "", office: "" });
-  const [registering, setRegistering] = useState(false);
 
   // Token / booking amount.
   const [tokenTarget, setTokenTarget] = useState<Booking | null>(null);
@@ -142,37 +141,6 @@ export function LeadBookingsTab({ leadId, customerId, refreshKey }: Props) {
       toast.error("Could not load units", extractErrorMessage(err));
     } finally {
       setPickerLoading(false);
-    }
-  }
-
-  function openRegister(b: Booking) {
-    setRegForm({
-      date: b.scheduledDate ?? new Date().toISOString().slice(0, 10),
-      number: b.registrationNumber ?? "",
-      office: b.subRegistrarOffice ?? "",
-    });
-    setRegisterTarget(b);
-  }
-
-  async function confirmRegister() {
-    if (!registerTarget || !regForm.date) {
-      toast.error("Registration date is required");
-      return;
-    }
-    setRegistering(true);
-    try {
-      await bookingsService.registerBooking(registerTarget.id, {
-        registration_date: regForm.date,
-        registration_number: regForm.number.trim() || null,
-        sub_registrar_office: regForm.office.trim() || null,
-      });
-      toast.success("Registered", "Unit marked Registered");
-      setRegisterTarget(null);
-      await load();
-    } catch (err) {
-      toast.error("Could not register", extractErrorMessage(err));
-    } finally {
-      setRegistering(false);
     }
   }
 
@@ -300,16 +268,19 @@ export function LeadBookingsTab({ leadId, customerId, refreshKey }: Props) {
                 <Button size="sm" variant="secondary" onClick={() => setPayBooking(b)}>
                   Manage payments
                 </Button>
-                <Button size="sm" variant="ghost" onClick={() => openToken(b)}>
-                  {b.tokenAmount != null ? "Update token" : "Record token"}
-                </Button>
+                {/* A cancelled booking's token can't change any more — the server refuses it. */}
+                {b.status !== "cancelled" && (
+                  <Button size="sm" variant="ghost" onClick={() => openToken(b)}>
+                    {b.tokenAmount != null ? "Update token" : "Record token"}
+                  </Button>
+                )}
                 {b.tokenAmount != null && (
                   <Button size="sm" variant="ghost" onClick={() => void downloadTokenReceipt(b)}>
                     Token receipt
                   </Button>
                 )}
                 {b.status === "confirmed" && !registered && (
-                  <Button size="sm" variant="ghost" onClick={() => openRegister(b)}>
+                  <Button size="sm" variant="ghost" onClick={() => setRegisterTarget(b)}>
                     Mark registered
                   </Button>
                 )}
@@ -415,23 +386,15 @@ export function LeadBookingsTab({ leadId, customerId, refreshKey }: Props) {
       )}
 
       {registerTarget && (
-        <Modal
-          open
-          title="Register unit"
+        <RegisterBookingModal
+          booking={registerTarget}
+          idPrefix="lead-reg"
           onClose={() => setRegisterTarget(null)}
-          footer={
-            <>
-              <Button variant="secondary" onClick={() => setRegisterTarget(null)} disabled={registering}>Cancel</Button>
-              <Button loading={registering} onClick={() => void confirmRegister()}>Mark Registered</Button>
-            </>
-          }
-        >
-          <div className="stack" style={{ gap: "0.75rem" }}>
-            <TextField id="lead-reg-date" label="Registration date" type="date" value={regForm.date} onChange={(e) => setRegForm({ ...regForm, date: e.target.value })} required />
-            <TextField id="lead-reg-number" label="Registration / deed no. (optional)" value={regForm.number} onChange={(e) => setRegForm({ ...regForm, number: e.target.value })} placeholder="e.g. SRO-2026-12345" />
-            <TextField id="lead-reg-office" label="Sub-registrar office (optional)" value={regForm.office} onChange={(e) => setRegForm({ ...regForm, office: e.target.value })} placeholder="e.g. SRO Whitefield" />
-          </div>
-        </Modal>
+          onRegistered={() => {
+            setRegisterTarget(null);
+            void load();
+          }}
+        />
       )}
 
       {tokenTarget && (

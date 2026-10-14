@@ -30,7 +30,7 @@ import { canSetStage } from "../../utils/stageAccess";
 import { IntentBadge } from "./IntentBadge";
 import { IntentSlider } from "./IntentSlider";
 import { LeadBookingsTab } from "./LeadBookingsTab";
-import { actorName, assignmentSourceLabel, buildLeadTimeline } from "./leadHistoryTimeline";
+import { actorName, assignmentSourceLabel, buildLeadTimeline, transitionActorText } from "./leadHistoryTimeline";
 
 
 // Mirror the stage-transition comment floor so a DNP is captured "like Call".
@@ -796,6 +796,7 @@ export function LeadDrawer({ open, lead, onClose, onTransitionRequest, onLogged,
                       );
                     }
                     const entry = item.transition;
+                    const actor = transitionActorText(entry);
                     const from = entry.from_stage_code ? getStage(lead.industry, entry.from_stage_code) : null;
                     const to = getStage(lead.industry, entry.to_stage_code);
                     return (
@@ -813,11 +814,7 @@ export function LeadDrawer({ open, lead, onClose, onTransitionRequest, onLogged,
                         </div>
                         <p className="timeline__comment">{entry.comment}</p>
                         <div className="timeline__meta">
-                          {entry.performed_by && (
-                            <span className="muted text-sm">
-                              by {entry.performed_by.first_name} {entry.performed_by.last_name}
-                            </span>
-                          )}
+                          {actor && <span className="muted text-sm">{actor}</span>}
                           {entry.next_action_date && (
                             <span className="muted text-sm">
                               · next action {formatDateTime(entry.next_action_date)}

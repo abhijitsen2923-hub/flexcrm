@@ -8,6 +8,7 @@ import {
   dueOnText,
   formatPercent,
   isEventMilestone,
+  isTokenOnlySchedule,
   legacyScheduleAsPlan,
   localIsoDate,
   markConfirmText,
@@ -19,6 +20,7 @@ import {
   reachedFor,
   reachedText,
   scopeText,
+  TOKEN_MILESTONE_KEY,
   undoConfirmText,
   undoResultText,
 } from "../src/utils/paymentPlan.ts";
@@ -87,6 +89,24 @@ test("pending = plan milestones with no demand row carrying their key, in plan o
   assert.deepEqual(pendingMilestones(SAMPLE_PLAN, [{ milestoneKey: "ag" }]).map((m) => m.key)[0], "bk");
   assert.deepEqual(pendingMilestones(null, rows), []);
   assert.deepEqual(pendingMilestones([], rows), []);
+});
+
+test("token only: just the token's paid Booking amount row and no project plan still needs a plan", () => {
+  const tokenRow = { milestoneKey: TOKEN_MILESTONE_KEY, outstanding: 0 };
+  assert.equal(TOKEN_MILESTONE_KEY, "__token__"); // backend real_estate/schemas.py TOKEN_MILESTONE_KEY
+  assert.equal(isTokenOnlySchedule(null, [tokenRow]), true);
+  assert.equal(isTokenOnlySchedule(undefined, [tokenRow]), true);
+  assert.equal(isTokenOnlySchedule([], [tokenRow]), true);
+  // A booking that took the project's plan has a plan, even if only the token row exists so far.
+  assert.equal(isTokenOnlySchedule(SAMPLE_PLAN, [tokenRow]), false);
+  // Any other row (a plan row or one added by hand) means a plan exists.
+  assert.equal(isTokenOnlySchedule(null, [tokenRow, { milestoneKey: null, outstanding: 500_000 }]), false);
+  assert.equal(isTokenOnlySchedule(null, [{ milestoneKey: "bk", outstanding: 0 }]), false);
+  assert.equal(isTokenOnlySchedule(null, [{ milestoneKey: null, outstanding: 0 }]), false);
+  // A token row whose demand was raised by hand (still owed on it) is an instalment to collect, not "no plan".
+  assert.equal(isTokenOnlySchedule(null, [{ milestoneKey: TOKEN_MILESTONE_KEY, outstanding: 400_000 }]), false);
+  // No rows at all is plain "no plan yet", not token only.
+  assert.equal(isTokenOnlySchedule(null, []), false);
 });
 
 test("planBase: box price + GST, else total less stamp duty and registration, else the unit price", () => {

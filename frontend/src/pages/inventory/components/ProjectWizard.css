@@ -329,6 +329,14 @@
 }
 .pw-grid-table th[scope="row"] { text-align: right; }
 .pw-grid-table td { padding: 0; vertical-align: top; }
+.pw-grid-table td.pw-grid-none {
+  padding: 0.2rem 0.6rem;
+  border: 1px dashed var(--color-border-strong);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-muted);
+  font-style: italic;
+  text-align: center;
+}
 .pw-units { display: flex; flex-wrap: wrap; gap: 4px; justify-content: center; }
 .pw-unit {
   display: inline-flex;

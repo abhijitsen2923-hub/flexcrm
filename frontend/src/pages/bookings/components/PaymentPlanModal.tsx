@@ -10,6 +10,7 @@ import { formatDate, formatInr } from "../../../utils/format";
 import {
   dueOnText,
   formatPercent,
+  isTokenOnlySchedule,
   localIsoDate,
   milestoneAmount,
   pendingMilestones,
@@ -75,9 +76,13 @@ export function PaymentPlanModal({ booking: initial, onClose, onChanged }: Props
   const canRaise = has("FINANCE_RECORD_PAYMENT");
   const [booking, setBooking] = useState<Booking>(initial);
   const total = Number(booking.pricingSnapshot?.total ?? booking.unit?.basePrice ?? 0);
+  // A booking whose only row is the token's "Booking amount" (no project plan) has no plan yet: offer the builder,
+  // or there'd be no way to set one up or record the next payment. A cancelled one keeps the schedule view with its
+  // refund — there is nothing left to plan on it.
+  const tokenOnly = booking.status !== "cancelled" && isTokenOnlySchedule(booking.paymentPlan, booking.paymentSchedules);
   // A booking that took its project's payment plan has a plan even before any demand is raised (e.g. every
   // milestone waits for a stage) — show the schedule view with what's still to come, not the plan builder.
-  const hasPlan = booking.paymentSchedules.length > 0 || (booking.paymentPlan?.length ?? 0) > 0;
+  const hasPlan = !tokenOnly && (booking.paymentSchedules.length > 0 || (booking.paymentPlan?.length ?? 0) > 0);
   const pending = pendingMilestones(booking.paymentPlan, booking.paymentSchedules);
   // What plan percentages are taken of (box price + GST), for the "≈ ₹" estimates.
   const base = planBase(booking.pricingSnapshot, booking.unit?.basePrice ?? 0);
@@ -267,6 +272,30 @@ export function PaymentPlanModal({ booking: initial, onClose, onChanged }: Props
   const paidTotal = booking.paymentSchedules.reduce((n, p) => n + p.paidAmount, 0);
   const outstandingTotal = booking.paymentSchedules.reduce((n, p) => n + p.outstanding, 0);
 
+  // Receipts show in both views: a token-only booking (plan builder) still lists the token it holds.
+  const receiptsList =
+    booking.paymentReceipts.length > 0 ? (
+      <div>
+        <div className="muted text-xs" style={{ textTransform: "uppercase", letterSpacing: ".04em", margin: "0.5rem 0" }}>
+          Receipts
+        </div>
+        <div className="stack" style={{ gap: "0.4rem" }}>
+          {booking.paymentReceipts.map((r) => (
+            <div key={r.id} className="row row--between" style={{ alignItems: "center", padding: "0.4rem 0.6rem", border: "1px solid var(--color-border)", borderRadius: "var(--radius-sm)" }}>
+              <span className="text-sm">
+                {formatDate(r.paidOn)} · <strong>{formatInr(r.amount)}</strong>{" "}
+                {r.isToken && <><Badge tone="info">Token</Badge>{" "}</>}
+                <span className="muted">· {r.mode.toUpperCase()}{r.reference ? ` · ${r.reference}` : ""}</span>
+              </span>
+              <Button size="sm" variant="ghost" icon={<FileDown size={14} />} onClick={() => void openReceipt(r.id)}>
+                Receipt
+              </Button>
+            </div>
+          ))}
+        </div>
+      </div>
+    ) : null;
+
   return (
     <Modal open title="Payment plan & collections" size="lg" onClose={onClose}>
       <div className="stack" style={{ gap: "1rem" }}>
@@ -362,10 +391,16 @@ export function PaymentPlanModal({ booking: initial, onClose, onChanged }: Props
               </span>
             </div>
 
+            {tokenOnly && (
+              <p className="muted text-sm" style={{ margin: 0 }}>The token already received is applied to the first instalment.</p>
+            )}
+
             <div className="row" style={{ justifyContent: "flex-end", gap: "0.5rem" }}>
               <Button variant="secondary" onClick={onClose}>Cancel</Button>
               <Button loading={creating} onClick={() => void createPlan()}>Create plan</Button>
             </div>
+
+            {receiptsList}
           </div>
         ) : (
           /* ---- Schedule + collections ---- */
@@ -489,26 +524,7 @@ export function PaymentPlanModal({ booking: initial, onClose, onChanged }: Props
               </div>
             )}
 
-            {booking.paymentReceipts.length > 0 && (
-              <div>
-                <div className="muted text-xs" style={{ textTransform: "uppercase", letterSpacing: ".04em", margin: "0.5rem 0" }}>
-                  Receipts
-                </div>
-                <div className="stack" style={{ gap: "0.4rem" }}>
-                  {booking.paymentReceipts.map((r) => (
-                    <div key={r.id} className="row row--between" style={{ alignItems: "center", padding: "0.4rem 0.6rem", border: "1px solid var(--color-border)", borderRadius: "var(--radius-sm)" }}>
-                      <span className="text-sm">
-                        {formatDate(r.paidOn)} · <strong>{formatInr(r.amount)}</strong>{" "}
-                        <span className="muted">· {r.mode.toUpperCase()}{r.reference ? ` · ${r.reference}` : ""}</span>
-                      </span>
-                      <Button size="sm" variant="ghost" icon={<FileDown size={14} />} onClick={() => void openReceipt(r.id)}>
-                        Receipt
-                      </Button>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
+            {receiptsList}
 
             {invoices.length > 0 && (
               <div>

@@ -239,6 +239,8 @@ export interface TowerForm {
   prefixTouched: boolean; // the user typed a prefix — stop following the name
   originalPrefix: string | null; // an existing tower's prefix as it is today (null = new tower)
   flatTypes: FlatTypeForm[];
+  // Floors with no flats at all (refuge floors …), as typed: "5, 12". Every flat type leaves them out.
+  skipFloors: string;
   others: OtherUnitForm[];
   existingUnits: ExistingUnitInfo[]; // live units of an existing tower
   // Set up before flat types (no saved layout). Until the user converts it, it's shown read-only and NOT sent.
@@ -339,6 +341,8 @@ export function newTowerForm(previous: TowerForm | undefined, takenNames: string
     prefixTouched: false,
     originalPrefix: null,
     flatTypes: copyTypes ? previous!.flatTypes.map((t) => ({ ...t })) : [blankFlatType("A")],
+    // Its refuge floors too: they come with the same design (and the same number of floors, copied above).
+    skipFloors: copyTypes ? previous!.skipFloors : "",
     others: [],
     existingUnits: [],
     legacy: false,
@@ -384,6 +388,8 @@ export function readLayout(raw: unknown): TowerLayout | null {
     others: (Array.isArray(layout.others) ? layout.others : []).filter(
       (o): o is OtherUnitLayout => !!o && typeof o === "object" && (o.unit_type === "shop" || o.unit_type === "godown")
     ),
+    // Layouts saved before floors with no flats existed have none.
+    skip_floors: (Array.isArray(layout.skip_floors) ? layout.skip_floors : []).filter((f): f is number => Number.isInteger(f)),
   };
 }
 
@@ -401,12 +407,13 @@ export function towerFormFromTower(tower: Tower): TowerForm {
   };
   if (!layout) {
     const prefix = guessExistingPrefix(existingUnits) ?? guessPrefix(tower.name);
-    return { ...base, prefix, originalPrefix: prefix, flatTypes: [], others: [], legacy: true, converted: false };
+    return { ...base, prefix, originalPrefix: prefix, flatTypes: [], skipFloors: "", others: [], legacy: true, converted: false };
   }
   return {
     ...base,
     prefix: layout.unit_prefix,
     originalPrefix: layout.unit_prefix,
+    skipFloors: (layout.skip_floors ?? []).join(", "),
     flatTypes: byPosition(layout.flat_types).map((t) => ({
       code: t.code,
       configuration: t.configuration ?? "",
@@ -488,31 +495,44 @@ export function legacySummaryText(tower: TowerForm): string {
 }
 
 /**
- * "Set up flat types" on an older tower: N types (N = its most common flats-per-floor count), each pre-filled with
- * the tower's most common sizes, over the floors its flats are on; shops / godowns grouped per kind. The server
- * matches the existing flats first, so an unchanged conversion adds nothing on floors that are already full.
+ * "Set up flat types" on an older tower, built from what EXISTS so an unchanged conversion adds nothing:
+ *  - one type per flat on its fullest floor; type k is on the floors that have at least k flats today (a shorter
+ *    top floor → the last types stop a floor lower), pre-filled with the tower's most common sizes;
+ *  - floors between its lowest and highest flat floor with no flats at all (a refuge floor) → floors with no flats;
+ *  - shops / godowns: one row per run of floors in a row with the same count.
+ * A type's floors are one from–to range, so a floor in the middle with FEWER flats than the floors around it (but
+ * some) is still covered — Save would add flats there; `conversionWarning` says so and the Preview lists them.
  */
 export function convertLegacyTower(tower: TowerForm): TowerForm {
   const units = tower.existingUnits;
   const flats = units.filter((u) => u.unitType === "residential");
   const top = toInt(tower.floors) ?? 1;
   let flatTypes: FlatTypeForm[] = [];
+  const noFlats: number[] = [];
   if (flats.length > 0) {
-    const s = legacySummary(tower);
-    const fullRange = s.floorFrom === 1 && s.floorTo === top;
+    const perFloor = perFloorCounts(flats);
+    const floors = [...perFloor.keys()].sort((a, b) => a - b);
+    for (let f = floors[0]; f <= floors[floors.length - 1]; f += 1) if (!perFloor.has(f)) noFlats.push(f);
     const size = {
       configuration: mode(flats.map((u) => u.configuration).filter((c): c is string => !!c)) ?? "",
       carpet: str(mode(flats.map((u) => u.carpetArea).filter((v): v is number => v != null))),
       builtUp: str(mode(flats.map((u) => u.builtUpArea).filter((v): v is number => v != null))),
       superBuiltUp: str(mode(flats.map((u) => u.area))),
     };
-    flatTypes = Array.from({ length: Math.min(Math.max(s.perFloor, 1), MAX_FLAT_TYPES) }, (_, i) => ({
-      ...blankFlatType(codeForPosition(i + 1)),
-      ...size,
-      limitFloors: !fullRange,
-      floorFrom: String(s.floorFrom ?? 1),
-      floorTo: String(s.floorTo ?? top),
-    }));
+    const types = Math.min(Math.max(...perFloor.values()), MAX_FLAT_TYPES);
+    for (let k = 1; k <= types; k += 1) {
+      const on = floors.filter((f) => (perFloor.get(f) ?? 0) >= k);
+      const from = on[0];
+      const to = on[on.length - 1];
+      flatTypes.push({
+        ...blankFlatType(codeForPosition(k)),
+        ...size,
+        // Floor 1 to the top = no limit, so the type follows the tower if floors are added later.
+        limitFloors: !(from === 1 && to === top),
+        floorFrom: String(from),
+        floorTo: String(to),
+      });
+    }
   } else if (units.length === 0) {
     flatTypes = [blankFlatType("A")];
   }
@@ -521,25 +541,53 @@ export function convertLegacyTower(tower: TowerForm): TowerForm {
     const ofKind = units.filter((u) => u.unitType === kind);
     if (ofKind.length === 0) continue;
     const perFloor = perFloorCounts(ofKind);
-    const floors = [...perFloor.keys()];
-    others.push({
-      key: nextKey("o"),
-      unitType: kind,
-      perFloor: String(mode([...perFloor.values()]) ?? 1),
-      floorFrom: String(Math.min(...floors)),
-      floorTo: String(Math.max(...floors)),
-      area: str(mode(ofKind.map((u) => u.area))),
-      carpet: str(mode(ofKind.map((u) => u.carpetArea).filter((v): v is number => v != null))),
-      builtUp: str(mode(ofKind.map((u) => u.builtUpArea).filter((v): v is number => v != null))),
-      prefix: mode(ofKind.map((u) => numberPrefix(u.unitNumber, u.floor)).filter((p): p is string => p !== null)) ?? "",
-    });
+    const prefix = mode(ofKind.map((u) => numberPrefix(u.unitNumber, u.floor)).filter((p): p is string => p !== null)) ?? "";
+    // 2 shops on floors 0–1 and 4 on floor 2 → two rows (one row with the most common count would add shops).
+    const runs: { from: number; to: number; count: number }[] = [];
+    for (const f of [...perFloor.keys()].sort((a, b) => a - b)) {
+      const count = perFloor.get(f) ?? 0;
+      const last = runs[runs.length - 1];
+      if (last && f === last.to + 1 && count === last.count) last.to = f;
+      else runs.push({ from: f, to: f, count });
+    }
+    for (const run of runs) {
+      const inRun = ofKind.filter((u) => u.floor >= run.from && u.floor <= run.to);
+      others.push({
+        key: nextKey("o"),
+        unitType: kind,
+        perFloor: String(run.count),
+        floorFrom: String(run.from),
+        floorTo: String(run.to),
+        area: str(mode(inRun.map((u) => u.area))),
+        carpet: str(mode(inRun.map((u) => u.carpetArea).filter((v): v is number => v != null))),
+        builtUp: str(mode(inRun.map((u) => u.builtUpArea).filter((v): v is number => v != null))),
+        prefix,
+      });
+    }
   }
-  return { ...tower, flatTypes, others, converted: true };
+  return { ...tower, flatTypes, others, skipFloors: noFlats.join(", "), converted: true };
 }
 
 /** Undo "Set up flat types" before saving: back to the read-only summary (nothing is sent for it). */
 export function revertLegacyTower(tower: TowerForm): TowerForm {
-  return { ...tower, flatTypes: [], others: [], prefix: tower.originalPrefix ?? tower.prefix, converted: false };
+  return { ...tower, flatTypes: [], skipFloors: "", others: [], prefix: tower.originalPrefix ?? tower.prefix, converted: false };
+}
+
+/**
+ * A converted older tower: the floors (among those its flats are on today) where Save would still add flats — a
+ * floor with fewer flats than the floors around it, or one taken off "Floors with no flats". Null when none.
+ */
+export function conversionWarning(tower: TowerForm): string | null {
+  if (!tower.legacy || !tower.converted) return null;
+  const flatFloors = tower.existingUnits.filter((u) => u.unitType === "residential").map((u) => u.floor);
+  if (flatFloors.length === 0) return null;
+  const low = Math.min(...flatFloors);
+  const high = Math.max(...flatFloors);
+  const adds = [...flatAddsByFloor(tower)].filter(([floor]) => floor >= low && floor <= high);
+  if (adds.length === 0) return null;
+  const count = adds.reduce((sum, [, n]) => sum + n, 0);
+  const where = floorsText(adds.map(([floor]) => floor));
+  return `Save would add ${countNoun(count, "flat", "flats")} on ${where}, which ${adds.length === 1 ? "has" : "have"} fewer flats today than these flat types cover. The Preview step lists ${count === 1 ? "it" : "them"} — check before saving.`;
 }
 
 /** Rename a tower; its prefix keeps following the name until the user types one. */
@@ -574,6 +622,59 @@ function otherRange(other: OtherUnitForm, top: number): [number, number] | null 
   return [from, to];
 }
 
+/** [5] → "floor 5"; [5, 12] → "floors 5 and 12"; [1, 2, 3, 7] → "floors 1–3 and 7". */
+export function floorsText(floors: number[]): string {
+  const runs: [number, number][] = [];
+  for (const f of [...new Set(floors)].sort((a, b) => a - b)) {
+    const last = runs[runs.length - 1];
+    if (last && f === last[1] + 1) last[1] = f;
+    else runs.push([f, f]);
+  }
+  const parts = runs.map(([a, b]) => (a === b ? String(a) : `${a}–${b}`));
+  if (runs.length === 1 && runs[0][0] === runs[0][1]) return `floor ${parts[0]}`;
+  return `floors ${parts.length > 1 ? `${parts.slice(0, -1).join(", ")} and ${parts[parts.length - 1]}` : parts[0]}`;
+}
+
+export interface SkipFloors {
+  floors: number[]; // the usable ones, sorted, each once
+  error: string | null;
+}
+
+/** "Floors with no flats" as typed — "5, 12" or "5 12": whole floor numbers from 1 to the tower's top floor. */
+export function parseSkipFloors(text: string, top: number | null): SkipFloors {
+  const floors = new Set<number>();
+  let error: string | null = null;
+  const highest = top ?? MAX_FLOORS;
+  for (const token of text.split(/[\s,;]+/).filter(Boolean)) {
+    if (!/^\d+$/.test(token)) {
+      error = error ?? "Use whole floor numbers separated by commas, e.g. 5, 12.";
+      continue;
+    }
+    const floor = Number(token);
+    if (floor < 1 || floor > highest) {
+      error = error ?? `Floor ${floor} isn't in this tower — use floors 1 to ${highest}.`;
+      continue;
+    }
+    floors.add(floor);
+  }
+  return { floors: [...floors].sort((a, b) => a - b), error };
+}
+
+/** A tower's floors with no flats (the usable ones — a mistyped entry is reported by the Towers step's check). */
+export function skipFloorsOf(tower: TowerForm): number[] {
+  const top = toInt(tower.floors);
+  return parseSkipFloors(tower.skipFloors, top != null && top >= 1 && top <= MAX_FLOORS ? top : null).floors;
+}
+
+/** The floors a flat type has flats on: its range, less the tower's floors with no flats ([] when unusable). */
+export function flatTypeFloors(type: FlatTypeForm, top: number, skip: ReadonlySet<number>): number[] {
+  const range = flatTypeRange(type, top);
+  const floors: number[] = [];
+  if (!range) return floors;
+  for (let f = range[0]; f <= range[1]; f += 1) if (!skip.has(f)) floors.push(f);
+  return floors;
+}
+
 export interface FlatsSummary {
   floors: number; // floors that have flats
   perFloorMin: number;
@@ -581,18 +682,24 @@ export interface FlatsSummary {
   flats: number;
   shops: number;
   godowns: number;
+  skipped: number[]; // floors with no flats that a type's range would otherwise cover
 }
 
 /** Flats per floor and in the tower, from the types' floor ranges (each type = one flat per floor). */
 export function flatsSummary(tower: TowerForm): FlatsSummary {
   const top = toInt(tower.floors);
-  const empty: FlatsSummary = { floors: 0, perFloorMin: 0, perFloorMax: 0, flats: 0, shops: 0, godowns: 0 };
+  const empty: FlatsSummary = { floors: 0, perFloorMin: 0, perFloorMax: 0, flats: 0, shops: 0, godowns: 0, skipped: [] };
   if (top == null || top < 1 || top > MAX_FLOORS) return empty;
+  const skip = new Set(skipFloorsOf(tower));
+  const skipped = new Set<number>();
   const perFloor = new Map<number, number>();
   for (const type of tower.flatTypes) {
     const range = flatTypeRange(type, top);
     if (!range) continue;
-    for (let f = range[0]; f <= range[1]; f += 1) perFloor.set(f, (perFloor.get(f) ?? 0) + 1);
+    for (let f = range[0]; f <= range[1]; f += 1) {
+      if (skip.has(f)) skipped.add(f);
+      else perFloor.set(f, (perFloor.get(f) ?? 0) + 1);
+    }
   }
   const counts = [...perFloor.values()];
   const summary: FlatsSummary = {
@@ -602,6 +709,7 @@ export function flatsSummary(tower: TowerForm): FlatsSummary {
     flats: counts.reduce((sum, n) => sum + n, 0),
     shops: 0,
     godowns: 0,
+    skipped: [...skipped].sort((a, b) => a - b),
   };
   for (const other of tower.others) {
     const range = otherRange(other, top);
@@ -614,7 +722,15 @@ export function flatsSummary(tower: TowerForm): FlatsSummary {
   return summary;
 }
 
-/** "Flats per floor: 4 (one of each type) · Flats in tower: 40 (10 floors × 4)" (a range when floors differ). */
+/** "floor 5 has none" / "floors 5 and 12 have none". */
+function noFlatsText(floors: number[]): string {
+  return `${floorsText(floors)} ${floors.length === 1 ? "has" : "have"} none`;
+}
+
+/**
+ * "Flats per floor: 4 (one of each type) · Flats in tower: 40 (10 floors × 4)" (a range when floors differ); with
+ * floors that have no flats: "Flats in tower: 36 (10 floors × 4, floor 5 has none)".
+ */
 export function flatsFooterText(tower: TowerForm): string {
   const s = flatsSummary(tower);
   const parts: string[] = [];
@@ -622,11 +738,13 @@ export function flatsFooterText(tower: TowerForm): string {
     parts.push(tower.flatTypes.length ? "Enter the number of floors to see the flat count" : "No flats");
   } else if (s.perFloorMin === s.perFloorMax) {
     const each = tower.flatTypes.length > 1 && s.perFloorMax === tower.flatTypes.length ? " (one of each type)" : "";
+    const floors = s.floors + s.skipped.length;
+    const none = s.skipped.length ? `, ${noFlatsText(s.skipped)}` : "";
     parts.push(`Flats per floor: ${s.perFloorMax}${each}`);
-    parts.push(`Flats in tower: ${s.flats.toLocaleString("en-IN")} (${s.floors} floor${s.floors === 1 ? "" : "s"} × ${s.perFloorMax})`);
+    parts.push(`Flats in tower: ${s.flats.toLocaleString("en-IN")} (${floors} floor${floors === 1 ? "" : "s"} × ${s.perFloorMax}${none})`);
   } else {
     parts.push(`Flats per floor: ${s.perFloorMin}–${s.perFloorMax}`);
-    parts.push(`Flats in tower: ${s.flats.toLocaleString("en-IN")}`);
+    parts.push(`Flats in tower: ${s.flats.toLocaleString("en-IN")}${s.skipped.length ? ` (${noFlatsText(s.skipped)})` : ""}`);
   }
   if (s.shops) parts.push(`Shops: ${s.shops.toLocaleString("en-IN")}`);
   if (s.godowns) parts.push(`Godowns: ${s.godowns.toLocaleString("en-IN")}`);
@@ -652,40 +770,63 @@ export interface EstimatedAdds {
 }
 
 /**
+ * New flats Save would add on each floor of a tower (floors with none left out). Mirrors the server's matching on
+ * the units the page can see (it also counts archived ones, which the browser never sees): on each floor a type
+ * matches an existing flat of that type first, then a flat without a type, then a flat of another type the floor
+ * has left over (one re-typed by hand, or of a type no longer listed) — so a full floor never gets another flat.
+ */
+export function flatAddsByFloor(tower: TowerForm): Map<number, number> {
+  const adds = new Map<number, number>();
+  if (!isEditableTower(tower)) return adds;
+  const top = toInt(tower.floors);
+  if (top == null || top < 1) return adds;
+  // floor → flat type ("" = none) → existing flats not matched yet
+  const left = new Map<number, Map<string, number>>();
+  for (const u of tower.existingUnits) {
+    if (u.unitType !== "residential") continue;
+    const onFloor = left.get(u.floor) ?? new Map<string, number>();
+    onFloor.set(u.flatType ?? "", (onFloor.get(u.flatType ?? "") ?? 0) + 1);
+    left.set(u.floor, onFloor);
+  }
+  const skip = new Set(skipFloorsOf(tower));
+  const missing = new Map<number, number>();
+  for (const type of tower.flatTypes) {
+    for (const f of flatTypeFloors(type, top, skip)) {
+      const onFloor = left.get(f);
+      const same = onFloor?.get(type.code) ?? 0;
+      if (same > 0) onFloor!.set(type.code, same - 1);
+      else missing.set(f, (missing.get(f) ?? 0) + 1);
+    }
+  }
+  for (const [floor, need] of missing) {
+    const onFloor = left.get(floor) ?? new Map<string, number>();
+    // Untyped flats first, then the floor's leftover flats of other types.
+    const kinds = ["", ...[...onFloor.keys()].filter((k) => k !== "").sort()];
+    let still = need;
+    for (const kind of kinds) {
+      const reuse = Math.min(onFloor.get(kind) ?? 0, still);
+      onFloor.set(kind, (onFloor.get(kind) ?? 0) - reuse);
+      still -= reuse;
+    }
+    if (still > 0) adds.set(floor, still);
+  }
+  return adds;
+}
+
+/**
  * Roughly what Save adds to a tower (the Preview step asks the server for the exact list — it also counts archived
- * units, which the browser never sees). Mirrors the server: on each floor, a type matches an existing flat of that
- * type first, then any flat without a type; shops / godowns match any of their kind on the floor.
+ * units, which the browser never sees). Flats as `flatAddsByFloor`; shops / godowns match any of their kind on the
+ * floor.
  */
 export function estimateAdds(tower: TowerForm): EstimatedAdds {
   const adds: EstimatedAdds = { flats: 0, shops: 0, godowns: 0 };
   if (!isEditableTower(tower)) return adds;
   const top = toInt(tower.floors);
   if (top == null || top < 1) return adds;
-  const typed = new Map<string, number>();
-  const untyped = new Map<number, number>();
+  for (const n of flatAddsByFloor(tower).values()) adds.flats += n;
   const others = new Map<string, number>();
   for (const u of tower.existingUnits) {
-    if (u.unitType === "residential") {
-      if (u.flatType) typed.set(`${u.floor}|${u.flatType}`, (typed.get(`${u.floor}|${u.flatType}`) ?? 0) + 1);
-      else untyped.set(u.floor, (untyped.get(u.floor) ?? 0) + 1);
-    } else {
-      others.set(`${u.unitType}|${u.floor}`, (others.get(`${u.unitType}|${u.floor}`) ?? 0) + 1);
-    }
-  }
-  const missing = new Map<number, number>();
-  for (const type of tower.flatTypes) {
-    const range = flatTypeRange(type, top);
-    if (!range) continue;
-    for (let f = range[0]; f <= range[1]; f += 1) {
-      const key = `${f}|${type.code}`;
-      if ((typed.get(key) ?? 0) > 0) typed.set(key, typed.get(key)! - 1);
-      else missing.set(f, (missing.get(f) ?? 0) + 1);
-    }
-  }
-  for (const [floor, need] of missing) {
-    const reuse = Math.min(untyped.get(floor) ?? 0, need);
-    untyped.set(floor, (untyped.get(floor) ?? 0) - reuse);
-    adds.flats += need - reuse;
+    if (u.unitType !== "residential") others.set(`${u.unitType}|${u.floor}`, (others.get(`${u.unitType}|${u.floor}`) ?? 0) + 1);
   }
   for (const other of tower.others) {
     const range = otherRange(other, top);
@@ -721,6 +862,7 @@ export function existingTopFloor(tower: TowerForm): number {
 
 export function layoutOf(tower: TowerForm): TowerLayout {
   const top = toInt(tower.floors) ?? 1;
+  const skip = tower.flatTypes.length ? skipFloorsOf(tower) : [];
   return {
     unit_prefix: tower.prefix.trim(),
     flat_types: byPosition(tower.flatTypes).map((t) => ({
@@ -744,6 +886,8 @@ export function layoutOf(tower: TowerForm): TowerLayout {
       built_up_area: positive(o.builtUp),
       unit_prefix: o.prefix.trim() || null,
     })),
+    // Sent only when there are some, so a tower without them is sent exactly as before.
+    ...(skip.length ? { skip_floors: skip } : {}),
   };
 }
 
@@ -896,9 +1040,12 @@ export function priceCheckRows(towers: TowerForm[], form: PricingForm): PriceChe
   for (const tower of towers.filter(isEditableTower)) {
     const top = toInt(tower.floors);
     if (top == null || top < 1) continue;
+    const skip = new Set(skipFloorsOf(tower));
     for (const type of byPosition(tower.flatTypes)) {
-      const range = flatTypeRange(type, top);
-      if (!range) continue;
+      // Its lowest and top floor that actually have flats (a refuge top floor isn't priced).
+      const floors = flatTypeFloors(type, top, skip);
+      if (floors.length === 0) continue;
+      const range: [number, number] = [floors[0], floors[floors.length - 1]];
       row(`${tower.key}:${type.code}`, tower.name.trim(), `Type ${type.code}`, type.configuration.trim(), type, p.rateFlats, range, type.plc, "base rate for flats");
     }
     for (const other of tower.others) {
@@ -911,7 +1058,8 @@ export function priceCheckRows(towers: TowerForm[], form: PricingForm): PriceChe
         godown ? "Godowns" : "Shops",
         "",
         { superBuiltUp: other.area, builtUp: other.builtUp, carpet: other.carpet },
-        godown ? p.rateGodowns ?? p.rateShops : p.rateShops,
+        // A godown rate of 0 is a cleared field: godowns use the shop rate, as on the server.
+        godown ? (p.rateGodowns ? p.rateGodowns : p.rateShops) : p.rateShops,
         range,
         false,
         godown ? "godown or shop rate" : "base rate for shops"
@@ -1204,7 +1352,7 @@ export function isStepOk(check: StepCheck): boolean {
 }
 
 export const fieldKey = {
-  tower: (t: string, field: "name" | "floors" | "prefix" | "units") => `t:${t}:${field}`,
+  tower: (t: string, field: "name" | "floors" | "prefix" | "units" | "skipFloors") => `t:${t}:${field}`,
   flatType: (t: string, code: string, field: "super" | "carpet" | "builtUp" | "floors" | "configuration") =>
     `t:${t}:ft:${code}:${field}`,
   other: (t: string, o: string, field: "perFloor" | "floors" | "area" | "carpet" | "builtUp") => `t:${t}:o:${o}:${field}`,
@@ -1280,6 +1428,10 @@ export function validateTowers(towers: TowerForm[], editing: boolean): StepCheck
     if (t.flatTypes.length > MAX_FLAT_TYPES) {
       fields[fieldKey.tower(t.key, "units")] = `A floor can hold at most ${MAX_FLAT_TYPES} flat types.`;
     }
+    const skip = parseSkipFloors(t.skipFloors, topOk ? top : null);
+    // (The field shows only while the tower has flat types — never block on one the user can't see.)
+    if (skip.error && t.flatTypes.length > 0) fields[fieldKey.tower(t.key, "skipFloors")] = skip.error;
+    const skipSet = new Set(skip.floors);
     for (const type of t.flatTypes) {
       if (positive(type.superBuiltUp) == null) fields[fieldKey.flatType(t.key, type.code, "super")] = "Enter the super built-up area.";
       checkOptionalArea(fields, fieldKey.flatType(t.key, type.code, "carpet"), type.carpet);
@@ -1292,6 +1444,10 @@ export function validateTowers(towers: TowerForm[], editing: boolean): StepCheck
         if (from == null || to == null || from < 0 || to < 0) fields[key] = "Enter whole floor numbers.";
         else if (from > to) fields[key] = "The first floor must not be above the last.";
         else if (to > top!) fields[key] = `The tower has ${top} floors.`;
+      }
+      const floorsKey = fieldKey.flatType(t.key, type.code, "floors");
+      if (topOk && !fields[floorsKey] && skipSet.size > 0 && flatTypeFloors(type, top!, skipSet).length === 0) {
+        fields[floorsKey] = "Every floor of this type is listed under floors with no flats.";
       }
     }
     if (t.others.length > MAX_OTHER_ROWS) fields[fieldKey.tower(t.key, "units")] = `Use at most ${MAX_OTHER_ROWS} shop / godown rows.`;

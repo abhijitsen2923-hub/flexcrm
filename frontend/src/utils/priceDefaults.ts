@@ -23,9 +23,10 @@ export interface PriceDefaults {
 }
 
 // Pick the project's per-sqft rate for a unit category (residential/parking → rate A, shop → B, godown → C,
-// falling back to the commercial rate like the server does) and bundle it with the other defaults.
+// falling back to the commercial rate like the server does — when rate C is blank or 0, a cleared field) and bundle
+// it with the other defaults.
 export function priceDefaultsForProject(p: Project, unitType: UnitType): PriceDefaults {
-  const rate = unitType === "shop" ? p.rateB : unitType === "godown" ? p.rateC ?? p.rateB : p.rateA;
+  const rate = unitType === "shop" ? p.rateB : unitType === "godown" ? (p.rateC ? p.rateC : p.rateB) : p.rateA;
   return {
     rate,
     parking: p.parkingCost,

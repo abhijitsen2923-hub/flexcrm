@@ -10,6 +10,7 @@ import {
   addFlatType,
   areaOrderWarning,
   blankOtherUnit,
+  conversionWarning,
   convertLegacyTower,
   estimateAdds,
   existingTopFloor,
@@ -128,6 +129,7 @@ function TowerCard({
   const removed = removedTypesWithUnits(tower);
   const adds = tower.towerId ? estimateAdds(tower) : null;
   const addsTotal = adds ? adds.flats + adds.shops + adds.godowns : 0;
+  const converting = conversionWarning(tower);
   const setType = (code: string, patch: Partial<FlatTypeForm>) =>
     onChange((t) => ({ ...t, flatTypes: t.flatTypes.map((x) => (x.code === code ? { ...x, ...patch } : x)) }));
   const setOther = (key: string, patch: Partial<OtherUnitForm>) =>
@@ -202,6 +204,7 @@ function TowerCard({
         {tower.towerId && tower.originalPrefix != null && tower.prefix.trim() !== tower.originalPrefix.trim() && (
           <Note>A new prefix only applies to units added from now on; existing units keep their numbers.</Note>
         )}
+        {converting && <Note tone="warn">{converting}</Note>}
 
         <div className="pw-subhead">
           <Layers size={15} aria-hidden="true" />
@@ -256,6 +259,19 @@ function TowerCard({
           </Button>
           <span className="muted text-xs">PLC: tick corner / view types — they get the PLC charge from Pricing.</span>
         </div>
+        {tower.flatTypes.length > 0 && (
+          <div className="pw-grid pw-grid--3">
+            <TextField
+              id={`pw-tower-skip-${tower.key}`}
+              label="Floors with no flats"
+              value={tower.skipFloors}
+              placeholder="e.g. 5, 12"
+              onChange={(e) => onChange((t) => ({ ...t, skipFloors: e.target.value }))}
+              error={err(fieldKey.tower(tower.key, "skipFloors"))}
+              hint="Refuge floors and the like — no flat type gets a flat there. Leave blank if every floor has flats."
+            />
+          </div>
+        )}
         {removed.length > 0 && (
           <Note tone="warn">
             {removed.map((r) => `Type ${r.code} (${r.units} flat${r.units === 1 ? "" : "s"})`).join(", ")}{" "}

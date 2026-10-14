@@ -20,6 +20,7 @@ import {
   buildEditPayloads,
   buildPreviewRequest,
   codeForPosition,
+  conversionWarning,
   convertLegacyTower,
   coverFileError,
   dueOnText,
@@ -42,6 +43,7 @@ import {
   nextFreeCode,
   nextTowerName,
   parkingAdds,
+  parseSkipFloors,
   planRowsFromProject,
   planTotal,
   positionOfCode,
@@ -237,7 +239,7 @@ test("a new tower copies the previous tower's types with the next name", () => {
 
 test("flats per floor = number of types; total from the floor ranges", () => {
   const t = typedTower("Tower A", 10, [type("A", "1"), type("B", "1"), type("C", "1"), type("D", "1")]);
-  assert.deepEqual(flatsSummary(t), { floors: 10, perFloorMin: 4, perFloorMax: 4, flats: 40, shops: 0, godowns: 0 });
+  assert.deepEqual(flatsSummary(t), { floors: 10, perFloorMin: 4, perFloorMax: 4, flats: 40, shops: 0, godowns: 0, skipped: [] });
   assert.equal(flatsFooterText(t), "Flats per floor: 4 (one of each type) · Flats in tower: 40 (10 floors × 4)");
 
   // A penthouse type on the top floor only.
@@ -323,6 +325,14 @@ test("shops use the shop rate; godowns their own rate, else the shop rate", () =
   assert.deepEqual(rows.map((r) => [r.label, r.basic]), [["Shops", 3_600_000], ["Godowns", 9_000_000]]);
   const own = priceCheckRows([t], { ...PRICING, rateShops: "9000", rateGodowns: "3000" });
   assert.equal(own[1].basic, 3_000_000);
+  // A godown rate of 0 is a cleared field, not free godowns: the shop rate, as the server prices them.
+  const zero = priceCheckRows([t], { ...PRICING, rateShops: "9000", rateGodowns: "0" });
+  assert.deepEqual([zero[1].basic, zero[1].problem], [9_000_000, null]);
+  const neither = priceCheckRows([t], { ...PRICING, rateShops: "", rateGodowns: "0" });
+  assert.deepEqual([neither[1].basic, neither[1].problem], [null, "Enter the godown or shop rate"]);
+  // …and the Pricing step asks for the shop rate then.
+  const godownsOnly = [{ ...t, others: [t.others[1]] }];
+  assert.equal(validatePricing({ ...PRICING, rateGodowns: "0" }, godownsOnly).fields.rateShops, "Enter a godown rate, or a shop rate for godowns to use.");
 });
 
 // --- parking ----------------------------------------------------------------------------------------------------
@@ -489,6 +499,184 @@ test("a tower with flat types opens from its layout; removed types and lowered f
   assert.deepEqual(removedTypesWithUnits(withoutC), [{ code: "C", units: 3 }]);
   // "Add flat type" must not hand C's existing flats a blank type: it skips C and takes D.
   assert.deepEqual(addFlatType(withoutC)!.flatTypes.map((t) => t.code), ["A", "B", "D"]);
+});
+
+// --- floors with no flats ---------------------------------------------------------------------------------------
+
+test("floors with no flats: left out of every type, counted in the footer, sent in the layout", () => {
+  const abcd = () => [type("A", "1000"), type("B", "1000"), type("C", "1000"), type("D", "1000")];
+  const t = { ...typedTower("Tower A", 10, abcd()), skipFloors: "5" };
+  assert.deepEqual(flatsSummary(t), { floors: 9, perFloorMin: 4, perFloorMax: 4, flats: 36, shops: 0, godowns: 0, skipped: [5] });
+  assert.equal(flatsFooterText(t), "Flats per floor: 4 (one of each type) · Flats in tower: 36 (10 floors × 4, floor 5 has none)");
+  assert.equal(
+    flatsFooterText({ ...typedTower("Tower A", 15, abcd()), skipFloors: "12 5," }),
+    "Flats per floor: 4 (one of each type) · Flats in tower: 52 (15 floors × 4, floors 5 and 12 have none)"
+  );
+  const ph = { ...t, flatTypes: [...t.flatTypes, type("E", "3000", { limitFloors: true, floorFrom: "10", floorTo: "10" })] };
+  assert.equal(flatsFooterText(ph), "Flats per floor: 4–5 · Flats in tower: 37 (floor 5 has none)");
+  // A floor no type reaches isn't "skipped" (nothing to leave out there).
+  const lowTypes = { ...typedTower("Tower A", 10, [type("A", "1", { limitFloors: true, floorFrom: "1", floorTo: "3" })]), skipFloors: "5" };
+  assert.deepEqual(flatsSummary(lowTypes).skipped, []);
+
+  // Save adds 36; the price check's top floor is the highest floor that has the type.
+  assert.deepEqual(estimateAdds(t), { flats: 36, shops: 0, godowns: 0 });
+  assert.equal(priceCheckRows([{ ...t, skipFloors: "10" }], PRICING)[0].topFloor, 9);
+  // Sent in the layout (sorted, each once) — and left out entirely when there are none.
+  // (12 is above the top floor: left out here — the Towers step's check stops the user before anything is sent.)
+  assert.deepEqual(layoutOf({ ...t, skipFloors: "12, 5 5" }).skip_floors, [5]);
+  assert.deepEqual(layoutOf({ ...t, skipFloors: " 9, 5 5" }).skip_floors, [5, 9]);
+  assert.equal("skip_floors" in layoutOf({ ...t, skipFloors: "" }), false);
+  const state = { ...validState(), towers: [{ ...validState().towers[0], skipFloors: "5" }] };
+  assert.deepEqual(buildCreatePayload(state).towers[0].layout!.skip_floors, [5]);
+
+  // A new tower copies them with the floors and types; a saved layout reopens with them; older layouts have none.
+  assert.equal(newTowerForm(t, ["Tower A"]).skipFloors, "5");
+  const saved: Tower = {
+    id: "t9",
+    projectId: "p1",
+    name: "Tower A",
+    totalFloors: 15,
+    layout: { unit_prefix: "A-", flat_types: [], others: [], skip_floors: [5, 12] },
+    units: [],
+  };
+  assert.equal(towerFormFromTower(saved).skipFloors, "5, 12");
+  assert.equal(towerFormFromTower({ ...saved, layout: { unit_prefix: "A-", flat_types: [], others: [] } }).skipFloors, "");
+});
+
+test("floors with no flats are checked: whole numbers within the tower, and every type keeps a floor", () => {
+  assert.deepEqual(parseSkipFloors("5, 12", 15), { floors: [5, 12], error: null });
+  assert.deepEqual(parseSkipFloors(" 12  5,,5;", 15), { floors: [5, 12], error: null });
+  assert.deepEqual(parseSkipFloors("", 15), { floors: [], error: null });
+  assert.equal(parseSkipFloors("5a", 15).error, "Use whole floor numbers separated by commas, e.g. 5, 12.");
+  assert.equal(parseSkipFloors("4.5", 15).error, "Use whole floor numbers separated by commas, e.g. 5, 12.");
+  assert.equal(parseSkipFloors("0", 10).error, "Floor 0 isn't in this tower — use floors 1 to 10.");
+  assert.deepEqual(parseSkipFloors("5, 11", 10), { floors: [5], error: "Floor 11 isn't in this tower — use floors 1 to 10." });
+
+  const t = typedTower("Tower A", 10, [type("A", "1000"), type("E", "3000", { limitFloors: true, floorFrom: "10", floorTo: "10" })]);
+  assert.ok(isStepOk(validateTowers([{ ...t, skipFloors: "5" }], false)));
+  assert.equal(
+    validateTowers([{ ...t, skipFloors: "5, 11" }], false).fields[fieldKey.tower(t.key, "skipFloors")],
+    "Floor 11 isn't in this tower — use floors 1 to 10."
+  );
+  assert.equal(
+    validateTowers([{ ...t, skipFloors: "10" }], false).fields[fieldKey.flatType(t.key, "E", "floors")],
+    "Every floor of this type is listed under floors with no flats."
+  );
+});
+
+// --- older towers converted from what exists ------------------------------------------------------------------
+
+/** An older tower (no flat types) with `counts[floor]` flats on each floor, numbered R101 …. */
+function olderTower(counts: Record<number, number>, totalFloors: number, extra: Unit[] = []): Tower {
+  const units: Unit[] = [];
+  for (const [floor, count] of Object.entries(counts)) {
+    for (let n = 1; n <= count; n += 1) units.push(unit(`R${floor}${String(n).padStart(2, "0")}`, Number(floor)));
+  }
+  return { id: "t1", projectId: "p1", name: "Tower A", totalFloors, layout: null, units: [...units, ...extra] };
+}
+
+function floorsWith(from: number, to: number, count: number, overrides: Record<number, number> = {}): Record<number, number> {
+  const counts: Record<number, number> = {};
+  for (let f = from; f <= to; f += 1) counts[f] = count;
+  for (const [f, n] of Object.entries(overrides)) {
+    if (n === 0) delete counts[Number(f)];
+    else counts[Number(f)] = n;
+  }
+  return counts;
+}
+
+const ranges = (t: TowerForm) => t.flatTypes.map((x) => [x.code, x.limitFloors, x.floorFrom, x.floorTo]);
+
+test("converting an older tower: an unchanged conversion adds nothing for every usual layout", () => {
+  const nothing = { flats: 0, shops: 0, godowns: 0 };
+
+  // A refuge floor: floor 5 has no flats → listed as a floor with no flats; the types still run 1–10.
+  const refuge = convertLegacyTower(towerFormFromTower(olderTower(floorsWith(1, 10, 4, { 5: 0 }), 10)));
+  assert.deepEqual(ranges(refuge), [["A", false, "1", "10"], ["B", false, "1", "10"], ["C", false, "1", "10"], ["D", false, "1", "10"]]);
+  assert.equal(refuge.skipFloors, "5");
+  assert.deepEqual(estimateAdds(refuge), nothing);
+  assert.equal(conversionWarning(refuge), null);
+  assert.equal(flatsFooterText(refuge), "Flats per floor: 4 (one of each type) · Flats in tower: 36 (10 floors × 4, floor 5 has none)");
+  assert.deepEqual(layoutOf(refuge).skip_floors, [5]);
+  assert.ok(isStepOk(validateTowers([refuge], true)));
+  // Taking floor 5 off the list would add its flats — said plainly.
+  assert.equal(
+    conversionWarning({ ...refuge, skipFloors: "" }),
+    "Save would add 4 flats on floor 5, which has fewer flats today than these flat types cover. The Preview step lists them — check before saving."
+  );
+
+  // A shorter top floor (2 flats on floor 10): types C and D stop at floor 9.
+  const shortTop = convertLegacyTower(towerFormFromTower(olderTower(floorsWith(1, 10, 4, { 10: 2 }), 10)));
+  assert.deepEqual(ranges(shortTop), [["A", false, "1", "10"], ["B", false, "1", "10"], ["C", true, "1", "9"], ["D", true, "1", "9"]]);
+  assert.equal(shortTop.skipFloors, "");
+  assert.deepEqual(estimateAdds(shortTop), nothing);
+  assert.equal(conversionWarning(shortTop), null);
+
+  // One fuller floor (5 flats on floor 3) → a fifth type on that floor only.
+  const fuller = convertLegacyTower(towerFormFromTower(olderTower(floorsWith(1, 4, 4, { 3: 5 }), 4)));
+  assert.deepEqual(ranges(fuller).slice(3), [["D", false, "1", "4"], ["E", true, "3", "3"]]);
+  assert.deepEqual(estimateAdds(fuller), nothing);
+
+  // Shops / godowns: one row per run of floors with the same count (3 on the ground floor, 2 on floors 1–2).
+  const shops = [0, 0, 0, 1, 1, 2, 2].map((floor, i) => unit(`S${floor}0${i + 1}`, floor, "shop", { area: floor === 0 ? 400 : 300 }));
+  const godown = unit("G001", 0, "godown", { area: 900 });
+  const mixed = convertLegacyTower(towerFormFromTower(olderTower(floorsWith(3, 10, 4), 10, [...shops, godown])));
+  assert.deepEqual(
+    mixed.others.map((o) => [o.unitType, o.perFloor, o.floorFrom, o.floorTo, o.area, o.prefix]),
+    [
+      ["shop", "3", "0", "0", "400", "S"],
+      ["shop", "2", "1", "2", "300", "S"],
+      ["godown", "1", "0", "0", "900", "G"],
+    ]
+  );
+  assert.deepEqual(ranges(mixed)[0], ["A", true, "3", "10"]);
+  assert.deepEqual(estimateAdds(mixed), nothing);
+  assert.equal(conversionWarning(mixed), null);
+
+  // Undo clears it all.
+  const undone = revertLegacyTower(refuge);
+  assert.deepEqual([undone.converted, undone.flatTypes.length, undone.skipFloors], [false, 0, ""]);
+});
+
+test("converting an older tower whose middle floor has fewer flats warns that Save would add flats there", () => {
+  // Floor 7 has 3 flats, the rest 4: Type D can't skip just floor 7 (a type's floors are one range).
+  const tower = convertLegacyTower(towerFormFromTower(olderTower(floorsWith(1, 10, 4, { 7: 3 }), 10)));
+  assert.deepEqual(ranges(tower)[3], ["D", false, "1", "10"]);
+  assert.deepEqual(estimateAdds(tower), { flats: 1, shops: 0, godowns: 0 });
+  assert.equal(
+    conversionWarning(tower),
+    "Save would add 1 flat on floor 7, which has fewer flats today than these flat types cover. The Preview step lists it — check before saving."
+  );
+  const two = convertLegacyTower(towerFormFromTower(olderTower(floorsWith(1, 10, 4, { 3: 3, 4: 3, 8: 2 }), 10)));
+  assert.match(conversionWarning(two) ?? "", /^Save would add 4 flats on floors 3–4 and 8, which have fewer flats/);
+  // Only for older towers being converted, not for towers that already have flat types.
+  assert.equal(conversionWarning({ ...tower, legacy: false }), null);
+});
+
+test("a flat re-typed by hand doesn't make Save add a flat to its full floor", () => {
+  const typedUnits = (retype: Record<string, string> = {}) => {
+    const units: Unit[] = [];
+    for (let f = 1; f <= 3; f += 1) {
+      for (const [i, code] of ["A", "B", "C", "D"].entries()) {
+        const number = `R${f}0${i + 1}`;
+        units.push(unit(number, f, "residential", { flatType: retype[number] ?? code }));
+      }
+    }
+    return units;
+  };
+  const tower = (units: Unit[]): TowerForm => ({
+    ...typedTower("Tower A", 3, [type("A", "1"), type("B", "1"), type("C", "1"), type("D", "1")]),
+    towerId: "t1",
+    existingUnits: units,
+  });
+  assert.deepEqual(estimateAdds(tower(typedUnits())), { flats: 0, shops: 0, godowns: 0 });
+  for (const retyped of ["B", "E"]) {
+    assert.deepEqual(estimateAdds(tower(typedUnits({ R101: retyped }))), { flats: 0, shops: 0, godowns: 0 }, retyped);
+  }
+  // A real gap still counts, and a 5th type is still added where floors have room for it.
+  assert.deepEqual(estimateAdds(tower(typedUnits().filter((u) => u.unitNumber !== "R204"))).flats, 1);
+  const withE = { ...tower(typedUnits({ R101: "E" })), flatTypes: [...tower([]).flatTypes, type("E", "1")] };
+  assert.deepEqual(estimateAdds(withE).flats, 3); // floor 1 lacks its A; floors 2–3 their E — as the server plans
 });
 
 // --- requests ---------------------------------------------------------------------------------------------------

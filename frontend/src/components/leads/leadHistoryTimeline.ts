@@ -32,6 +32,26 @@ export function actorName(
   return name || fallback;
 }
 
+/** How every automatic move's comment starts (backend real_estate/lead_sync.py payment_comment and the others). */
+export const AUTO_MOVE_COMMENT_PREFIX = "Auto:";
+
+/**
+ * The "by …" line of a stage move. The automatic move after a payment, a registration or a fully ticked possession
+ * checklist (backend real_estate/lead_sync.py) is saved with no user, so it reads "by System" rather than showing
+ * no one. A missing user alone doesn't prove that: the archival job hard-deletes users some time after they're
+ * removed, which also empties their moves' user — so only a move whose comment marks it automatic says System, and
+ * any other move without a name says nothing (as before) rather than claim the system did it.
+ */
+export function transitionActorText(transition: {
+  performed_by_id: string | null;
+  performed_by?: Pick<HistoryActor, "first_name" | "last_name"> | null;
+  comment: string | null;
+}): string {
+  if (transition.performed_by) return `by ${actorName(transition.performed_by, "a team member")}`;
+  if (transition.performed_by_id) return "";
+  return (transition.comment ?? "").trimStart().startsWith(AUTO_MOVE_COMMENT_PREFIX) ? "by System" : "";
+}
+
 function toTime(iso: string): number {
   const t = Date.parse(iso);
   return Number.isNaN(t) ? 0 : t;

@@ -17,6 +17,7 @@ import { priceDefaultsForProject } from "../../utils/priceDefaults";
 import type { Booking, PaymentMode, Unit, UnitStatus } from "../../types/realestate";
 import { extractErrorMessage } from "../../utils/errors";
 import { formatDate, formatInr } from "../../utils/format";
+import { isTokenOnlySchedule } from "../../utils/paymentPlan";
 import { matchesUnitSearch, unitOptionParts } from "../../utils/unitLabel";
 import "./BookingsPage.css";
 
@@ -340,6 +341,11 @@ export default function BookingsPage() {
       render: (b) => {
         const demand = b.paymentSchedules.reduce((n, p) => n + p.demandAmount, 0);
         const paid = b.paymentSchedules.reduce((n, p) => n + p.paidAmount, 0);
+        // Only the token's paid "Booking amount" row so far: the plan is still to be set up — "₹1L / ₹1L" would read
+        // as fully collected. (A cancelled one shows its figures, as its Payments window does.)
+        const noPlanYet =
+          b.paymentSchedules.length === 0 ||
+          (b.status !== "cancelled" && isTokenOnlySchedule(b.paymentPlan, b.paymentSchedules));
         return (
           <Button
             size="sm"
@@ -350,7 +356,7 @@ export default function BookingsPage() {
               setPayBooking(b);
             }}
           >
-            {b.paymentSchedules.length === 0
+            {noPlanYet
               ? (b.paymentPlan?.length ?? 0) > 0
                 ? "View plan" // took the project's plan; nothing raised yet (e.g. every milestone waits for a stage)
                 : "Set up"
