@@ -7,8 +7,10 @@ are never changed or removed. Pure (no DB): the router loads the existing units 
 
 Flat types (the project wizard, t048): a tower is laid out as types A, B, C … with ONE flat of each type per
 floor, and a type's position on the floor is fixed by its letter (A-101 = Type A, A-102 = Type B …).
-`layout_specs` turns such a layout into unit batches priced from the project; the planner matches typed units by
-their type, and falls back to untyped units so a tower set up before flat types is never duplicated.
+`layout_specs` turns such a layout into unit batches priced from the project (leaving out the tower's floors with
+no flats); the planner matches typed units by their type, then untyped units (a tower set up before flat types is
+never duplicated), then flats of another type on the same floor (a flat re-typed by hand never makes Save add a
+flat to a floor that already has its flats).
 """
 import re
 from collections import Counter, defaultdict
@@ -43,6 +45,12 @@ _TYPE_NOUN = {
     UnitType.shop.value: "shops",
     UnitType.godown.value: "godowns",
     UnitType.parking.value: "parking spots",
+}
+_TYPE_NOUN_ONE = {
+    UnitType.residential.value: "flat",
+    UnitType.shop.value: "shop",
+    UnitType.godown.value: "godown",
+    UnitType.parking.value: "parking spot",
 }
 
 
@@ -134,6 +142,19 @@ def number_units(spec: UnitBatchCreate, used: set[str]) -> list[NewUnit]:
 
 
 _ANY = object()  # match a unit whatever its flat type
+_TYPED = object()  # match a unit that has a flat type, whichever it is
+
+
+def _floors_text(floors: list[int]) -> str:
+    """[1, 2, 3, 7] → "floors 1–3, 7"; [5] → "floor 5"."""
+    runs: list[list[int]] = []
+    for f in sorted(set(floors)):
+        if runs and f == runs[-1][1] + 1:
+            runs[-1][1] = f
+        else:
+            runs.append([f, f])
+    text = ", ".join(str(a) if a == b else f"{a}–{b}" for a, b in runs)
+    return f"floor {text}" if len(runs) == 1 and runs[0][0] == runs[0][1] else f"floors {text}"
 
 
 class _Pool:
@@ -149,12 +170,17 @@ class _Pool:
             self._left[u.archived][(u.unit_type, u.floor)][u.flat_type or None] += 1
 
     def take(self, unit_type: str, floor: int, need: int, flat_type=_ANY) -> tuple[int, int]:
-        """Match up to `need` units of `flat_type` (None = untyped ones, _ANY = any) — active ones first, then
-        archived. Returns (matched, of which archived)."""
+        """Match up to `need` units of `flat_type` (None = untyped ones, _ANY = any, _TYPED = any with a flat type)
+        — active ones first, then archived. Returns (matched, of which archived)."""
         matched = from_archived = 0
         for archived in (False, True):
             counts = self._left[archived][(unit_type, floor)]
-            kinds = sorted(counts, key=lambda k: (k is not None, k or "")) if flat_type is _ANY else [flat_type]
+            if flat_type is _ANY:
+                kinds = sorted(counts, key=lambda k: (k is not None, k or ""))
+            elif flat_type is _TYPED:
+                kinds = sorted(k for k in counts if k is not None)
+            else:
+                kinds = [flat_type]
             for kind in kinds:
                 n = min(counts[kind], need - matched)
                 if n <= 0:
@@ -180,9 +206,11 @@ def plan_tower_units(tower_name: str, specs: list[UnitBatchCreate], existing: li
     tower's flat size never makes Save duplicate a floor — and only the shortfall is created. Untyped specs match
     any unit on the floor, so two of the same type on a floor (2BHK + 3BHK) share one count.
 
-    Typed specs (flat type A, B …) match in two passes per floor: first existing units of their own flat type,
-    then, for what is still missing, existing UNTYPED units. A tower set up before flat types (4 untyped flats a
-    floor) reopened with 4 types therefore gets nothing new on those floors.
+    Typed specs (flat type A, B …) match in three passes per floor: first existing units of their own flat type;
+    then, for what is still missing, existing UNTYPED units — a tower set up before flat types (4 untyped flats a
+    floor) reopened with 4 types gets nothing new on those floors; then units of ANOTHER type that pass 1 left
+    over on that floor (two Type B flats after one was re-typed by hand, or a type the layout no longer lists) —
+    a floor that already has as many flats as the layout wants there never gets another one.
     """
     pool = _Pool(existing)
     numberer = _Numberer({u.unit_number for u in existing})
@@ -195,17 +223,25 @@ def plan_tower_units(tower_name: str, specs: list[UnitBatchCreate], existing: li
             target_by_type[spec.unit_type.value] += fu.count
             missing[(i, j)] = fu.count
 
-    def match(i: int, spec: UnitBatchCreate, flat_type) -> None:
+    def match(i: int, spec: UnitBatchCreate, flat_type) -> list[int]:
+        """Match spec i's still-missing units; the floor of each unit matched."""
+        floors: list[int] = []
         for j, fu in enumerate(spec.floors):
             matched, from_archived = pool.take(spec.unit_type.value, fu.floor, missing[(i, j)], flat_type)
             missing[(i, j)] -= matched
             archived_counted[spec.unit_type.value] += from_archived
+            floors.extend([fu.floor] * matched)
+        return floors
 
     typed = [(i, spec) for i, spec in enumerate(specs) if spec.flat_type]
     for i, spec in typed:  # pass 1: units of the same flat type
         match(i, spec, spec.flat_type)
     for i, spec in typed:  # pass 2: untyped units (set up before flat types) fill what's still missing
         match(i, spec, None)
+    # pass 3: units of another flat type still unmatched on the floor fill the rest, before anything is created
+    stand_ins: defaultdict[str, list[int]] = defaultdict(list)  # unit type → the floor of each unit it matched
+    for i, spec in typed:
+        stand_ins[spec.unit_type.value].extend(match(i, spec, _TYPED))
     for i, spec in enumerate(specs):  # untyped specs: any unit left on the floor, as always
         if not spec.flat_type:
             match(i, spec, _ANY)
@@ -220,6 +256,22 @@ def plan_tower_units(tower_name: str, specs: list[UnitBatchCreate], existing: li
         if count:
             plan.notes.append(
                 f"{tower_name}: {count} archived {noun(unit_type, 'units')} count toward the layout and were not re-created."
+            )
+    for unit_type, floors in sorted(stand_ins.items()):
+        if not floors:
+            continue
+        where = _floors_text(floors)
+        if len(floors) == 1:
+            plan.notes.append(
+                f"{tower_name}: 1 existing {_TYPE_NOUN_ONE.get(unit_type, 'unit')} on {where} has a flat type its "
+                "floor already has (or one the layout doesn't list) — it counts for the missing type, so nothing "
+                "was added there. Check its type in the project's unit list."
+            )
+        else:
+            plan.notes.append(
+                f"{tower_name}: {len(floors)} existing {noun(unit_type, 'units')} on {where} have a flat type their "
+                "floor already has (or one the layout doesn't list) — they count for the missing types, so nothing "
+                "was added there. Check their types in the project's unit list."
             )
     for unit_type, extra in sorted(pool.active_left().items()):
         # Only for types this page lays out: a tower's other units (its older parking, say) aren't "extra".
@@ -252,12 +304,14 @@ class LayoutPricing:
     basis: str | None = None              # super_built_up (default) / built_up / carpet
     flat_rate: Decimal | None = None      # rate_a
     shop_rate: Decimal | None = None      # rate_b
-    godown_rate: Decimal | None = None    # rate_c — godowns fall back to the shop rate when it isn't set
+    godown_rate: Decimal | None = None    # rate_c — godowns fall back to the shop rate when it isn't set (or is 0)
 
     def rate_for(self, unit_type: UnitType) -> Decimal | None:
         if unit_type == UnitType.residential:
             return self.flat_rate
-        if unit_type == UnitType.godown and self.godown_rate is not None:
+        # A godown rate of 0 means "not set" (a cleared field), never "godowns are free" — same as the Pricing
+        # step, which only asks for the shop rate when the godown rate is blank or 0.
+        if unit_type == UnitType.godown and self.godown_rate:
             return self.godown_rate
         return self.shop_rate
 
@@ -322,12 +376,13 @@ def _other_label(tower_name: str, other: OtherUnitSpec) -> str:
 def layout_specs(tower_name: str, total_floors: int, layout: TowerLayout, pricing: LayoutPricing) -> LayoutSpecs:
     """The unit batches a tower's layout describes (the server's single source of truth for a wizard tower).
 
-    Each flat type → one flat on every floor of its range (default floor 1 to the top), numbered at the type's
-    position; each shops / godowns row → `per_floor` of them on each floor of its range. Prices are worked out
-    here — basis area × base rate — never taken from the browser. Raises LayoutError for a layout that can't be
-    built (floor range, numbering); a price that can't be worked out is reported in `unpriced` instead, so the
-    preview can still show the units."""
+    Each flat type → one flat on every floor of its range (default floor 1 to the top) except the tower's floors
+    with no flats (`skip_floors`), numbered at the type's position; each shops / godowns row → `per_floor` of them
+    on each floor of its range. Prices are worked out here — basis area × base rate — never taken from the
+    browser. Raises LayoutError for a layout that can't be built (floor range, numbering); a price that can't be
+    worked out is reported in `unpriced` instead, so the preview can still show the units."""
     out = LayoutSpecs()
+    no_flats = set(layout.skip_floors)
 
     def add(spec: UnitBatchCreate, problem: str | None) -> None:
         out.specs.append(spec)
@@ -338,7 +393,16 @@ def layout_specs(tower_name: str, total_floors: int, layout: TowerLayout, pricin
         label = f"{tower_name} · Type {flat.code}"
         if flat_type_position(flat.code) > MAX_FLAT_POSITION:
             raise LayoutError(f"{label}: a floor can number at most {MAX_FLAT_POSITION} flat types (A to CU).")
-        floors = _floors(label, 1 if flat.floor_from is None else flat.floor_from, flat.floor_to, total_floors)
+        floors = [
+            f
+            for f in _floors(label, 1 if flat.floor_from is None else flat.floor_from, flat.floor_to, total_floors)
+            if f not in no_flats
+        ]
+        if not floors:
+            raise LayoutError(
+                f"{label}: every floor it is on is listed as a floor with no flats — remove the type or change its "
+                "floors."
+            )
         price, problem = _price(
             label, UnitType.residential, pricing, flat.super_built_up_area, flat.built_up_area, flat.carpet_area
         )

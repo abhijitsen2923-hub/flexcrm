@@ -18,6 +18,10 @@ from app.database.enums import BookingStatus
 from app.real_estate.models import Booking, Unit
 
 _CENT = Decimal("0.01")
+# sales_orders.deal_value (and its invoice's amount) is NUMERIC(12,2): ₹1000 crore or more can't be stored. Such a
+# figure is a typo in the saved pricing, so the sale is treated as having no price (₹0, as with no booking) rather than
+# failing the Sold move. Migration t050 skips the same orders.
+MAX_SALE_VALUE = Decimal("1e10")
 
 
 def _number(value) -> Decimal | None:
@@ -31,11 +35,26 @@ def _number(value) -> Decimal | None:
 
 
 def booking_sale_value(pricing_snapshot, unit_price) -> Decimal:
-    """The sale value from a booking's pricing snapshot (see the module docstring); 0 when nothing is known."""
+    """The sale value from a booking's pricing snapshot (see the module docstring); 0 when nothing is known, or when
+    the value is too large to store (MAX_SALE_VALUE)."""
+    try:
+        value = _raw_sale_value(pricing_snapshot, unit_price)
+    except ArithmeticError:
+        # A figure too large even to subtract (e.g. "1e1000000" in the saved total) — a typo, like any value over
+        # MAX_SALE_VALUE; it must not fail the Sold move.
+        return Decimal("0")
+    # Compared before rounding too: quantize() itself fails on a number this large.
+    if value is None or value >= MAX_SALE_VALUE:
+        return Decimal("0")
+    value = value.quantize(_CENT)
+    return value if value < MAX_SALE_VALUE else Decimal("0")
+
+
+def _raw_sale_value(pricing_snapshot, unit_price) -> Decimal | None:
     snap = pricing_snapshot if isinstance(pricing_snapshot, dict) else {}
     box = _number(snap.get("boxPrice"))
     if box is not None and box > 0:
-        return box.quantize(_CENT)
+        return box
     total = _number(snap.get("total"))
     if total is not None:
         taxes = sum(
@@ -43,9 +62,9 @@ def booking_sale_value(pricing_snapshot, unit_price) -> Decimal:
             Decimal("0"),
         )
         if total - taxes > 0:
-            return (total - taxes).quantize(_CENT)
+            return total - taxes
     price = _number(unit_price)
-    return price.quantize(_CENT) if price is not None and price > 0 else Decimal("0")
+    return price if price is not None and price > 0 else None
 
 
 async def sale_value_for_lead(session: AsyncSession, lead_id: UUID) -> Decimal:

@@ -11,7 +11,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.api.deps import require_permissions
+from app.api.deps import load_effective_permissions, require_any_permissions, require_permissions
 from app.core import storage
 from app.core.exceptions import NotFoundError
 from app.core.pdf import html_to_pdf
@@ -57,7 +57,19 @@ from app.real_estate.models import (
     Tower,
     Unit,
 )
+from app.real_estate.lead_sync import (
+    AGREEMENT_PAYMENT_STAGE,
+    POSSESSION_STAGE,
+    REGISTRATION_STAGE,
+    actor_name,
+    advance_lead_after,
+    payment_comment,
+    possession_comment,
+    possession_complete,
+    registration_comment,
+)
 from app.real_estate.payment_plan import apply_payment_plan, reprice_plan_rows
+from app.real_estate.token_receipts import sync_token_receipt, token_receipt_for
 from app.services.customer_lifecycle import recompute_ltv
 from app.services.email import EmailService
 from app.services.notifications import NotificationService
@@ -1289,7 +1301,9 @@ async def list_bookings(
     customer_id: UUID | None = Query(default=None),
     lead_id: UUID | None = Query(default=None),
     booking_status: str | None = Query(default=None, alias="status"),
-    _: object = Depends(require_permissions(PermissionCode.LEAD_VIEW)),
+    # Read-only list: the accounts role (FINANCE_VIEW, no LEAD_VIEW) records the payments, so it sees the purchases
+    # it collects on (Customers → Purchases). Every other booking endpoint keeps its own permission.
+    _: object = Depends(require_any_permissions(PermissionCode.LEAD_VIEW, PermissionCode.FINANCE_VIEW)),
     session: AsyncSession = Depends(get_db_session),
 ):
     stmt = (
@@ -1511,14 +1525,21 @@ async def update_booking_pricing(
 async def update_possession_checklist(
     booking_id: UUID,
     payload: PossessionChecklistUpdate,
-    _: object = Depends(require_permissions(PermissionCode.LEAD_MANAGE)),
+    current_user=Depends(require_permissions(PermissionCode.LEAD_MANAGE)),
     session: AsyncSession = Depends(get_db_session),
 ):
     booking = await session.get(Booking, booking_id)
     if not booking or booking.is_deleted:
         raise HTTPException(status_code=404, detail="Booking not found")
     booking.possession_checklist = payload.checklist
+    comment = None
+    if possession_complete(payload.checklist):
+        unit = await session.get(Unit, booking.unit_id)
+        comment = possession_comment(unit.unit_number if unit else None, actor_name(current_user))
     await session.commit()
+    if comment is not None:
+        # Every handover item ticked -> the lead moves to Possession (forward only; never fails this save).
+        await advance_lead_after(session, booking_id, POSSESSION_STAGE, comment, actor=current_user)
     stmt = (
         select(Booking)
         .where(Booking.id == booking_id)
@@ -1531,17 +1552,24 @@ async def update_possession_checklist(
 async def record_booking_token(
     booking_id: UUID,
     payload: BookingTokenUpdate,
-    _: object = Depends(require_permissions(PermissionCode.LEAD_MANAGE)),
+    current_user=Depends(require_permissions(PermissionCode.LEAD_MANAGE)),
     session: AsyncSession = Depends(get_db_session),
 ):
-    """Record (or update) the token / booking amount on a booking (Phase C)."""
-    booking = await session.get(Booking, booking_id)
+    """Record (or update) the token / booking amount on a booking (Phase C). The token is a real payment: its one
+    receipt is created or updated with it and applied to the booking's first instalment (token_receipts.py). Once
+    recorded, changing its amount or date needs FINANCE_RECORD_PAYMENT (403 otherwise); mode / reference don't."""
+    booking = await session.get(Booking, booking_id, with_for_update={"key_share": True}, populate_existing=True)
     if not booking or booking.is_deleted:
         raise HTTPException(status_code=404, detail="Booking not found")
+    if booking.status == BookingStatus.cancelled:
+        # Its money was settled by the cancel / refund — a token added or changed now would no longer match it.
+        raise HTTPException(status_code=409, detail="This booking is cancelled — its token can't be changed.")
     booking.token_amount = payload.token_amount
     booking.token_received_on = payload.token_received_on
     booking.token_mode = payload.token_mode
     booking.token_reference = payload.token_reference
+    can_record_payment = PermissionCode.FINANCE_RECORD_PAYMENT in await load_effective_permissions(session, current_user)
+    await sync_token_receipt(session, booking, can_record_payment=can_record_payment)
     await session.commit()
     stmt = (
         select(Booking)
@@ -1689,8 +1717,9 @@ async def create_payment_plan(
     session: AsyncSession = Depends(get_db_session),
 ):
     """Create/replace a booking's installment plan. Amounts come from an explicit
-    value or a percentage of the total consideration. Blocked once any money has
-    been collected (so a plan is never rewritten out from under recorded payments)."""
+    value or a percentage of the total consideration. Blocked once any money other
+    than the token has been collected (so a plan is never rewritten out from under
+    recorded payments); the token's receipt moves to the new plan's first row."""
     stmt = (
         select(Booking)
         .where(Booking.id == booking_id)
@@ -1706,13 +1735,35 @@ async def create_payment_plan(
         await session.scalars(
             select(PaymentSchedule)
             .where(PaymentSchedule.booking_id == booking_id)
+            .order_by(PaymentSchedule.id)
             .with_for_update()
             .execution_options(populate_existing=True)
         )
     ).all()
-    if any((ps.paid_amount or Decimal("0")) > 0 for ps in schedules):
-        raise HTTPException(status_code=409, detail="Payments already recorded; cannot replace the plan.")
+    # The token's receipt is the only money allowed on the rows being replaced: it moves to the new plan below.
+    token = await token_receipt_for(session, booking_id)
+    token_row = token.schedule_id if token is not None else None
+    for ps in schedules:
+        paid = ps.paid_amount or Decimal("0")
+        if ps.id == token_row:
+            paid -= token.amount
+        if paid > 0:
+            raise HTTPException(status_code=409, detail="Payments already recorded; cannot replace the plan.")
+    # A live invoice on a row being replaced would be detached (its schedule_id is set NULL) and the instalment could
+    # be billed again on the new plan. (The rows are locked, so an invoice can't be raised on them meanwhile.)
+    if schedules and await session.scalar(
+        select(BookingInvoice.id)
+        .where(
+            BookingInvoice.schedule_id.in_([ps.id for ps in schedules]),
+            BookingInvoice.is_deleted.is_(False),
+        )
+        .limit(1)
+    ):
+        raise HTTPException(status_code=409, detail="An invoice is raised on an instalment — cancel it first.")
 
+    if token is not None:
+        token.schedule_id = None  # its row is deleted below
+        await session.flush()
     for ps in schedules:
         await session.delete(ps)
     # A manual plan replaces the project's payment plan entirely — no milestone stays pending to be raised later.
@@ -1720,6 +1771,7 @@ async def create_payment_plan(
 
     total = _booking_total(booking)
     today = date.today()
+    new_rows: list[PaymentSchedule] = []
     for inst in payload.installments:
         if inst.amount is not None:
             demand = inst.amount
@@ -1727,17 +1779,25 @@ async def create_payment_plan(
             demand = (total * inst.percentage / Decimal(100)).quantize(Decimal("0.01"))
         else:
             demand = Decimal("0")
-        session.add(
-            PaymentSchedule(
-                booking_id=booking_id,
-                installment_name=inst.installment_name,
-                due_date=inst.due_date,
-                demand_amount=demand,
-                paid_amount=Decimal("0"),
-                outstanding=demand,
-                is_overdue=(demand > 0 and inst.due_date < today),
-            )
+        row = PaymentSchedule(
+            booking_id=booking_id,
+            installment_name=inst.installment_name,
+            due_date=inst.due_date,
+            demand_amount=demand,
+            paid_amount=Decimal("0"),
+            outstanding=demand,
+            is_overdue=(demand > 0 and inst.due_date < today),
         )
+        session.add(row)
+        new_rows.append(row)
+    if token is not None:
+        # The token pays the new plan's first instalment by due date (the first one listed on a tie).
+        first = min(enumerate(new_rows), key=lambda pair: (pair[1].due_date, pair[0]))[1]
+        await session.flush()  # old rows gone, new rows have ids
+        first.paid_amount = token.amount
+        first.outstanding = max(Decimal("0"), first.demand_amount - first.paid_amount)
+        first.is_overdue = first.outstanding > 0 and first.due_date < today
+        token.schedule_id = first.id
     await session.commit()
     return await _booking_read(session, booking_id)
 
@@ -1835,6 +1895,15 @@ async def delete_payment_schedule(
             status_code=409,
             detail="Payments recorded against this demand; cannot delete it.",
         )
+    # An invoice (or a receipt) still pointing at it: deleting would detach the invoice and let the milestone be
+    # raised — and billed — a second time.
+    from app.real_estate.payment_plan import _rows_with_money
+
+    if ps.id in await _rows_with_money(session, [ps.id]):
+        raise HTTPException(
+            status_code=409,
+            detail="An invoice or a receipt is recorded against this demand; cancel the invoice first.",
+        )
     await session.delete(ps)
     await session.commit()
 
@@ -1843,11 +1912,13 @@ async def delete_payment_schedule(
 async def record_payment(
     booking_id: UUID,
     payload: PaymentReceiptCreate,
-    _: object = Depends(require_permissions(PermissionCode.FINANCE_RECORD_PAYMENT)),
+    current_user=Depends(require_permissions(PermissionCode.FINANCE_RECORD_PAYMENT)),
     session: AsyncSession = Depends(get_db_session),
 ):
-    """Post a collection against a booking (optionally a specific installment)."""
-    booking = await session.get(Booking, booking_id)
+    """Post a collection against a booking (optionally a specific installment). The buyer's lead then moves to
+    Agreement / Payment (lead_sync.py — forward only, and a failed move never fails the payment)."""
+    # Booking first, then its row — the same lock order as the token and a manual plan.
+    booking = await session.get(Booking, booking_id, with_for_update={"key_share": True}, populate_existing=True)
     if not booking or booking.is_deleted:
         raise HTTPException(status_code=404, detail="Booking not found")
 
@@ -1875,7 +1946,10 @@ async def record_payment(
         session, await _booking_owner_id(session, booking),
         f"Payment of ₹{payload.amount} recorded.",
     )
+    unit = await session.get(Unit, booking.unit_id)
+    comment = payment_comment(payload.amount, unit.unit_number if unit else None, actor_name(current_user))
     await session.commit()
+    await advance_lead_after(session, booking_id, AGREEMENT_PAYMENT_STAGE, comment, actor=current_user)
     result = await _booking_read(session, booking_id)
     # Email the customer a receipt (best-effort).
     if result.customer and result.customer.email:
@@ -2084,18 +2158,26 @@ async def cancel_booking(
     session: AsyncSession = Depends(get_db_session),
 ):
     """Cancel a booking and free its unit. Blocked once any payment is recorded
-    (the money must be refunded / cleared first)."""
+    (the money must be refunded / cleared first) — except the token: a booking
+    whose only money is its token may still be cancelled here, and the token is
+    kept (forfeited), as it was before the token became a receipt. Giving the
+    token back goes through /refund."""
+    # The booking's money lock (the token and payment writes take it first) before reading its receipts: a token or
+    # a payment being recorded at this moment is either seen here or waits for this to commit (a token is then
+    # refused — the booking is cancelled).
     stmt = (
         select(Booking)
         .where(Booking.id == booking_id)
         .options(selectinload(Booking.payment_receipts))
+        .with_for_update(key_share=True)
+        .execution_options(populate_existing=True)
     )
     booking = (await session.execute(stmt)).scalar_one_or_none()
     if not booking or booking.is_deleted:
         raise HTTPException(status_code=404, detail="Booking not found")
     if booking.status == BookingStatus.cancelled:
         raise HTTPException(status_code=409, detail="Booking is already cancelled.")
-    if booking.payment_receipts:
+    if any(not receipt.is_token for receipt in booking.payment_receipts):
         raise HTTPException(status_code=409, detail="Payments recorded; refund/clear them before cancelling.")
 
     booking.status = BookingStatus.cancelled
@@ -2134,10 +2216,14 @@ async def refund_booking(
     """Refund a paid booking and cancel it. This is the counterpart to /cancel:
     an unpaid booking is cancelled directly, a paid one is cancelled *here* by
     recording the refund (net = collected − deduction) and freeing its unit."""
+    # The booking's money lock before summing its receipts: a token or a payment being recorded at this moment is
+    # either in gross_paid or waits for this to commit (a token is then refused — the booking is cancelled).
     stmt = (
         select(Booking)
         .where(Booking.id == booking_id)
         .options(selectinload(Booking.payment_receipts))
+        .with_for_update(key_share=True)
+        .execution_options(populate_existing=True)
     )
     booking = (await session.execute(stmt)).scalar_one_or_none()
     if not booking or booking.is_deleted:
@@ -2214,11 +2300,12 @@ async def refund_booking(
 async def register_booking(
     booking_id: UUID,
     payload: BookingRegister,
-    _: object = Depends(require_permissions(PermissionCode.LEAD_MANAGE)),
+    current_user=Depends(require_permissions(PermissionCode.LEAD_MANAGE)),
     session: AsyncSession = Depends(get_db_session),
 ):
     """Record the legal registration of a confirmed booking and mark its unit
-    Registered (captures deed no. + sub-registrar office + registration date)."""
+    Registered (captures deed no. + sub-registrar office + registration date).
+    The buyer's lead then moves to Registration (lead_sync.py — forward only)."""
     booking = await session.get(Booking, booking_id)
     if not booking or booking.is_deleted:
         raise HTTPException(status_code=404, detail="Booking not found")
@@ -2240,6 +2327,7 @@ async def register_booking(
         session, await _booking_owner_id(session, booking),
         f"Unit {unit.unit_number} marked Registered.",
     )
+    comment = registration_comment(unit.unit_number, payload.registration_number, actor_name(current_user))
     await session.commit()
     await realtime_manager.broadcast({
         "event": "unit.status_changed",
@@ -2247,4 +2335,5 @@ async def register_booking(
         "status": UnitStatus.registered.value,
         "project_id": str(unit.project_id),
     })
+    await advance_lead_after(session, booking_id, REGISTRATION_STAGE, comment, actor=current_user)
     return await _booking_read(session, booking_id)

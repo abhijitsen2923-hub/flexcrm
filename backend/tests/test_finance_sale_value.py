@@ -73,6 +73,16 @@ def test_sale_value_rule():
     assert booking_sale_value({"boxPrice": True}, 0) == Decimal("0")
 
 
+def test_a_sale_value_too_large_to_store_counts_as_no_price():
+    # sales_orders.deal_value is NUMERIC(12,2): ₹1000 crore or more is a typo in the pricing, never a failed Sold.
+    assert booking_sale_value({"boxPrice": "9999999999.99"}, UNIT_PRICE) == Decimal("9999999999.99")
+    assert booking_sale_value({"boxPrice": 10_000_000_000}, UNIT_PRICE) == Decimal("0")
+    assert booking_sale_value({"boxPrice": "9999999999.996"}, UNIT_PRICE) == Decimal("0")  # rounds up to 1e10
+    assert booking_sale_value({"total": "1e40"}, UNIT_PRICE) == Decimal("0")
+    assert booking_sale_value({"total": "1e1000000"}, UNIT_PRICE) == Decimal("0")  # too large even to subtract
+    assert booking_sale_value(None, 10_000_000_000) == Decimal("0")
+
+
 @pytest.mark.asyncio
 async def test_flat_sale_is_worth_its_booking_price_and_names_the_buyer(client):
     h = await _owner(client)

@@ -98,10 +98,13 @@ class StageTransitionService(ServiceBase):
         actor_role: UserRole,
         allow_backward: bool = True,
         intent_source: str = "stage_change",
+        can_record_payment: bool = False,
     ) -> StageTransition:
         """Move one lead to `payload.to_stage_code`. `allow_backward=False` (bulk moves) rejects, for
         EVERY role, a move to an earlier active stage and any change to a closed (Sold or lost) lead,
-        except the DNP↔Follow-up toggle — so one bulk action can't restart or reverse a batch's lifecycle."""
+        except the DNP↔Follow-up toggle — so one bulk action can't restart or reverse a batch's lifecycle.
+        `can_record_payment`: the actor holds FINANCE_RECORD_PAYMENT — a repeated "Booked / Token" capture
+        may then change the recorded token's amount or date (token_receipts.sync_token_receipt)."""
         lead = await self.lead_repository.get(lead_id, options=self.lead_repository.default_options)
         if lead is None:
             raise NotFoundError("Lead not found.")
@@ -303,7 +306,9 @@ class StageTransitionService(ServiceBase):
             if payload.partner_id is not None:
                 lead.partner_id = payload.partner_id
             lead.incentive_exempt = bool(payload.incentive_exempt)
-            booking, held_unit_event = await self._apply_booked_token(lead, payload.booking)
+            booking, held_unit_event = await self._apply_booked_token(
+                lead, payload.booking, can_record_payment=can_record_payment
+            )
             customer = await self.promotion_service.promote_from_lead(lead, actor_id=actor_id)
             if booking.customer_id is None:
                 booking.customer_id = customer.id
@@ -446,7 +451,7 @@ class StageTransitionService(ServiceBase):
                 seen.append(e)
         return {"updated": updated, "failed": len(errors), "errors": seen[:5]}
 
-    async def _apply_booked_token(self, lead: Lead, capture):
+    async def _apply_booked_token(self, lead: Lead, capture, *, can_record_payment: bool):
         """Record the "Booked / Token" property + token on a Booking for the lead.
 
         Reuses the lead's existing non-cancelled Booking if one exists (e.g. one
@@ -509,6 +514,12 @@ class StageTransitionService(ServiceBase):
         booking.token_received_on = capture.token_received_on
         booking.token_mode = capture.token_mode
         booking.token_reference = capture.token_reference
+        # The token is a real payment: its one receipt is created (or, on a reused booking, updated — never a
+        # second one) and applied to the booking's first instalment. Committed with this transition; changing an
+        # already recorded token's amount or date needs FINANCE_RECORD_PAYMENT (the whole move fails otherwise).
+        from app.real_estate.token_receipts import sync_token_receipt
+
+        await sync_token_receipt(self.session, booking, can_record_payment=can_record_payment)
         # held_unit → the caller broadcasts unit.status_changed after commit so
         # inventory boards / unit pickers drop the now-held unit without a refresh.
         return booking, held_unit

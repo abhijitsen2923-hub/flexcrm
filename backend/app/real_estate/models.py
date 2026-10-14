@@ -345,6 +345,11 @@ class PaymentSchedule(TenantBase, UUIDPrimaryKeyMixin, TimestampMixin):
     # paid or an invoice raised); editing the amount by hand clears it.
     milestone_key: Mapped[str | None] = mapped_column(String(40), nullable=True)
     percent: Mapped[Decimal | None] = mapped_column(Numeric(7, 3), nullable=True)
+    # The "reached" mark (projects.milestones_reached entry id) that raised this demand — undoing a mark that covers
+    # it removes it (when nothing was paid or invoiced against it). NULL for every other demand (raised by hand, a
+    # plan's dated row, or raised by a mark the old code made without an id — t049 stamped the earlier marks'
+    # demands).
+    raised_by_mark: Mapped[str | None] = mapped_column(String(32), nullable=True)
 
     booking: Mapped["Booking"] = relationship("Booking", back_populates="payment_schedules")
 
@@ -354,6 +359,15 @@ class PaymentReceipt(TenantBase, UUIDPrimaryKeyMixin, TimestampMixin):
     __tablename__ = "payment_receipts"
     __table_args__ = (
         Index("ix_payment_receipts_booking", "booking_id"),
+        # The token is ONE receipt per booking (t049): recording or updating the token edits that receipt, so a
+        # double click or two tabs can never count the token twice.
+        Index(
+            "uq_payment_receipts_booking_token",
+            "booking_id",
+            unique=True,
+            postgresql_where=text("is_token"),
+            sqlite_where=text("is_token"),
+        ),
         {"schema": "tenant"},
     )
 
@@ -369,6 +383,9 @@ class PaymentReceipt(TenantBase, UUIDPrimaryKeyMixin, TimestampMixin):
     mode: Mapped[str] = mapped_column(String(20), nullable=False)  # upi/neft/cheque/cash/card/other
     reference: Mapped[str | None] = mapped_column(String(120), nullable=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # The booking's token / booking amount (t049). Written only by token_receipts.sync_token_receipt from the
+    # booking's token_* fields — it mirrors them, so it is never recorded or edited as an ordinary payment.
+    is_token: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=text("false"))
 
     booking: Mapped["Booking"] = relationship("Booking", back_populates="payment_receipts")
 

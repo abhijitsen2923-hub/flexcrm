@@ -322,8 +322,14 @@ async def create_transition(
     session: AsyncSession = Depends(get_db_session),
 ):
     await _enforce_lead_access(session, lead_id, current_user)
+    # A "Booked / Token" move that re-records an existing token may change a recorded payment — only with
+    # FINANCE_RECORD_PAYMENT (checked in the token sync). Looked up only when the move carries a token.
+    can_record_payment = payload.booking is not None and (
+        PermissionCode.FINANCE_RECORD_PAYMENT in await load_effective_permissions(session, current_user)
+    )
     return await StageTransitionService(session).create_transition(
-        lead_id, payload, actor_id=current_user.id, actor_role=current_user.role
+        lead_id, payload, actor_id=current_user.id, actor_role=current_user.role,
+        can_record_payment=can_record_payment,
     )
 
 

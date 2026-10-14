@@ -71,6 +71,9 @@ FloorRiseBasis = Literal["per_sqft", "per_floor"]
 PlanDueOn = Literal["on_booking", "days_after_booking", "on_date", "on_stage", "on_possession", "on_registration"]
 EVENT_DUE_ON: frozenset[str] = frozenset({"on_stage", "on_possession", "on_registration"})
 MAX_PLAN_MILESTONES = 40
+# milestone_key of the "Booking amount" row a token creates on a booking with no instalments (token_receipts.py) —
+# never a plan milestone's key.
+TOKEN_MILESTONE_KEY = "__token__"
 
 
 class PlanMilestone(ORMModel):
@@ -111,8 +114,15 @@ def check_payment_plan(plan: list[PlanMilestone] | None) -> list[PlanMilestone] 
     keys = [m.key for m in plan]
     if len(set(keys)) != len(keys):
         raise ValueError("Two milestones share the same key — reload the page and try again.")
+    if TOKEN_MILESTONE_KEY in keys:
+        # Reserved for the "Booking amount" row a token creates (token_receipts.py).
+        raise ValueError(f"“{TOKEN_MILESTONE_KEY}” is reserved — rename that milestone's key.")
+    # Each % is stored (and billed) to 3 decimals, so the plan must add up to exactly 100 at that precision — 33.33
+    # three times (99.99%) would leave 0.01% of every booking's price never demanded.
+    for m in plan:
+        m.percent = m.percent.quantize(Decimal("0.001"))
     total = sum((m.percent for m in plan), Decimal("0"))
-    if abs(total - Decimal("100")) > Decimal("0.01"):
+    if total != Decimal("100"):
         raise ValueError(f"The payment plan adds up to {total.normalize():f}% — it must add up to 100%.")
     return plan
 
@@ -339,11 +349,21 @@ class TowerLayout(ORMModel):
     unit_prefix: str = Field(default="", max_length=8)
     flat_types: list[FlatTypeSpec] = Field(default_factory=list, max_length=MAX_FLAT_TYPES_PER_TOWER)
     others: list[OtherUnitSpec] = Field(default_factory=list, max_length=20)
+    # Floors with no flats at all (a refuge floor, say): every flat type leaves them out. Shops / godowns rows keep
+    # their own floors. Layouts saved before this field read as [] (every floor of a type's range has its flats).
+    skip_floors: list[Annotated[int, Field(ge=0, le=200)]] = Field(default_factory=list, max_length=200)
 
     @field_validator("unit_prefix", mode="before")
     @classmethod
     def _strip_prefix(cls, value):
         return value.strip() if isinstance(value, str) else value
+
+    @field_validator("skip_floors")
+    @classmethod
+    def _unique_skip_floors(cls, value: list[int]) -> list[int]:
+        if len(set(value)) != len(value):
+            raise ValueError("A floor is listed twice under floors with no flats.")
+        return sorted(value)
 
     @model_validator(mode="after")
     def _unique_codes(self):
@@ -555,6 +575,8 @@ class PaymentReceiptRead(ORMModel):
     mode: str
     reference: str | None = None
     notes: str | None = None
+    # The booking's token (one per booking; mirrors Booking.token_*) — counted once, as this receipt.
+    is_token: bool = False
     created_at: datetime
 
 

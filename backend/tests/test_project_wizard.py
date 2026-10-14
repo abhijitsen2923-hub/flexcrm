@@ -9,17 +9,22 @@ from __future__ import annotations
 
 import csv
 import io
+from dataclasses import replace
 from decimal import Decimal
 from uuid import UUID, uuid4
 
 import pytest
 import pytest_asyncio
 
+from pydantic import ValidationError
+
+from app.database.enums import UnitType
 from app.real_estate.documents import render_booking_document
 from app.real_estate.inventory_layout import (
     ExistingUnit,
     LayoutError,
     LayoutPricing,
+    TowerPlan,
     flat_type_position,
     layout_specs,
     number_units,
@@ -382,6 +387,159 @@ async def test_a_tower_set_up_before_flat_types_is_never_duplicated_and_old_tabs
     assert _tower(result["project"], "Tower B")["layout"] is None
 
 
+def _with_no_flats_on(card: dict, *floors: int) -> dict:
+    card["layout"]["skip_floors"] = list(floors)
+    return card
+
+
+@pytest.mark.asyncio
+async def test_floors_with_no_flats_get_none_and_saving_again_adds_nothing(client, owner_headers):
+    shops = {"unit_type": "shop", "per_floor": 2, "floor_from": 0, "floor_to": 0, "area": 400}
+    card = _with_no_flats_on(_typed("Tower A", 10, FOUR_TYPES, others=[shops]), 5)
+    project = await _create_full(client, owner_headers, [card], rate_a=6000, rate_b=9000)
+    project_id, tower_id = project["id"], _tower(project, "Tower A")["id"]
+    units = _units(project, "Tower A")
+    flats = {n: u for n, u in units.items() if u["unit_type"] == "residential"}
+    assert len(flats) == 36
+    assert {u["floor"] for u in flats.values()} == set(range(1, 11)) - {5}  # a refuge floor: no flats at all
+    assert sorted(n for n, u in units.items() if u["unit_type"] == "shop") == ["A-S001", "A-S002"]
+    assert _tower(project, "Tower A")["layout"]["skip_floors"] == [5]
+
+    # The same layout again — the preview and Save — adds nothing.
+    again = _with_no_flats_on(_typed("Tower A", 10, FOUR_TYPES, others=[shops], tower_id=tower_id), 5)
+    assert (await _preview(client, owner_headers, project_id, [again]))["new_units"] == 0
+    result = await _sync(client, owner_headers, project_id, [again])
+    assert result["created"]["units"] == 0 and result["notes"] == []
+
+    # Taking floor 5 off the list adds just that floor's flats, at their own numbers.
+    opened = _typed("Tower A", 10, FOUR_TYPES, others=[shops], tower_id=tower_id)
+    result = await _sync(client, owner_headers, project_id, [opened])
+    added = {n: u["flat_type"] for n, u in _units(result["project"], "Tower A").items() if n not in units}
+    assert added == {"A-501": "A", "A-502": "B", "A-503": "C", "A-504": "D"}
+    assert _tower(result["project"], "Tower A")["layout"]["skip_floors"] == []
+
+
+@pytest.mark.asyncio
+async def test_a_tower_with_a_refuge_floor_set_up_before_flat_types_converts_without_new_flats(client, owner_headers):
+    # 4 flats a floor on floors 1–10, none on floor 5 (refuge), made before flat types.
+    spec = {
+        "unit_type": "residential",
+        "floors": [{"floor": f, "count": 4} for f in range(1, 11) if f != 5],
+        "area": 1200,
+        "base_price": 6_000_000,
+    }
+    project = await _create_full(client, owner_headers, [{"name": "Tower B", "total_floors": 10, "unit_specs": [spec]}],
+                                 rate_a=6000)
+    project_id, tower_id = project["id"], _tower(project, "Tower B")["id"]
+    before = _units(project, "Tower B")
+    assert len(before) == 36
+
+    # "Set up flat types": 4 types over floors 1–10 with floor 5 listed as having no flats → nothing new.
+    converted = _with_no_flats_on(_typed("Tower B", 10, FOUR_TYPES, prefix="R", tower_id=tower_id), 5)
+    preview = await _preview(client, owner_headers, project_id, [converted])
+    assert (preview["new_units"], preview["notes"]) == (0, [])
+    result = await _sync(client, owner_headers, project_id, [converted])
+    assert result["created"]["units"] == 0
+    assert _units(result["project"], "Tower B").keys() == before.keys()
+
+    # Without it, the preview shows the 4 flats Save would add on the refuge floor.
+    plain = _typed("Tower B", 10, FOUR_TYPES, prefix="R", tower_id=tower_id)
+    assert sorted(_planned(await _preview(client, owner_headers, project_id, [plain]), "Tower B")) == [
+        "R501", "R502", "R503", "R504"
+    ]
+
+    # Floors with no flats are checked like the rest of the layout.
+    for floors, message in (([5, 5], "listed twice"), ([201], "less than or equal to 200")):
+        bad = _with_no_flats_on(_typed("Tower B", 10, FOUR_TYPES, prefix="R", tower_id=tower_id), *floors)
+        body = await _preview(client, owner_headers, project_id, [bad], expect=422)
+        assert message in str(body["error"]["detail"]), body
+    only_floor_5 = _with_no_flats_on(
+        _typed("Tower B", 10, [*FOUR_TYPES, _flat("E", 900, floor_from=5, floor_to=5)], prefix="R", tower_id=tower_id),
+        5,
+    )
+    body = await _sync(client, owner_headers, project_id, [only_floor_5], expect=422)
+    assert "Tower B · Type E: every floor it is on is listed as a floor with no flats" in body["error"]["detail"]
+    assert len(_units(await _project(client, owner_headers, project_id), "Tower B")) == 36
+
+
+@pytest.mark.asyncio
+async def test_an_older_tower_with_shops_and_two_refuge_floors_converts_then_grows_by_exactly_one_floor(
+    client, owner_headers
+):
+    # Made before flat types: 3 shops on the ground floor, 4 flats a floor on 1–12 except refuge floors 5 and 9.
+    flats = {
+        "unit_type": "residential",
+        "floors": [{"floor": f, "count": 4} for f in range(1, 13) if f not in (5, 9)],
+        "area": 1200,
+        "base_price": 6_000_000,
+    }
+    shops = {"unit_type": "shop", "floors": [{"floor": 0, "count": 3}], "area": 400, "base_price": 3_000_000}
+    project = await _create_full(
+        client, owner_headers, [{"name": "Tower C", "total_floors": 12, "unit_specs": [flats, shops]}],
+        rate_a=6000, rate_b=9000,
+    )
+    project_id, tower_id = project["id"], _tower(project, "Tower C")["id"]
+    before = _units(project, "Tower C")
+    assert len(before) == 43 and sorted(n for n in before if n.startswith("S")) == ["S001", "S002", "S003"]
+
+    # What the wizard's "Set up flat types" builds from it: 4 types on every floor, floors 5 and 9 with no flats,
+    # one shops row for the ground floor — Save adds nothing, and the preview says so.
+    def converted(floors: int) -> dict:
+        ground_shops = {"unit_type": "shop", "per_floor": 3, "floor_from": 0, "floor_to": 0, "area": 400,
+                        "unit_prefix": "S"}
+        card = _typed("Tower C", floors, FOUR_TYPES, prefix="R", others=[ground_shops], tower_id=tower_id)
+        return _with_no_flats_on(card, 5, 9)
+
+    preview = await _preview(client, owner_headers, project_id, [converted(12)])
+    assert (preview["new_units"], preview["notes"]) == (0, [])
+    result = await _sync(client, owner_headers, project_id, [converted(12)])
+    assert (result["created"]["units"], result["notes"]) == (0, [])
+    assert _units(result["project"], "Tower C").keys() == before.keys()
+
+    # One floor added: exactly that floor's 4 flats, at their own numbers — the preview listed the same ones.
+    preview = await _preview(client, owner_headers, project_id, [converted(13)])
+    result = await _sync(client, owner_headers, project_id, [converted(13)])
+    added = {n: u["flat_type"] for n, u in _units(result["project"], "Tower C").items() if n not in before}
+    assert added == {"R1301": "A", "R1302": "B", "R1303": "C", "R1304": "D"}
+    assert sorted(_planned(preview, "Tower C")) == sorted(added)
+    assert (await _sync(client, owner_headers, project_id, [converted(13)]))["created"]["units"] == 0
+
+    # An old tab (no flat types) is still stopped for it.
+    body = await _sync(client, owner_headers, project_id, [_legacy("Tower C", 14, 4, tower_id=tower_id)], expect=409)
+    assert body["error"]["detail"] == "This tower was set up with flat types — reload the page to edit it."
+    assert len(_units(await _project(client, owner_headers, project_id), "Tower C")) == 47
+
+
+@pytest.mark.asyncio
+async def test_a_flat_retyped_from_the_unit_list_never_makes_save_add_a_flat(client, owner_headers):
+    project = await _create_full(client, owner_headers, [_typed("Tower A", 3, FOUR_TYPES, prefix="R")], rate_a=6000)
+    project_id, tower_id = project["id"], _tower(project, "Tower A")["id"]
+    before = _units(project, "Tower A")
+    assert len(before) == 12
+    card = _typed("Tower A", 3, FOUR_TYPES, prefix="R", tower_id=tower_id)
+
+    # R101 is Type A. Re-typed to B (now two B's, no A on floor 1), then to E (a type the layout doesn't list):
+    # floor 1 still has its 4 flats, so the preview and Save add nothing — and say why.
+    for new_type in ("B", "E"):
+        response = await client.patch(
+            f"{API}/units/{before['R101']['id']}", headers=owner_headers, json={"flat_type": new_type}
+        )
+        assert response.status_code == 200, response.text
+        preview = await _preview(client, owner_headers, project_id, [card])
+        result = await _sync(client, owner_headers, project_id, [card])
+        assert preview["new_units"] == result["created"]["units"] == 0, new_type
+        assert _units(result["project"], "Tower A").keys() == before.keys()
+        assert preview["notes"] == result["notes"]
+        assert len(result["notes"]) == 1 and "1 existing flat on floor 1 has a flat type" in result["notes"][0]
+
+    # Adding Type E to the layout: R101 is now its Type E flat on floor 1, so floor 1 only lacks its Type A
+    # (R101's number is taken → the lowest free one), and floors 2–3 get their Type E flats.
+    grown = _typed("Tower A", 3, [*FOUR_TYPES, _flat("E", 900)], prefix="R", tower_id=tower_id)
+    result = await _sync(client, owner_headers, project_id, [grown])
+    added = {n: u["flat_type"] for n, u in _units(result["project"], "Tower A").items() if n not in before}
+    assert added == {"R105": "A", "R205": "E", "R305": "E"}
+
+
 @pytest.mark.asyncio
 async def test_layouts_that_cannot_be_built_or_priced_are_refused_before_anything_is_written(client, owner_headers):
     cases = [
@@ -607,6 +765,14 @@ def test_layout_prices_each_unit_on_the_project_basis():
         assert (shop.base_price, godown.base_price) == (Decimal(areas[1] * 9000), Decimal(areas[2] * 9000))
     godown_rate = layout_specs("T", 1, layout, LayoutPricing(godown_rate=Decimal(2000), **rates)).specs[2]
     assert godown_rate.base_price == Decimal(500 * 2000)
+    # A godown rate of 0 is a cleared field, not free godowns: they use the shop rate, like a blank one.
+    for unset in (None, Decimal(0), Decimal("0.00")):
+        pricing = LayoutPricing(godown_rate=unset, **rates)
+        assert pricing.rate_for(UnitType.godown) == Decimal(9000)
+        assert layout_specs("T", 1, layout, pricing).specs[2].base_price == Decimal(500 * 9000)
+    # No shop rate either: the godowns can't be priced (Save refuses; the preview shows them unpriced).
+    no_rate = layout_specs("T", 1, layout, LayoutPricing(flat_rate=Decimal(1), godown_rate=Decimal(0)))
+    assert "Set the godown rate (or the shops / commercial rate)" in no_rate.price_problem(no_rate.specs[2])
     # Flat batches: one per type, one flat a floor, prefix + type + configuration carried; shops "A-S".
     flat, shop, _ = built.specs
     assert [(f.floor, f.count) for f in flat.floors] == [(1, 1), (2, 1)]
@@ -667,12 +833,18 @@ def test_typed_specs_match_their_own_type_then_untyped_units():
     assert plan.new == []
     assert plan.notes == ["T: 1 archived flats count toward the layout and were not re-created."]
 
-    # Flats of a type no longer in the layout are kept (never re-used for another type) and reported.
+    # Flats of a type no longer in the layout are kept and reported…
     existing = [ExistingUnit("R101", "residential", 1, False, "A"), ExistingUnit("R102", "residential", 1, False, "B")]
     plan = plan_tower_units("T", [_typed_spec("A", [1])], existing)
     assert plan.new == []
     assert any("kept 1 existing flats beyond this layout" in note for note in plan.notes)
+    # …and when the layout still wants that many flats on the floor (B swapped for C), the B flat fills C's place:
+    # the floor already has its 2 flats, so Save adds none.
     plan = plan_tower_units("T", [_typed_spec("A", [1]), _typed_spec("C", [1])], existing)
+    assert plan.new == []
+    assert not any("beyond this layout" in note for note in plan.notes)
+    # A floor short of flats still gets the missing one.
+    plan = plan_tower_units("T", [_typed_spec(c, [1]) for c in "ABC"], existing)
     assert [(n.unit_number, n.spec.flat_type) for n in plan.new] == [("R103", "C")]
 
 
@@ -693,6 +865,95 @@ def test_untyped_specs_still_match_any_unit_on_the_floor():
     ]
     spec = UnitBatchCreate(floors=[{"floor": 1, "count": 3}], area=Decimal(100), base_price=Decimal(1))
     assert [n.unit_number for n in plan_tower_units("T", [spec], existing).new] == ["R101"]
+
+
+def _abcd(floors: int = 3) -> list[ExistingUnit]:
+    """A typed tower as Save built it: R101 = Type A … R104 = Type D on every floor."""
+    return [
+        ExistingUnit(f"R{f}{p:02d}", "residential", f, False, "ABCD"[p - 1])
+        for f in range(1, floors + 1)
+        for p in range(1, 5)
+    ]
+
+
+def _retyped(units: list[ExistingUnit], changes: dict[str, str]) -> list[ExistingUnit]:
+    return [replace(u, flat_type=changes[u.unit_number]) if u.unit_number in changes else u for u in units]
+
+
+def test_a_flat_retyped_by_hand_never_makes_save_add_a_flat_to_a_full_floor():
+    specs = [_typed_spec(c, [1, 2, 3]) for c in "ABCD"]
+    assert plan_tower_units("T", specs, _abcd()) == TowerPlan()
+
+    # One flat re-typed: to a type its floor already has (two B's) or to one the layout doesn't list (E).
+    for new_type in ("B", "E"):
+        plan = plan_tower_units("T", specs, _retyped(_abcd(), {"R101": new_type}))
+        assert plan.new == [], new_type
+        assert plan.notes == [
+            "T: 1 existing flat on floor 1 has a flat type its floor already has (or one the layout doesn't list) — "
+            "it counts for the missing type, so nothing was added there. Check its type in the project's unit list."
+        ]
+
+    # Several floors, archived flats too (an archived flat is never re-created, whatever its type).
+    existing = _retyped(_abcd(), {"R101": "D", "R102": "D", "R301": "Z"})
+    existing = [replace(u, archived=True) if u.unit_number == "R301" else u for u in existing]
+    plan = plan_tower_units("T", specs, existing)
+    assert plan.new == []
+    assert plan.notes == [
+        "T: 1 archived flats count toward the layout and were not re-created.",
+        "T: 3 existing flats on floors 1, 3 have a flat type their floor already has (or one the layout doesn't "
+        "list) — they count for the missing types, so nothing was added there. Check their types in the "
+        "project's unit list.",
+    ]
+
+    # A floor that really is short still gets its flat, at its own number…
+    plan = plan_tower_units("T", specs, [u for u in _abcd() if u.unit_number != "R204"])
+    assert [(n.unit_number, n.spec.flat_type) for n in plan.new] == [("R204", "D")]
+    # …and a type the floor has no flat for (beyond what's there) is still added: 5 types, 4 flats a floor.
+    plan = plan_tower_units("T", [*specs, _typed_spec("E", [1, 2, 3])], _retyped(_abcd(), {"R101": "B"}))
+    assert [(n.unit_number, n.spec.flat_type) for n in plan.new] == [("R105", "E"), ("R205", "E"), ("R305", "E")]
+
+
+def _skip_layout(flat_types: list[dict], skip_floors: list[int], others: list[dict] | None = None) -> TowerLayout:
+    return TowerLayout.model_validate(
+        {"unit_prefix": "A-", "flat_types": flat_types, "others": others or [], "skip_floors": skip_floors}
+    )
+
+
+def test_floors_with_no_flats_are_left_out_of_every_flat_type_but_not_shops():
+    pricing = LayoutPricing(flat_rate=Decimal(1), shop_rate=Decimal(1))
+    shops = {"unit_type": "shop", "per_floor": 2, "floor_from": 0, "floor_to": 5, "area": 300}
+    layout = _skip_layout(
+        [_flat("A", 1000), _flat("B", 1000, floor_from=4, floor_to=6), _flat("C", 2000, floor_from=10, floor_to=10)],
+        [12, 5],
+        others=[shops],
+    )
+    assert layout.skip_floors == [5, 12]  # stored in order
+    a, b, c, shop = layout_specs("Tower A", 10, layout, pricing).specs
+    assert [f.floor for f in a.floors] == [1, 2, 3, 4, 6, 7, 8, 9, 10]
+    assert [f.floor for f in b.floors] == [4, 6]
+    assert [f.floor for f in c.floors] == [10]
+    assert [(f.floor, f.count) for f in shop.floors] == [(f, 2) for f in range(0, 6)]  # their own floors
+
+    # Re-saving plans nothing; a converted older tower (untyped flats, none on floor 5) plans nothing either.
+    built = layout_specs("Tower A", 10, _skip_layout([_flat(c, 1000) for c in "ABCD"], [5]), pricing).specs
+    typed_units = [
+        ExistingUnit(f"A-{f}{p:02d}", "residential", f, False, "ABCD"[p - 1]) for f in range(1, 11) if f != 5
+        for p in range(1, 5)
+    ]
+    untyped_units = [
+        ExistingUnit(f"R{f}{p:02d}", "residential", f, False) for f in range(1, 11) if f != 5 for p in range(1, 5)
+    ]
+    assert plan_tower_units("Tower A", built, typed_units) == TowerPlan()
+    assert plan_tower_units("Tower A", built, untyped_units) == TowerPlan()
+
+    # Saved before floors with no flats existed: none (every floor of a type's range has its flats).
+    assert TowerLayout.model_validate({"unit_prefix": "A-", "flat_types": [_flat("A", 1000)]}).skip_floors == []
+    # A type whose every floor has no flats can't be built; bad lists are refused.
+    with pytest.raises(LayoutError, match="Type A: every floor it is on is listed as a floor with no flats"):
+        layout_specs("Tower A", 10, _skip_layout([_flat("A", 1000, floor_from=5, floor_to=5)], [5]), pricing)
+    for bad in ([5, 5], [-1], [201], list(range(201))):
+        with pytest.raises(ValidationError):
+            _skip_layout([_flat("A", 1000)], bad)
 
 
 def test_booking_documents_show_the_flat_type_only_when_the_unit_has_one():

@@ -14,12 +14,12 @@ from uuid import UUID
 
 import pytest
 import pytest_asyncio
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 
 from app.database.session import db_manager
 from app.real_estate import payment_plan as payment_plan_module
-from app.real_estate.models import Booking, PaymentSchedule, Unit
+from app.real_estate.models import Booking, PaymentSchedule, Project, Unit
 from app.real_estate.payment_plan import plan_base, reached_on_for
 
 API = "/api/v1"
@@ -439,8 +439,9 @@ async def test_mark_reached_raises_on_live_bookings_in_scope_only(client, owner_
     ]
     for booking in (confirmed, draft):
         row = _rows(await _booking(client, owner_headers, booking["id"]))["fnd"]
+        # Due on the reached date — but never before the booking existed (these bookings were made today).
         assert (row["due_date"], _amount(row), row["installment_name"]) == (
-            "2026-10-05", Decimal("750000.00"), "Foundation complete",
+            max(date(2026, 10, 5), TODAY).isoformat(), Decimal("750000.00"), "Foundation complete",
         )
     for booking in (cancelled, manual, tower_b, elsewhere):
         assert "fnd" not in _rows(await _booking(client, owner_headers, booking["id"]))
@@ -458,7 +459,9 @@ async def test_mark_reached_raises_on_live_bookings_in_scope_only(client, owner_
     whole = await _mark(client, owner_headers, project["id"], "fnd", "2026-10-07")
     assert (whole["raised"], whole["already_raised"]) == (1, 2)
     assert Decimal(str(whole["amount"])) == Decimal("600000.00")  # 15% of ₹40L
-    assert _rows(await _booking(client, owner_headers, tower_b["id"]))["fnd"]["due_date"] == "2026-10-07"
+    assert _rows(await _booking(client, owner_headers, tower_b["id"]))["fnd"]["due_date"] == max(
+        date(2026, 10, 7), TODAY
+    ).isoformat()
     assert "fnd" not in _rows(await _booking(client, owner_headers, elsewhere["id"]))
 
 
@@ -627,8 +630,8 @@ async def test_a_concurrent_duplicate_is_a_409_not_a_500(client, owner_headers, 
     booking = await _book(client, owner_headers, project["units"]["Tower A"][0])
     real_new_row = payment_plan_module._new_row
 
-    def _collides(booking_id, milestone, due, base, today):
-        row = real_new_row(booking_id, milestone, due, base, today)
+    def _collides(booking_id, milestone, due, base, today, **kwargs):
+        row = real_new_row(booking_id, milestone, due, base, today, **kwargs)
         row.milestone_key = "bk"  # already on the booking
         return row
 
@@ -769,3 +772,189 @@ async def test_apply_payment_plan_twice_never_doubles_a_demand(client, owner_hea
             select(PaymentSchedule).where(PaymentSchedule.booking_id == row.id)
         )).all())
     assert count == 3
+
+
+# --- review follow-ups ----------------------------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_undo_removes_only_what_the_mark_raised(client, owner_headers):
+    """A demand raised by hand on one booking, or one finance edited, survives undoing a project-wide mark."""
+    project = await _project(client, owner_headers)
+    hand_raised = await _book(client, owner_headers, project["units"]["Tower A"][0])
+    edited = await _book(client, owner_headers, project["units"]["Tower A"][1])
+    plain = await _book(client, owner_headers, project["units"]["Tower B"][0])
+    raised = await client.post(f"{API}/bookings/{hand_raised['id']}/payment-plan/reg/raise", headers=owner_headers,
+                               json={"due_date": TODAY.isoformat()})
+    assert raised.status_code == 200, raised.text
+
+    await _mark(client, owner_headers, project["id"], "reg", reached_on=TODAY.isoformat())
+    edited_row = _rows(await _booking(client, owner_headers, edited["id"]))["reg"]
+    r = await client.patch(f"{API}/bookings/{edited['id']}/payment-schedules/{edited_row['id']}", headers=owner_headers,
+                           json={"demand_amount": 123456})
+    assert r.status_code == 200, r.text
+
+    undo = await _undo(client, owner_headers, project["id"], "reg")
+    assert "reg" in _rows(await _booking(client, owner_headers, hand_raised["id"]))  # raised by hand → stays
+    assert "reg" not in _rows(await _booking(client, owner_headers, plain["id"]))     # raised by the mark → gone
+    assert undo["removed"] == 2  # the plain booking's and the edited booking's (it was the mark's row)
+
+
+@pytest.mark.asyncio
+async def test_back_dated_mark_is_never_due_before_the_booking(client, owner_headers):
+    project = await _project(client, owner_headers)
+    booking = await _book(client, owner_headers, project["units"]["Tower A"][0])
+    await _mark(client, owner_headers, project["id"], "fnd", reached_on="2026-01-15")
+    row = _rows(await _booking(client, owner_headers, booking["id"]))["fnd"]
+    assert row["due_date"] == TODAY.isoformat()
+
+
+@pytest.mark.asyncio
+async def test_a_milestone_dropped_from_the_project_plan_stays_markable_for_bookings_that_hold_it(client, owner_headers):
+    project = await _project(client, owner_headers)
+    booking = await _book(client, owner_headers, project["units"]["Tower A"][0])
+    new_plan = [m for m in PLAN if m["key"] != "fnd"]
+    new_plan[0] = {**new_plan[0], "percent": 25}  # still 100%
+    r = await client.patch(f"{API}/inventory/projects/{project['id']}", headers=owner_headers, json={"payment_plan": new_plan})
+    assert r.status_code == 200, r.text
+    result = await _mark(client, owner_headers, project["id"], "fnd", reached_on=TODAY.isoformat())
+    assert result["raised"] == 1
+    assert "fnd" in _rows(await _booking(client, owner_headers, booking["id"]))
+    await _mark(client, owner_headers, project["id"], "nope", expect=404)
+
+
+@pytest.mark.asyncio
+async def test_an_invoiced_demand_cannot_be_deleted(client, owner_headers):
+    project = await _project(client, owner_headers)
+    booking = await _book(client, owner_headers, project["units"]["Tower A"][0])
+    row = _rows(await _booking(client, owner_headers, booking["id"]))["bk"]
+    await _invoice(client, owner_headers, booking["id"], row["id"])
+    r = await client.delete(f"{API}/bookings/{booking['id']}/payment-schedules/{row['id']}", headers=owner_headers)
+    assert r.status_code == 409, r.text
+    assert "bk" in _rows(await _booking(client, owner_headers, booking["id"]))
+
+
+@pytest.mark.asyncio
+async def test_a_plan_must_add_up_to_exactly_100(client, owner_headers):
+    project = await _project(client, owner_headers, plan=None)
+    thirds = [{"key": f"m{i}", "label": f"Part {i}", "percent": 33.33, "due_on": "on_booking"} for i in range(3)]
+    r = await client.patch(f"{API}/inventory/projects/{project['id']}", headers=owner_headers, json={"payment_plan": thirds})
+    assert r.status_code == 422, r.text  # 99.99%
+    thirds[2]["percent"] = 33.34
+    r = await client.patch(f"{API}/inventory/projects/{project['id']}", headers=owner_headers, json={"payment_plan": thirds})
+    assert r.status_code == 200, r.text
+
+
+# --- marks keep their id; undo takes back what any mark raised -------------------------------------------------------
+
+async def _marks(project_id: str) -> list[dict]:
+    """The project's stored marks, ids included (the API leaves the id out)."""
+    async with db_manager.session_factory() as session:
+        project = await session.get(Project, UUID(project_id))
+        return list(project.milestones_reached or [])
+
+
+async def _raised_by(booking_id: str, key: str) -> str | None:
+    async with db_manager.session_factory() as session:
+        return await session.scalar(
+            select(PaymentSchedule.raised_by_mark).where(
+                PaymentSchedule.booking_id == UUID(booking_id), PaymentSchedule.milestone_key == key
+            )
+        )
+
+
+@pytest.mark.asyncio
+async def test_marking_the_same_scope_again_keeps_the_mark_so_undo_still_takes_back_its_demands(client, owner_headers):
+    project = await _project(client, owner_headers)
+    first = await _book(client, owner_headers, project["units"]["Tower A"][0])
+    tower_b = project["towers"]["Tower B"]
+    await _mark(client, owner_headers, project["id"], "fnd", "2026-10-01")
+    await _mark(client, owner_headers, project["id"], "fnd", "2026-10-01", [tower_b])
+    [whole] = [e for e in await _marks(project["id"]) if e["tower_id"] is None]
+    assert whole["id"] and await _raised_by(first["id"], "fnd") == whole["id"]
+    later = await _book(client, owner_headers, project["units"]["Tower A"][1])  # gets the demand straight away
+    assert await _raised_by(later["id"], "fnd") == whole["id"]
+
+    # The whole project again, on a later date: the same mark (same id) — only its date moves.
+    again = await _mark(client, owner_headers, project["id"], "fnd", "2026-10-06")
+    assert (again["raised"], again["already_raised"]) == (0, 2)
+    marks = await _marks(project["id"])
+    assert [e for e in marks if e["tower_id"] is None] == [{**whole, "reached_on": "2026-10-06"}]
+    assert len(marks) == 2  # the Tower B mark is untouched
+
+    undo = await _undo(client, owner_headers, project["id"], "fnd")
+    assert (undo["removed"], undo["kept"]) == (2, 0)
+    for booking in (first, later):
+        assert "fnd" not in _rows(await _booking(client, owner_headers, booking["id"]))
+
+
+@pytest.mark.asyncio
+async def test_overlapping_whole_project_and_tower_marks_can_both_be_undone(client, owner_headers):
+    project = await _project(client, owner_headers)
+    in_a = await _book(client, owner_headers, project["units"]["Tower A"][0])
+    in_b, by_hand = [await _book(client, owner_headers, u) for u in project["units"]["Tower B"]]
+    raised = await client.post(f"{API}/bookings/{by_hand['id']}/payment-plan/fnd/raise", headers=owner_headers,
+                               json={"due_date": TODAY.isoformat()})
+    assert raised.status_code == 200, raised.text
+    tower_b = project["towers"]["Tower B"]
+    await _mark(client, owner_headers, project["id"], "fnd", "2026-10-01")
+    tower = await _mark(client, owner_headers, project["id"], "fnd", "2026-10-02", [tower_b])
+    assert (tower["raised"], tower["already_raised"]) == (0, 2)  # B's demand came from the whole-project mark
+
+    whole = await _undo(client, owner_headers, project["id"], "fnd")
+    assert (whole["removed"], whole["kept"]) == (1, 0)  # Tower B keeps its demands: it has its own mark
+    assert "fnd" not in _rows(await _booking(client, owner_headers, in_a["id"]))
+    assert "fnd" in _rows(await _booking(client, owner_headers, in_b["id"]))
+
+    # Undoing the tower mark takes back B's demand too, though the whole-project mark raised it; the demand raised
+    # by hand stays.
+    tower_undo = await _undo(client, owner_headers, project["id"], "fnd", tower_b)
+    assert (tower_undo["removed"], tower_undo["kept"]) == (1, 0)
+    assert "fnd" not in _rows(await _booking(client, owner_headers, in_b["id"]))
+    assert "fnd" in _rows(await _booking(client, owner_headers, by_hand["id"]))
+    assert await _marks(project["id"]) == []
+
+
+@pytest.mark.asyncio
+async def test_undoing_a_mark_made_before_marks_had_ids_keeps_the_old_rule(client, owner_headers):
+    project = await _project(client, owner_headers)
+    plain, paid = [await _book(client, owner_headers, u) for u in project["units"]["Tower A"][:2]]
+    in_b = await _book(client, owner_headers, project["units"]["Tower B"][0])
+    await _mark(client, owner_headers, project["id"], "fnd", "2026-10-01")
+    await _pay(client, owner_headers, paid["id"], _rows(await _booking(client, owner_headers, paid["id"]))["fnd"]["id"])
+    # As the live code left them: a mark without an id, and demands that name no mark.
+    async with db_manager.session_factory() as session:
+        stored = await session.get(Project, UUID(project["id"]))
+        stored.milestones_reached = [{k: v for k, v in e.items() if k != "id"} for e in stored.milestones_reached]
+        await session.execute(
+            update(PaymentSchedule).where(PaymentSchedule.milestone_key == "fnd").values(raised_by_mark=None)
+        )
+        await session.commit()
+
+    # Marked again: still a mark without an id, and what it raises names none either.
+    await _mark(client, owner_headers, project["id"], "fnd", "2026-10-03")
+    later = await _book(client, owner_headers, project["units"]["Tower A"][2])
+    assert [sorted(e) for e in await _marks(project["id"])] == [["key", "reached_on", "tower_id"]]
+    assert await _raised_by(later["id"], "fnd") is None
+
+    undo = await _undo(client, owner_headers, project["id"], "fnd")
+    assert (undo["removed"], undo["kept"]) == (3, 1)
+    for booking in (plain, in_b, later):
+        assert "fnd" not in _rows(await _booking(client, owner_headers, booking["id"]))
+    assert "fnd" in _rows(await _booking(client, owner_headers, paid["id"]))
+
+
+@pytest.mark.asyncio
+async def test_undo_also_takes_back_an_untouched_demand_on_a_booking_cancelled_since(client, owner_headers):
+    """As before marks had ids: the demand a mark raised on a booking that was cancelled afterwards, with nothing paid
+    or invoiced on it, goes with the undo — else it would stay in Customer Receivables for a milestone not reached."""
+    project = await _project(client, owner_headers)
+    live, cancelled = [await _book(client, owner_headers, u) for u in project["units"]["Tower A"][:2]]
+    await _mark(client, owner_headers, project["id"], "fnd", "2026-10-01")
+    cancel = await client.post(f"{API}/bookings/{cancelled['id']}/cancel", headers=owner_headers, json={})
+    assert cancel.status_code == 200, cancel.text
+    assert "fnd" in _rows(await _booking(client, owner_headers, cancelled["id"]))
+
+    undo = await _undo(client, owner_headers, project["id"], "fnd")
+    assert (undo["removed"], undo["kept"]) == (2, 0)
+    for booking in (live, cancelled):
+        assert "fnd" not in _rows(await _booking(client, owner_headers, booking["id"]))

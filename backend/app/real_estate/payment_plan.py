@@ -11,18 +11,20 @@ the milestone's key and %:
 
 Money rules: one row per (booking, milestone) is enforced by a unique index, so a double click / two tabs can't
 double-bill; rows are locked before they change; a row that has a payment, a receipt or a live invoice is never
-re-priced or removed.
+removed, and never re-priced — except a row whose only money is the booking's token (token_receipts.py): its demand
+still follows the price, its paid amount stays.
 """
 from __future__ import annotations
 
 import copy
+import uuid
 from datetime import date, timedelta
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from typing import NamedTuple
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -147,11 +149,11 @@ def _reached_tower(entry: dict) -> str | None:
     return str(tower) if tower else None
 
 
-def reached_on_for(reached: list | None, key: str, tower_id: UUID | None) -> date | None:
-    """When an event milestone was marked reached for this unit — for the whole project or for its tower (the
-    earliest mark that covers it). None = not reached yet."""
+def reached_mark_for(reached: list | None, key: str, tower_id: UUID | None) -> tuple[date, str | None] | None:
+    """The earliest mark of an event milestone that covers this unit — for the whole project or for its tower —
+    as (reached on, the mark's id). None = not reached yet."""
     tower = str(tower_id) if tower_id else None
-    dates: list[date] = []
+    found: list[tuple[date, str | None]] = []
     for entry in reached or []:
         if not isinstance(entry, dict) or entry.get("key") != key:
             continue
@@ -159,13 +161,26 @@ def reached_on_for(reached: list | None, key: str, tower_id: UUID | None) -> dat
         if scope is not None and scope != tower:
             continue
         try:
-            dates.append(date.fromisoformat(str(entry.get("reached_on"))[:10]))
+            found.append((date.fromisoformat(str(entry.get("reached_on"))[:10]), entry.get("id")))
         except ValueError:
             continue
-    return min(dates) if dates else None
+    return min(found, key=lambda pair: pair[0]) if found else None
 
 
-def _new_row(booking_id: UUID, milestone: Milestone, due: date, base: Decimal, today: date) -> PaymentSchedule:
+def reached_on_for(reached: list | None, key: str, tower_id: UUID | None) -> date | None:
+    """When an event milestone was marked reached for this unit (see reached_mark_for). None = not reached yet."""
+    mark = reached_mark_for(reached, key, tower_id)
+    return mark[0] if mark else None
+
+
+def _booking_date(booking: Booking) -> date:
+    created = booking.__dict__.get("created_at")
+    return created.date() if created is not None else date.today()
+
+
+def _new_row(
+    booking_id: UUID, milestone: Milestone, due: date, base: Decimal, today: date, *, mark_id: str | None = None
+) -> PaymentSchedule:
     demand = demand_for(milestone.percent, base)
     return PaymentSchedule(
         booking_id=booking_id,
@@ -177,6 +192,7 @@ def _new_row(booking_id: UUID, milestone: Milestone, due: date, base: Decimal, t
         is_overdue=(demand > 0 and due < today),
         milestone_key=milestone.key,
         percent=milestone.percent,
+        raised_by_mark=mark_id,
     )
 
 
@@ -216,10 +232,16 @@ async def apply_payment_plan(
                 continue
             due = milestone.due_date
         elif milestone.due_on in EVENT_DUE_ON:
-            reached = reached_on_for(project.milestones_reached, milestone.key, unit.tower_id)
-            if reached is None:
+            mark = reached_mark_for(project.milestones_reached, milestone.key, unit.tower_id)
+            if mark is None:
                 continue  # pending: raised when the builder marks it reached
-            due = max(on, reached)
+            due = max(on, mark[0])
+            # Raised because of that mark: undoing the mark takes it back too.
+            row = _new_row(booking.id, milestone, due, base, today, mark_id=mark[1])
+            session.add(row)
+            rows.append(row)
+            have.add(milestone.key)
+            continue
         else:
             continue
         row = _new_row(booking.id, milestone, due, base, today)
@@ -229,8 +251,10 @@ async def apply_payment_plan(
     return rows
 
 
-async def _rows_with_money(session: AsyncSession, row_ids: list[UUID]) -> set[UUID]:
-    """Rows that have a receipt or a live (not deleted) invoice against them — never re-priced or removed."""
+async def _rows_with_money(session: AsyncSession, row_ids: list[UUID], *, ignore_token: bool = False) -> set[UUID]:
+    """Rows that have a receipt or a live (not deleted) invoice against them — never re-priced or removed.
+    `ignore_token`: the booking's token receipt doesn't count (re-pricing only — the token row still follows the
+    price; the caller checks its paid amount is the token alone)."""
     if not row_ids:
         return set()
     invoiced = await session.scalars(
@@ -238,21 +262,23 @@ async def _rows_with_money(session: AsyncSession, row_ids: list[UUID]) -> set[UU
             BookingInvoice.schedule_id.in_(row_ids), BookingInvoice.is_deleted.is_(False)
         )
     )
-    receipted = await session.scalars(select(PaymentReceipt.schedule_id).where(PaymentReceipt.schedule_id.in_(row_ids)))
+    receipts = select(PaymentReceipt.schedule_id).where(PaymentReceipt.schedule_id.in_(row_ids))
+    if ignore_token:
+        receipts = receipts.where(PaymentReceipt.is_token.is_(False))
+    receipted = await session.scalars(receipts)
     return {i for i in invoiced.all() if i is not None} | {i for i in receipted.all() if i is not None}
 
 
 async def reprice_plan_rows(session: AsyncSession, booking: Booking, unit: Unit | None = None) -> int:
     """After the booking's price is saved: rows that follow the price (percent set) and have no money against
-    them yet (nothing paid, no receipt, no live invoice) are re-worked from the new price. Returns how many."""
+    them yet (nothing paid, no receipt, no live invoice) are re-worked from the new price. A row whose only money
+    is the booking's token receipt follows the price too — its demand changes, its paid amount stays (the token is
+    the buyer's first payment towards that demand, not an agreed amount). The caller holds the booking lock.
+    Returns how many rows changed."""
     rows = (
         await session.scalars(
             select(PaymentSchedule)
-            .where(
-                PaymentSchedule.booking_id == booking.id,
-                PaymentSchedule.percent.is_not(None),
-                PaymentSchedule.paid_amount == 0,
-            )
+            .where(PaymentSchedule.booking_id == booking.id, PaymentSchedule.percent.is_not(None))
             .order_by(PaymentSchedule.id)
             .with_for_update()
             .execution_options(populate_existing=True)
@@ -260,17 +286,27 @@ async def reprice_plan_rows(session: AsyncSession, booking: Booking, unit: Unit 
     ).all()
     if not rows:
         return 0
-    with_money = await _rows_with_money(session, [r.id for r in rows])
+    with_money = await _rows_with_money(session, [r.id for r in rows], ignore_token=True)
+    token = (
+        await session.execute(
+            select(PaymentReceipt.schedule_id, PaymentReceipt.amount).where(
+                PaymentReceipt.booking_id == booking.id, PaymentReceipt.is_token.is_(True)
+            )
+        )
+    ).first()
+    token_paid = {token.schedule_id: token.amount or _ZERO} if token is not None and token.schedule_id else {}
     base = plan_base(booking, unit)
     today = date.today()
     changed = 0
     for row in rows:
-        if row.id in with_money or (row.paid_amount or _ZERO) != 0 or row.percent is None:
+        paid = row.paid_amount or _ZERO
+        # Money other than the token (a payment, a hand-entered paid amount, an invoice) pins the row.
+        if row.id in with_money or paid != token_paid.get(row.id, _ZERO) or row.percent is None:
             continue
         demand = demand_for(Decimal(row.percent), base)
         row.demand_amount = demand
-        row.outstanding = demand
-        row.is_overdue = demand > 0 and row.due_date < today
+        row.outstanding = max(_ZERO, demand - paid)
+        row.is_overdue = row.outstanding > 0 and row.due_date < today
         changed += 1
     return changed
 
@@ -339,6 +375,10 @@ async def mark_milestone_reached(
     project = await _lock_project(session, project_id)
     milestone = next((m for m in parse_plan(project.payment_plan) if m.key == key), None)
     if milestone is None:
+        # The builder may have edited the plan since: bookings keep the plan they took, so a milestone still pending
+        # on them must stay markable.
+        milestone = await _milestone_from_bookings(session, project_id, key)
+    if milestone is None:
         raise HTTPException(status_code=404, detail="That milestone isn't in this project's payment plan.")
     if milestone.due_on not in EVENT_DUE_ON:
         raise HTTPException(
@@ -363,12 +403,28 @@ async def mark_milestone_reached(
 
     # Record the mark (replacing an earlier mark of the same scope). A new list, so the JSON column is saved.
     scopes = [str(t) for t in tower_ids] or [None]
+    same_scope = {
+        _reached_tower(e): e for e in (project.milestones_reached or [])
+        if isinstance(e, dict) and e.get("key") == key and _reached_tower(e) in scopes
+    }
     marks = [
         e for e in (project.milestones_reached or [])
         if not (isinstance(e, dict) and e.get("key") == key and _reached_tower(e) in scopes)
     ]
     reached_on = payload.reached_on
-    marks += [{"key": key, "tower_id": scope, "reached_on": reached_on.isoformat()} for scope in scopes]
+    # Each mark has an id that every demand it raises carries (PaymentSchedule.raised_by_mark), so undoing the mark
+    # can take them back. Marking the same scope again only moves the date: it keeps the earlier mark's id, so the
+    # demands that mark raised stay its own. A mark without an id (made by the old code during the rollout — t049
+    # gave the earlier ones ids) stays without one, as do its demands — undoing it uses the old rule, see
+    # undo_milestone_reached.
+    mark_ids = {
+        scope: same_scope[scope].get("id") if scope in same_scope else uuid.uuid4().hex for scope in scopes
+    }
+    marks += [
+        {"key": key, "tower_id": scope, "reached_on": reached_on.isoformat(),
+         **({"id": mark_ids[scope]} if mark_ids[scope] else {})}
+        for scope in scopes
+    ]
     project.milestones_reached = marks
 
     # Lock the bookings (in a fixed order) before looking for their rows, so a concurrent per-booking raise is
@@ -405,8 +461,11 @@ async def mark_milestone_reached(
         if booking.id in already:
             already_raised += 1
             continue
-        # The booking's own copy of the plan sets the % (the buyer's terms), not today's project plan.
-        row = _new_row(booking.id, booking_milestone, reached_on, plan_base(booking, unit), today)
+        # The booking's own copy of the plan sets the % (the buyer's terms), not today's project plan. A back-dated
+        # mark never makes a demand due before the booking existed (same rule as a booking made after the mark).
+        mark_id = mark_ids.get(str(unit.tower_id)) or mark_ids.get(None)
+        due = max(reached_on, _booking_date(booking))
+        row = _new_row(booking.id, booking_milestone, due, plan_base(booking, unit), today, mark_id=mark_id)
         session.add(row)
         raised += 1
         amount += row.demand_amount
@@ -448,6 +507,18 @@ async def undo_milestone_reached(
         )
     remaining = [e for e in marks if e not in undone]
     project.milestones_reached = remaining or None
+    # Which demands the undo may take back (only those with nothing paid or invoiced, below): the ones a mark raised
+    # (raised_by_mark set). Any mark's, not only this one's — a demand raised by an earlier whole-project mark on a
+    # tower that has its own mark is that tower mark's to take back; the coverage rules below keep whatever a
+    # standing mark still covers. A demand raised by hand on one booking carries no mark and stays. A mark without
+    # an id (made by the old code during the rollout — t049 gave the earlier ones ids and stamped their demands)
+    # raised demands that carry none either, so undoing it keeps the old rule: every plan demand (a % set) of this
+    # milestone that carries no mark.
+    raised_terms = []
+    if any(e.get("id") for e in undone):
+        raised_terms.append(PaymentSchedule.raised_by_mark.is_not(None))
+    if any(not e.get("id") for e in undone):
+        raised_terms.append(and_(PaymentSchedule.raised_by_mark.is_(None), PaymentSchedule.percent.is_not(None)))
 
     # Bookings still covered by another mark of this milestone keep their demand: a whole-project undo skips
     # towers that have their own mark, and a tower undo removes nothing while the whole-project mark stands.
@@ -462,6 +533,8 @@ async def undo_milestone_reached(
                         skip_towers.add(UUID(_reached_tower(e)))
                     except ValueError:
                         continue
+        # Cancelled bookings included (as before): a demand raised there before the cancel, with nothing paid or
+        # invoiced, is taken back too — else it would linger in Customer Receivables for a milestone not reached.
         scope_terms = _booking_scope(project_id, [tower_id] if tower_id else None, skip_towers)
         # Lock the bookings first (same order as a mark), then their rows of this milestone.
         await session.execute(
@@ -476,7 +549,7 @@ async def undo_milestone_reached(
                 select(PaymentSchedule)
                 .join(Booking, PaymentSchedule.booking_id == Booking.id)
                 .join(Unit, Booking.unit_id == Unit.id)
-                .where(*scope_terms, PaymentSchedule.milestone_key == key)
+                .where(*scope_terms, PaymentSchedule.milestone_key == key, or_(*raised_terms))
                 .order_by(PaymentSchedule.id)
                 .with_for_update(of=PaymentSchedule)
                 .execution_options(populate_existing=True)
@@ -491,6 +564,22 @@ async def undo_milestone_reached(
             removed += 1
     await session.commit()
     return MilestoneUndoResult(removed=removed, kept=kept, project=await _project_read(session, project))
+
+
+async def _milestone_from_bookings(session: AsyncSession, project_id: UUID, key: str) -> Milestone | None:
+    """A milestone no longer in the project's plan, as a live booking of the project still holds it."""
+    plans = (
+        await session.scalars(
+            select(Booking.payment_plan)
+            .join(Unit, Booking.unit_id == Unit.id)
+            .where(*_booking_scope(project_id, None), Booking.status != BookingStatus.cancelled, Booking.payment_plan.is_not(None))
+        )
+    ).all()
+    for plan in plans:
+        for milestone in parse_plan(plan):
+            if milestone.key == key:
+                return milestone
+    return None
 
 
 @router.post("/bookings/{booking_id}/payment-plan/{key}/raise", response_model=BookingRead)
