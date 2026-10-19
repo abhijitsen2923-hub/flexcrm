@@ -1855,6 +1855,18 @@ body.has-import-pill .app-content { padding-bottom: 72px; }
 .role-access__list label { min-width: 0; overflow-wrap: anywhere; }
 .role-access p { margin: 0; }
 
+/* Small inline text button (e.g. "Clear" next to the Campaign filter's count). */
+.filter-clear-link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--color-primary);
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
 /* Stage checkbox list inside the Filters panel. */
 .filter-stage-list {
   display: grid;

@@ -7,12 +7,14 @@ import {
   NEW_CAMPAIGN_VALUE,
   buildCampaignFilterOptions,
   buildCampaignFormOptions,
+  campaignFilterQuery,
   campaignKey,
   campaignRejectionMessage,
   campaignSourceLabel,
   cleanCampaignName,
   findCampaignByKey,
   isCampaignListEvent,
+  matchCampaignOptions,
   mergePreviewCount,
   renameConflictId,
   shouldUseLegacyCampaigns
@@ -138,4 +140,34 @@ test("renameConflictId offers a merge target on a name clash", () => {
 test("campaignSourceLabel", () => {
   assert.equal(campaignSourceLabel("sheet"), "Google Sheet");
   assert.equal(campaignSourceLabel("something-new"), "something-new");
+});
+
+test("filter options keep every ticked campaign, even one no longer on visible leads", () => {
+  const opts = buildCampaignFilterOptions([campaign("Monsoon Offer")], ["Monsoon Offer"], ["Monsoon Offer", "Gone Promo", ""]);
+  assert.deepEqual(opts, [
+    { value: "Monsoon Offer", label: "Monsoon Offer" },
+    { value: "Gone Promo", label: "Gone Promo" }
+  ]);
+});
+
+test("ticked campaigns become the list query: one → campaign, several → campaigns, none → nothing", () => {
+  assert.deepEqual(campaignFilterQuery([]), {});
+  assert.deepEqual(campaignFilterQuery(["", "  "]), {});
+  assert.deepEqual(campaignFilterQuery(["Monsoon Offer"]), { campaign: "Monsoon Offer" });
+  // Names may contain commas — kept whole, sent as a repeated parameter; repeats dropped.
+  assert.deepEqual(campaignFilterQuery(["Diwali, Phase 2", "Monsoon Offer", "Diwali, Phase 2"]), {
+    campaigns: ["Diwali, Phase 2", "Monsoon Offer"]
+  });
+});
+
+test("the campaign search box matches any part of the name, ignoring case", () => {
+  const options = [
+    { value: "Monsoon Offer", label: "Monsoon Offer" },
+    { value: "Old Promo", label: "Old Promo (inactive)" },
+    { value: "Diwali Promo", label: "Diwali Promo" }
+  ];
+  assert.deepEqual(matchCampaignOptions(options, "promo").map((o) => o.value), ["Old Promo", "Diwali Promo"]);
+  assert.deepEqual(matchCampaignOptions(options, "  INACTIVE ").map((o) => o.value), ["Old Promo"]);
+  assert.equal(matchCampaignOptions(options, "").length, 3);
+  assert.deepEqual(matchCampaignOptions(options, "zzz"), []);
 });

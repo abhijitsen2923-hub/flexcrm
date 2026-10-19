@@ -42,9 +42,11 @@ import {
   NEW_CAMPAIGN_VALUE,
   buildCampaignFilterOptions,
   buildCampaignFormOptions,
+  campaignFilterQuery,
   campaignRejectionMessage,
   cleanCampaignName,
-  findCampaignByKey
+  findCampaignByKey,
+  matchCampaignOptions
 } from "../utils/campaigns";
 import {
   assignedDayDate,
@@ -109,6 +111,10 @@ interface CreateFormState {
   possession_preference: string;
   partner_id: string;
 }
+
+
+// The Campaign filter gets a search box once the list is this long.
+const CAMPAIGN_SEARCH_FROM = 8;
 
 
 function makeEmptyForm(
@@ -176,7 +182,8 @@ export default function LeadsPage() {
   const [leadDateTo, setLeadDateTo] = useState<string>("");
   const [ownerFilter, setOwnerFilter] = useState<string>("");
   const [sourceFilter, setSourceFilter] = useState<string>("");
-  const [campaignFilter, setCampaignFilter] = useState<string>("");
+  const [campaignFilter, setCampaignFilter] = useState<string[]>([]);   // multi-select: leads of ANY ticked campaign
+  const [campaignSearch, setCampaignSearch] = useState("");
   // Intent: "high,medium" / "none" (not rated) — the quick chips by the search box + the Filters panel.
   const [intentFilter, setIntentFilter] = useState<string>("");
   // "Assigned today / yesterday / on a day" — when the CURRENT owner got the lead. Opens from the dashboard
@@ -276,7 +283,7 @@ export default function LeadsPage() {
       created_from: leadDate.from,
       created_to: leadDate.to,
       source: sourceFilter || undefined,
-      campaign: campaignFilter || undefined,
+      ...campaignFilterQuery(campaignFilter),
       intent: intentFilter || undefined,
       // Assigned on a day: newest assignment first, so the latest hand-offs lead the list.
       ...assignedDayQuery(assignedDay),
@@ -299,6 +306,11 @@ export default function LeadsPage() {
     setPage(1);
   }
 
+  function toggleCampaign(value: string) {
+    setCampaignFilter((prev) => (prev.includes(value) ? prev.filter((c) => c !== value) : [...prev, value]));
+    setPage(1);
+  }
+
   function toggleStage(code: string) {
     setStageFilter((prev) => (prev.includes(code) ? prev.filter((c) => c !== code) : [...prev, code]));
     setPage(1);
@@ -309,7 +321,8 @@ export default function LeadsPage() {
   function clearAllFilters() {
     setStageFilter([]);
     setSourceFilter("");
-    setCampaignFilter("");
+    setCampaignFilter([]);
+    setCampaignSearch("");
     setIntentFilter("");
     setAssignedDay("");
     setOwnerFilter("");
@@ -409,6 +422,11 @@ export default function LeadsPage() {
     () => buildCampaignFilterOptions(campaignLists.campaigns, campaignLists.inUse, campaignFilter),
     [campaignLists.campaigns, campaignLists.inUse, campaignFilter]
   );
+  // The search box narrows the list but never hides a ticked campaign (it can always be unticked in place).
+  const visibleCampaignOptions = useMemo(() => {
+    const matching = new Set(matchCampaignOptions(campaignFilterOptions, campaignSearch).map((o) => o.value));
+    return campaignFilterOptions.filter((o) => matching.has(o.value) || campaignFilter.includes(o.value));
+  }, [campaignFilterOptions, campaignSearch, campaignFilter]);
 
   const stageOptionsForFilter = useMemo(() => {
     const source = industryFilter ? byIndustry[industryFilter] : allStages;
@@ -423,7 +441,7 @@ export default function LeadsPage() {
   const activeFilterCount =
     stageFilter.length +
     (sourceFilter ? 1 : 0) +
-    (campaignFilter ? 1 : 0) +
+    campaignFilter.length +
     (intentFilter ? 1 : 0) +
     (assignedDay ? 1 : 0) +
     (ownerFilter ? 1 : 0) +
@@ -1162,12 +1180,12 @@ export default function LeadsPage() {
                 <X size={12} aria-hidden="true" />
               </button>
             )}
-            {campaignFilter && (
-              <button type="button" className="active-filter" onClick={() => { setCampaignFilter(""); setPage(1); }}>
-                Campaign: {campaignFilter}
+            {campaignFilter.map((value) => (
+              <button key={value} type="button" className="active-filter" onClick={() => toggleCampaign(value)}>
+                Campaign: {campaignFilterOptions.find((o) => o.value === value)?.label ?? value}
                 <X size={12} aria-hidden="true" />
               </button>
-            )}
+            ))}
             {intentFilter && (
               <button type="button" className="active-filter" onClick={() => { setIntentFilter(""); setPage(1); }}>
                 Intent: {intentFilterLabel(intentFilter)}
@@ -1517,20 +1535,45 @@ export default function LeadsPage() {
                 ))}
               </select>
             </label>
-            <label className="mobile-filters__field">
-              <span className="mobile-filters__label">Campaign</span>
-              <select
-                className="select"
-                value={campaignFilter}
-                onChange={(event) => { setCampaignFilter(event.target.value); setPage(1); }}
-                aria-label="Filter by campaign"
-              >
-                <option value="">All campaigns</option>
-                {campaignFilterOptions.map((option) => (
-                  <option key={option.value} value={option.value}>{option.label}</option>
+            <div className="mobile-filters__field">
+              <span className="mobile-filters__label">
+                Campaign
+                {campaignFilter.length > 0 && (
+                  <>
+                    {" "}· {campaignFilter.length} selected{" "}
+                    <button type="button" className="filter-clear-link" onClick={() => { setCampaignFilter([]); setPage(1); }}>
+                      Clear
+                    </button>
+                  </>
+                )}
+              </span>
+              {campaignFilterOptions.length >= CAMPAIGN_SEARCH_FROM && (
+                <input
+                  className="input"
+                  type="search"
+                  value={campaignSearch}
+                  onChange={(event) => setCampaignSearch(event.target.value)}
+                  placeholder="Search campaigns…"
+                  aria-label="Search campaigns"
+                />
+              )}
+              <div className="filter-stage-list" role="group" aria-label="Filter by campaign">
+                {visibleCampaignOptions.map((option) => (
+                  <label key={option.value} className="filter-stage-list__item">
+                    <input
+                      type="checkbox"
+                      checked={campaignFilter.includes(option.value)}
+                      onChange={() => toggleCampaign(option.value)}
+                    />
+                    <span>{option.label}</span>
+                  </label>
                 ))}
-              </select>
-            </label>
+                {campaignFilterOptions.length === 0 && <span className="muted text-sm">No campaigns on your leads yet.</span>}
+                {campaignFilterOptions.length > 0 && visibleCampaignOptions.length === 0 && (
+                  <span className="muted text-sm">No campaign matches “{campaignSearch.trim()}”.</span>
+                )}
+              </div>
+            </div>
             {canAssign && (
               <label className="mobile-filters__field">
                 <span className="mobile-filters__label">Owner</span>

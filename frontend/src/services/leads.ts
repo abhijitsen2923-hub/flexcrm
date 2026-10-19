@@ -24,6 +24,8 @@ export interface LeadListQuery extends PaginationQuery, SearchSortQuery {
   stage_code?: string;        // single code, or comma-joined for a multi-stage filter
   source?: string;
   campaign?: string;
+  // Several campaigns (any of them) — sent as a repeated parameter, see utils/campaigns campaignFilterQuery.
+  campaigns?: string[];
   // Intent, comma-joined for several: "high,medium" — "none" = not rated.
   intent?: string;
   assigned_to_id?: string;

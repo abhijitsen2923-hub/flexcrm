@@ -64,12 +64,13 @@ export function buildCampaignFormOptions(
 /**
  * Leads-list Campaign filter: the campaigns actually on the leads this user can see (`inUse` — the backend
  * scopes it to a rep's own leads, so a rep doesn't discover campaigns used only on others' leads), one
- * entry per campaign, labelled from the workspace list (inactive marked), plus always the current selection.
+ * entry per campaign, labelled from the workspace list (inactive marked), plus always the current selection
+ * (one campaign, or the several ticked in the multi-select).
  */
 export function buildCampaignFilterOptions(
   campaigns: ReadonlyArray<CampaignOption>,
   inUse: ReadonlyArray<string>,
-  selected: string
+  selected: string | ReadonlyArray<string>
 ): SelectOption[] {
   const byKey = new Map<string, SelectOption>();
   for (const value of inUse) {
@@ -80,8 +81,28 @@ export function buildCampaignFilterOptions(
     byKey.set(key, { value: known ? known.name : value, label: known && !known.is_active ? `${name} (inactive)` : name });
   }
   const options = [...byKey.values()].sort((a, b) => byName(a.label, b.label));
-  if (selected && !options.some((o) => o.value === selected)) options.push({ value: selected, label: selected });
+  for (const value of typeof selected === "string" ? [selected] : selected) {
+    if (value && !options.some((o) => o.value === value)) options.push({ value, label: value });
+  }
   return options;
+}
+
+/**
+ * The Leads-list query for the campaigns ticked in the filter: one campaign → `campaign` (works with every backend
+ * version), several → `campaigns` (repeated `?campaigns=A&campaigns=B`; names may contain commas, so they aren't
+ * comma-joined like stages), none → nothing.
+ */
+export function campaignFilterQuery(selected: ReadonlyArray<string>): { campaign?: string; campaigns?: string[] } {
+  const picked = [...new Set(selected.filter((v) => v && v.trim()))];
+  if (picked.length === 0) return {};
+  if (picked.length === 1) return { campaign: picked[0] };
+  return { campaigns: picked };
+}
+
+/** Options whose label contains the typed text (case-insensitive) — the filter box over a long campaign list. */
+export function matchCampaignOptions(options: ReadonlyArray<SelectOption>, typed: string): SelectOption[] {
+  const term = typed.trim().toLowerCase();
+  return term ? options.filter((o) => o.label.toLowerCase().includes(term)) : [...options];
 }
 
 /**
