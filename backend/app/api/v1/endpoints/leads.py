@@ -37,7 +37,7 @@ from app.services.lead_documents import LeadDocumentService, get_lead_or_404
 from app.services.lead_import import LeadImportService
 from app.services.lead_intents import LeadIntentService
 from app.services.lead_scope import request_scope
-from app.services.leads import LeadService
+from app.services.leads import MAX_CAMPAIGN_FILTERS, LeadService
 from app.services.stage_transitions import StageTransitionService
 
 
@@ -80,6 +80,9 @@ async def list_lead_brokerage(
 @router.get("", response_model=PaginatedResponse[LeadRead])
 async def list_leads(
     filters: LeadFilterParams = Depends(),
+    # Several campaigns at once: repeat the parameter (?campaigns=A&campaigns=B) — names may contain commas, so
+    # they aren't comma-joined like stage codes. `campaign` (one name) still works.
+    campaigns: list[str] | None = Query(default=None, max_length=MAX_CAMPAIGN_FILTERS),
     pagination: PaginationParams = Depends(pagination_params),
     current_user=Depends(require_permissions(PermissionCode.LEAD_VIEW)),
     session: AsyncSession = Depends(get_db_session),
@@ -97,6 +100,7 @@ async def list_leads(
         pagination,
         filters,
         reveal_duplicate_owner=current_user.role not in ASSIGNED_ONLY_LEAD_ROLES,
+        campaigns=campaigns,
     )
     return PaginatedResponse[LeadRead](items=items, pagination=build_page_meta(total, pagination))
 

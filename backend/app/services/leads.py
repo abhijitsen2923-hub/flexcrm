@@ -47,6 +47,10 @@ _LEAD_SEARCH_FIELDS = (
 )
 
 
+# The Leads filter's campaign multi-select: at most this many campaigns in one request.
+MAX_CAMPAIGN_FILTERS = 50
+
+
 def lead_number_from_search(term: str | None) -> int | None:
     """"92422" / "#92422" → 92422; anything else (phone numbers, text, 10+ digits) → None."""
     match = _LEAD_NUMBER_SEARCH.fullmatch(term.strip()) if term else None
@@ -241,13 +245,27 @@ class LeadService(ServiceBase):
         """Drop the memo — after a rollback, a campaign it remembers may have been rolled back too."""
         self._campaign_names.clear()
 
+    async def _campaign_filter_values(self, wanted: list[str]) -> list[str] | None:
+        """Every stored spelling of the chosen campaigns (each one's name + remembered old spellings) — one IN list,
+        so any number of campaigns is one indexed filter. None = no campaign filter."""
+        names = list(dict.fromkeys(v.strip() for v in wanted if v and v.strip()))
+        if not names:
+            return None
+        service = CampaignService(self.session)
+        values: list[str] = []
+        for name in names:
+            values.extend(await service.filter_values(name))
+        return list(dict.fromkeys(values))
+
     async def list_leads(
         self,
         pagination: PaginationParams,
         filters: LeadFilterParams,
         *,
         reveal_duplicate_owner: bool = True,
+        campaigns: list[str] | None = None,
     ):
+        """`campaigns`: several campaigns picked in the filter (any of them); else `filters.campaign` (one)."""
         sort_by = validate_sort_field(filters.sort_by, self.allowed_sort_fields)
         # Stage filter accepts a single code or a comma-joined list (multi-select) →
         # a list value makes the repo emit `stage_code IN (...)`.
@@ -299,10 +317,8 @@ class LeadService(ServiceBase):
                 "stage_code": stage_codes or None,
                 "source": filters.source,
                 # Any spelling of a campaign (case / spaces / merged or renamed old name) finds its leads.
-                "campaign": (
-                    await CampaignService(self.session).filter_values(filters.campaign)
-                    if filters.campaign
-                    else None
+                "campaign": await self._campaign_filter_values(
+                    campaigns if campaigns else ([filters.campaign] if filters.campaign else [])
                 ),
                 "assigned_to_id": filters.assigned_to_id,
                 "partner_id": filters.partner_id,
