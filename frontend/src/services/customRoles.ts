@@ -1,4 +1,5 @@
 import type { PermissionCode } from "../types";
+import type { LeadAccessPayload, RoleLeadAccess } from "../utils/leadAccess";
 import { apiClient } from "./http";
 
 export interface CustomRole {
@@ -8,6 +9,8 @@ export interface CustomRole {
   permissions: PermissionCode[];
   is_active: boolean;
   assigned_user_count: number;
+  // "Data access": which leads the role's users see (absent on an older backend = all leads).
+  lead_access?: RoleLeadAccess;
   created_at: string;
   updated_at: string;
 }
@@ -16,6 +19,7 @@ export interface CreateCustomRolePayload {
   name: string;
   description?: string | null;
   permissions: PermissionCode[];
+  lead_access?: LeadAccessPayload;
 }
 
 export interface UpdateCustomRolePayload {
@@ -23,11 +27,23 @@ export interface UpdateCustomRolePayload {
   description?: string | null;
   permissions?: PermissionCode[];
   is_active?: boolean;
+  lead_access?: LeadAccessPayload;
+}
+
+/** What a role's "Data access" can be limited to. */
+export interface LeadAccessOptions {
+  campaigns: { id: string; name: string }[];
+  sources: string[];
 }
 
 export const customRolesService = {
   async list(): Promise<CustomRole[]> {
     const { data } = await apiClient.get<CustomRole[]>("/custom-roles");
+    return data;
+  },
+
+  async leadAccessOptions(): Promise<LeadAccessOptions> {
+    const { data } = await apiClient.get<LeadAccessOptions>("/custom-roles/lead-access-options");
     return data;
   },
 

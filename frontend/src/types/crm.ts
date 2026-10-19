@@ -1,4 +1,5 @@
 import type { PaginatedResponse } from "./common";
+import type { UserLeadAccess } from "../utils/leadAccess";
 
 
 export type UserRole =
@@ -101,6 +102,8 @@ export interface UserSummary {
   // Populated when role === "custom" so the UI can display the template name.
   custom_role_id?: string | null;
   custom_role_name?: string | null;
+  // On /me, login and refresh: the leads this user's custom role limits them to (absent = every lead).
+  lead_access?: UserLeadAccess | null;
 }
 
 export interface GrantedPermission {

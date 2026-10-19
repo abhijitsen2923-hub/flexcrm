@@ -4,6 +4,7 @@ import { Badge, Button, EmptyState, LoadingBlock, useToast } from "../../../comp
 import type { CustomRole } from "../../../services/customRoles";
 import { customRolesService } from "../../../services/customRoles";
 import { extractErrorMessage } from "../../../utils/errors";
+import { describeLeadAccess } from "../../../utils/leadAccess";
 import { CustomRoleEditorModal } from "./CustomRoleEditorModal";
 
 interface Props {
@@ -59,7 +60,7 @@ export function RolesTab({ canManage }: Props) {
       <div className="page-header" style={{ marginBottom: "1rem" }}>
         <div className="page-header__titles">
           <h2 style={{ fontSize: "1.1rem" }}>Custom roles</h2>
-          <p className="muted text-sm">Define named permission templates for your organisation.</p>
+          <p className="muted text-sm">Named permission templates — and which leads each one sees.</p>
         </div>
         {canManage && (
           <div className="page-header__actions">
@@ -91,6 +92,9 @@ export function RolesTab({ canManage }: Props) {
                   <div className="text-xs muted" style={{ marginTop: "0.5rem" }}>
                     {role.permissions.length} permission{role.permissions.length === 1 ? "" : "s"} ·{" "}
                     {role.assigned_user_count} user{role.assigned_user_count === 1 ? "" : "s"} assigned
+                  </div>
+                  <div className="text-xs" style={{ marginTop: "0.25rem", overflowWrap: "anywhere" }}>
+                    <strong>Sees:</strong> {describeLeadAccess(role.lead_access)}
                   </div>
                 </div>
                 {canManage && (

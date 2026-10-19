@@ -1,4 +1,4 @@
-import { Plus, Power, RefreshCw, ShieldCheck, Trash2 } from "lucide-react";
+import { Plus, Power, RefreshCw, ShieldCheck, Trash2, UserCog } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 
 import {
@@ -27,6 +27,8 @@ import { ROLES_BY_INDUSTRY } from "../types/crm";
 import { extractErrorMessage } from "../utils/errors";
 import { formatDate } from "../utils/format";
 import { titleCase } from "../utils/options";
+import { describeLeadAccess } from "../utils/leadAccess";
+import { ALL_PERMISSION_CODES, HIDDEN_PERMISSION_CODES } from "../utils/permissionCodes";
 import { RolesTab } from "./users/components/RolesTab";
 
 
@@ -35,24 +37,6 @@ const emptyList: PaginatedResponse<User> = {
   pagination: { page: 1, page_size: 20, total: 0, total_pages: 1 }
 };
 
-// LEAD_DOCS_MANAGE (Travel visa documents) isn't offered for new grants: FlexCRM is real estate only and no
-// screen uses it. Where it is already granted it still shows, so it can be revoked.
-const HIDDEN_PERMISSION_CODES: ReadonlyArray<string> = ["LEAD_DOCS_MANAGE"];
-const ALL_PERMISSION_CODES: ReadonlyArray<string> = [
-  "DASHBOARD_VIEW",
-  "LEAD_VIEW", "LEAD_MANAGE", "LEAD_IMPORT",
-  "CAMPAIGN_MANAGE",
-  "CUSTOMER_VIEW", "CUSTOMER_MANAGE",
-  "DEAL_VIEW", "DEAL_MANAGE",
-  "TASK_VIEW", "TASK_MANAGE",
-  "ACTIVITY_VIEW", "ACTIVITY_MANAGE",
-  "FINANCE_VIEW", "FINANCE_RECORD_PAYMENT", "FINANCE_REFUND",
-  "HR_VIEW", "HR_MANAGE",
-  "USER_VIEW", "USER_MANAGE",
-  "ORG_MANAGE",
-  "ANALYTICS_VIEW", "REPORTS_VIEW",
-  "EXPORT_DATA",
-];
 
 // Sentinel prefix for custom role option values in the select dropdown.
 const CUSTOM_ROLE_PREFIX = "custom:";
@@ -208,6 +192,51 @@ export default function UsersPage() {
 
   function closeDrawer() { setDrawerUser(null); setDrawerPerms(null); }
 
+  // --- Change role (built-in ↔ custom) --------------------------------------
+  const [roleTarget, setRoleTarget] = useState<User | null>(null);
+  const [roleValue, setRoleValue] = useState("");
+  const [roleSaving, setRoleSaving] = useState(false);
+  const [roleError, setRoleError] = useState<string | null>(null);
+
+  function currentRoleValue(user: User): string {
+    return user.role === "custom" && user.custom_role_id ? `${CUSTOM_ROLE_PREFIX}${user.custom_role_id}` : user.role;
+  }
+
+  function openRoleChange(user: User) {
+    setRoleTarget(user);
+    setRoleValue(currentRoleValue(user));
+    setRoleError(null);
+    // Pick up roles created / edited in the Roles tab meanwhile.
+    void customRolesService
+      .list()
+      .then((roles) => setCustomRoles(roles.filter((r) => r.is_active)))
+      .catch(() => undefined);
+  }
+
+  async function saveRoleChange(event: FormEvent) {
+    event.preventDefault();
+    if (!roleTarget) return;
+    if (roleValue === currentRoleValue(roleTarget)) { setRoleTarget(null); return; }
+    setRoleSaving(true);
+    setRoleError(null);
+    try {
+      if (roleValue.startsWith(CUSTOM_ROLE_PREFIX)) {
+        await customRolesService.assign(roleTarget.id, roleValue.slice(CUSTOM_ROLE_PREFIX.length));
+      } else if (roleTarget.role === "custom") {
+        await customRolesService.unassign(roleTarget.id, roleValue);
+      } else {
+        await usersService.update(roleTarget.id, { role: roleValue as UserRole });
+      }
+      toast.success("Role changed", `${roleTarget.first_name} ${roleTarget.last_name}`);
+      setRoleTarget(null);
+      await refresh();
+    } catch (error) {
+      setRoleError(extractErrorMessage(error));
+    } finally {
+      setRoleSaving(false);
+    }
+  }
+
   // --- Enable/disable + delete ------------------------------------------
   const [statusBusyId, setStatusBusyId] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<User | null>(null);
@@ -313,6 +342,14 @@ export default function UsersPage() {
       render: (user) =>
         canManage && currentUser?.id !== user.id ? (
           <div style={{ display: "flex", gap: 4, justifyContent: "flex-end", flexWrap: "wrap" }}>
+            <Button
+              size="sm"
+              variant="ghost"
+              icon={<UserCog size={14} />}
+              onClick={() => openRoleChange(user)}
+            >
+              Role
+            </Button>
             <Button
               size="sm"
               variant="ghost"
@@ -501,7 +538,57 @@ export default function UsersPage() {
                 }))}
                 hint={`Predefined + custom roles for your ${titleCase(orgIndustry)} workspace.`}
               />
+              {form.roleValue.startsWith(CUSTOM_ROLE_PREFIX) && (() => {
+                const chosen = customRoles.find((r) => `${CUSTOM_ROLE_PREFIX}${r.id}` === form.roleValue);
+                return chosen ? (
+                  <div className="text-sm" style={{ overflowWrap: "anywhere" }}>
+                    <strong>Sees:</strong> {describeLeadAccess(chosen.lead_access)}
+                  </div>
+                ) : null;
+              })()}
               {createError && <div className="error-banner">{createError}</div>}
+            </form>
+          </Modal>
+
+          {/* Change-role modal */}
+          <Modal
+            open={Boolean(roleTarget)}
+            onClose={() => setRoleTarget(null)}
+            title={roleTarget ? `Role — ${roleTarget.first_name} ${roleTarget.last_name}` : ""}
+            footer={
+              <>
+                <Button variant="secondary" onClick={() => setRoleTarget(null)} disabled={roleSaving}>Cancel</Button>
+                <Button type="submit" form="user-role-form" loading={roleSaving} disabled={roleSaving}>Save role</Button>
+              </>
+            }
+          >
+            <form id="user-role-form" className="form" onSubmit={saveRoleChange}>
+              <SelectField
+                id="user-role-change"
+                label="Role"
+                value={roleValue}
+                onChange={(e) => setRoleValue(e.target.value)}
+                options={[
+                  ...roleOptions.filter((o) => o.value !== "__separator__"),
+                  // Their current custom role, even if it's switched off now (so the select shows it).
+                  ...(roleTarget?.role === "custom" && roleTarget.custom_role_id
+                    && !customRoles.some((r) => r.id === roleTarget.custom_role_id)
+                    ? [{ value: `${CUSTOM_ROLE_PREFIX}${roleTarget.custom_role_id}`, label: `Custom: ${roleTarget.custom_role_name ?? "current"}` }]
+                    : []),
+                ]}
+              />
+              {roleValue.startsWith(CUSTOM_ROLE_PREFIX) && (() => {
+                const chosen = customRoles.find((r) => `${CUSTOM_ROLE_PREFIX}${r.id}` === roleValue);
+                return chosen ? (
+                  <div className="text-sm" style={{ overflowWrap: "anywhere" }}>
+                    <strong>Sees:</strong> {describeLeadAccess(chosen.lead_access)}
+                  </div>
+                ) : null;
+              })()}
+              <p className="text-xs muted" style={{ margin: 0 }}>
+                Takes effect on their next screen load. Individual permission grants stay as they are.
+              </p>
+              {roleError && <div className="error-banner">{roleError}</div>}
             </form>
           </Modal>
 

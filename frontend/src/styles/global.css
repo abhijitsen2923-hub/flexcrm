@@ -1815,6 +1815,46 @@ body.has-import-pill .app-content { padding-bottom: 72px; }
   color: #1a1205;
 }
 
+/* Custom role editor → "Data access" (which leads the role's users see). */
+.role-access {
+  display: grid;
+  gap: 0.6rem;
+  margin: 0;
+  padding: 0.75rem;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  min-width: 0;
+}
+.role-access legend { padding: 0 0.25rem; }
+.role-access__intro { margin: 0; }
+.role-access__own {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+.role-access__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+}
+.role-access__label {
+  min-width: 5.5rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+.role-access__choices { display: grid; gap: 0.4rem; min-width: 0; }
+.role-access__list {
+  max-height: 220px;
+  padding: 0.5rem;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+}
+.role-access__list label { min-width: 0; overflow-wrap: anywhere; }
+.role-access p { margin: 0; }
+
 /* Stage checkbox list inside the Filters panel. */
 .filter-stage-list {
   display: grid;

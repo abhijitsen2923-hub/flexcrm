@@ -70,6 +70,7 @@ import {
   toggleIntentFilter,
   type IntentFilterToken
 } from "../utils/leadIntent";
+import { defaultCampaignFor, defaultSourceFor, describeLeadAccess, sourceOptionsFor } from "../utils/leadAccess";
 import { OTHER_OPTION, industryInterestLabel, leadIndustryOptions, leadSourceOptions, pipelineCategoryTone, propertyInterestOptions, propertyTypeOptions, salutationOptions, titleCase } from "../utils/options";
 import { canSetStage } from "../utils/stageAccess";
 
@@ -147,6 +148,9 @@ function makeEmptyForm(
 
 export default function LeadsPage() {
   const { user } = useAuth();
+  // A custom role's "Data access": the screens offer only the user's campaigns / sources (the server enforces it).
+  const leadAccess = user?.lead_access ?? null;
+  const sourceOptions = useMemo(() => sourceOptionsFor(leadSourceOptions, leadAccess), [leadAccess]);
   // Default view = the user's industry until the workspace loads (below), which then sets it for everyone —
   // the per-user business_type is empty for every staff member an owner adds.
   const defaultIndustry: LeadIndustry | "" = user?.business_type ?? "";
@@ -584,7 +588,12 @@ export default function LeadsPage() {
     // Industry is the ORG's (single-industry, authoritative) — the per-user
     // business_type can be stale/null. The backend pins it regardless; this just
     // drives which optional (real-estate) fields the form shows.
-    setForm(makeEmptyForm(org?.business_type ?? user?.business_type ?? "real_estate", allowedCurrencies[0] ?? "INR"));
+    setForm({
+      ...makeEmptyForm(org?.business_type ?? user?.business_type ?? "real_estate", allowedCurrencies[0] ?? "INR"),
+      // A user limited to one campaign / one source starts with it.
+      source: defaultSourceFor(leadSourceOptions, leadAccess),
+      campaign: defaultCampaignFor(leadAccess),
+    });
     setFormError(null);
     setDuplicates([]);
     setDupChecked(false);
@@ -939,6 +948,11 @@ export default function LeadsPage() {
         <div className="page-header__titles">
           <h1>Leads Management</h1>
           <p>Industry-aware pipeline with mandatory comments on every stage move.</p>
+          {leadAccess && (
+            <p className="text-sm" style={{ overflowWrap: "anywhere" }}>
+              <strong>Your access:</strong> {describeLeadAccess(leadAccess, "your")}
+            </p>
+          )}
         </div>
         <div className="page-header__actions">
           {!isPhone && (
@@ -1498,7 +1512,7 @@ export default function LeadsPage() {
                 aria-label="Filter by source"
               >
                 <option value="">All sources</option>
-                {leadSourceOptions.map((option) => (
+                {sourceOptions.map((option) => (
                   <option key={option.value} value={option.value}>{option.label}</option>
                 ))}
               </select>
@@ -1793,7 +1807,7 @@ export default function LeadsPage() {
             value={form.source}
             onChange={(event) => setForm({ ...form, source: event.target.value })}
             required
-            options={[{ value: "", label: "Select…" }, ...leadSourceOptions]}
+            options={[{ value: "", label: "Select…" }, ...sourceOptions]}
           />
           {form.source === OTHER_OPTION && (
             <TextField
