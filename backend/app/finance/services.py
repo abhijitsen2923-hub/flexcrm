@@ -14,7 +14,7 @@ from sqlalchemy import case, func, select
 from sqlalchemy.orm import selectinload
 
 from app.core.exceptions import AuthorizationError, NotFoundError, ValidationError
-from app.core.tenancy import current_org
+from app.core.tenancy import SKIP_LEAD_SCOPE, current_org
 from app.database.enums import (
     CommissionDirection,
     ExpenseStatus,
@@ -87,6 +87,7 @@ from app.models.organization import Organization
 from app.models.stage_transition import StageTransition
 from app.models.user import User
 from app.services.base import ServiceBase
+from app.services.lead_scope import check_new_link
 from app.services.realtime import realtime_manager
 
 
@@ -97,8 +98,8 @@ PREVIOUS_OWNER_ASSIST_PERCENT = 20
 async def _next_sequence(session, model, attr_name: str, prefix: str, start: int = 1000) -> str:
     """Generic monotonic counter for invoice/order numbers. Suffix-formatted."""
     column = getattr(model, attr_name)
-    # Pull the highest numeric suffix.
-    rows = (await session.execute(select(column))).scalars().all()
+    # Pull the highest numeric suffix — over EVERY row, also for a user limited to some leads (lead_scope).
+    rows = (await session.execute(select(column).execution_options(**SKIP_LEAD_SCOPE))).scalars().all()
     highest = start
     for value in rows:
         try:
@@ -1085,6 +1086,8 @@ class CustomerDemandService(ServiceBase):
         return row
 
     async def create_contract(self, payload: CustomerContractCreate, *, actor_id: UUID) -> CustomerContract:
+        # A user limited to some leads (lead_scope) only adds contracts for customers they can see.
+        await check_new_link(self.session, lead_id=None, customer_id=payload.customer_id, what="contract")
         row = CustomerContract(
             customer_id=payload.customer_id, title=payload.title, contract_value=payload.contract_value,
             currency=(payload.currency or "INR").upper(), notes=payload.notes, status="active",

@@ -33,6 +33,15 @@ class CustomRole(TenantBase, UUIDPrimaryKeyMixin, TimestampMixin, TenantAuditMix
     permissions: Mapped[list] = mapped_column(sa.JSON, nullable=False, default=list)
     is_active: Mapped[bool] = mapped_column(sa.Boolean, nullable=False, server_default=sa.true())
 
+    # Which leads the role's users may see (app/services/lead_scope.py). NULL = no limit on that dimension; a lead must
+    # pass every limit that is set. Campaigns are stored by id (a rename keeps the id; a merge repoints it), sources
+    # by label (matched ignoring case and surrounding spaces).
+    lead_campaign_ids: Mapped[list | None] = mapped_column(sa.JSON(none_as_null=True), nullable=True)
+    lead_sources: Mapped[list | None] = mapped_column(sa.JSON(none_as_null=True), nullable=True)
+    lead_own_only: Mapped[bool] = mapped_column(
+        sa.Boolean, nullable=False, default=False, server_default=sa.false()
+    )
+
     assignments: Mapped[list["UserCustomRoleAssignment"]] = relationship(
         "UserCustomRoleAssignment",
         back_populates="custom_role",

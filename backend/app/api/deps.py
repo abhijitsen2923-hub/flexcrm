@@ -9,6 +9,7 @@ from app.core.cache import cache_client
 from app.core.config import get_settings
 from app.core.exceptions import AuthenticationError, AuthorizationError
 from app.core.permissions import (
+    LEAD_LIMITED_EXCLUDED,
     PermissionCode,
     effective_permissions_for_user,
 )
@@ -21,6 +22,7 @@ from app.models.organization import Organization
 from app.models.user_permission_grant import UserPermissionGrant
 from app.repositories.users import UserRepository
 from app.schemas.common import PaginationParams
+from app.services.lead_scope import load_lead_scope, role_limits_leads, set_request_scope
 from app.services.realtime import set_broadcast_org
 
 
@@ -98,6 +100,8 @@ async def get_current_user(
             raise AuthenticationError("This workspace has been disabled. Contact your administrator.")
         if context["schema_name"]:
             await set_tenant_schema(session, context["schema_name"])
+        # A custom role's "Data access" limits apply to everything this request reads or changes.
+        set_request_scope(session, await load_lead_scope(session, user))
 
     return user
 
@@ -127,10 +131,34 @@ async def load_effective_permissions(
                 )
             )
         ).scalar_one_or_none()
-        base = assignment.custom_role.permissions if (assignment and assignment.custom_role) else []
-        return effective_permissions_for_user(UserRole.custom, rows, base_override=base)
+        role = assignment.custom_role if assignment else None
+        # A switched-off role grants nothing (its user keeps only their individual grants).
+        base = role.permissions if (role is not None and role.is_active) else []
+        effective = effective_permissions_for_user(UserRole.custom, rows, base_override=base)
+        if role_limits_leads(role):
+            effective = effective - LEAD_LIMITED_EXCLUDED
+        return effective
 
     return effective_permissions_for_user(user.role, rows)
+
+
+async def ensure_caller_holds(session: AsyncSession, caller, codes) -> None:
+    """Privilege-escalation guard: a caller may only give out (in a role, a grant or a reset) permissions they hold
+    themselves. Platform admins excepted."""
+    if getattr(caller, "is_platform_admin", False):
+        return
+    wanted: set[str] = set()
+    for code in codes:
+        try:
+            wanted.add(PermissionCode(code).value)
+        except ValueError:
+            continue
+    held = {code.value for code in await load_effective_permissions(session, caller)}
+    missing = sorted(wanted - held)
+    if missing:
+        raise AuthorizationError(
+            "You can only give out permissions you hold yourself. Not yours: " + ", ".join(missing) + "."
+        )
 
 
 def require_permissions(*codes: PermissionCode):

@@ -23,6 +23,7 @@ from app.schemas.campaign import (
 )
 from app.schemas.common import MessageResponse
 from app.services.campaigns import RACE_MESSAGE, CampaignService, is_lock_conflict, is_missing_table
+from app.services.lead_scope import request_scope
 
 router = APIRouter()
 T = TypeVar("T")
@@ -75,9 +76,14 @@ async def list_campaigns(
     if current_user.role in ASSIGNED_ONLY_LEAD_ROLES:
         include_inactive = False
     try:
-        return await CampaignService(session).list_options(include_inactive=include_inactive)
+        options = await CampaignService(session).list_options(include_inactive=include_inactive)
     except (ProgrammingError, OperationalError) as exc:
         await _not_ready(session, exc)
+    # A user whose custom role covers only some campaigns is offered just those.
+    scope = request_scope(session)
+    if scope is not None and scope.campaign_keys is not None:
+        options = [c for c in options if c.name_key in scope.campaign_keys]
+    return options
 
 
 @router.get("/manage", response_model=CampaignOverview)

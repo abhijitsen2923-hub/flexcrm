@@ -7,7 +7,7 @@ from sqlalchemy import select, text
 
 from app.core.config import get_settings
 from app.core.exceptions import AuthenticationError, ConflictError, ServiceUnavailableError, ValidationError
-from app.core.permissions import effective_permissions_for_user
+from app.core.permissions import LEAD_LIMITED_EXCLUDED, effective_permissions_for_user
 from app.core.schema_naming import make_schema_name
 from app.core.security import (
     create_access_token,
@@ -25,9 +25,10 @@ from app.models.user_permission_grant import UserPermissionGrant
 from app.repositories.refresh_tokens import RefreshTokenRepository
 from app.repositories.users import UserRepository
 from app.schemas.auth import LoginRequest, RefreshTokenRequest, RegisterRequest, TokenResponse
-from app.schemas.user import UserRead
+from app.schemas.user import LeadAccessProfile, UserRead
 from app.services.base import ServiceBase
 from app.services.email import EmailService
+from app.services.lead_scope import scope_for_role
 from app.services.tenant_provisioner import provision_tenant
 
 
@@ -311,13 +312,22 @@ class AuthService(ServiceBase):
                     )
                 )
             ).scalar_one_or_none()
-            if assignment and assignment.custom_role:
+            role = assignment.custom_role if assignment else None
+            if role is not None:
                 updates["custom_role_id"] = assignment.custom_role_id
-                updates["custom_role_name"] = assignment.custom_role.name
-                base = assignment.custom_role.permissions
-            else:
-                base = []
+                updates["custom_role_name"] = role.name
+            # Same rules as load_effective_permissions: a switched-off role grants nothing; a user limited to some
+            # leads never holds user / workspace / campaign management.
+            base = role.permissions if (role is not None and role.is_active) else []
             effective = effective_permissions_for_user(UserRole.custom, grant_codes, base_override=base)
+            scope = await scope_for_role(self.session, role, user_id=user.id)
+            if scope is not None:
+                effective = effective - LEAD_LIMITED_EXCLUDED
+                updates["lead_access"] = LeadAccessProfile(
+                    own_leads_only=scope.owner_id is not None,
+                    campaigns=list(scope.campaign_names) if scope.campaign_keys is not None else None,
+                    sources=list(scope.sources) if scope.source_keys is not None else None,
+                )
         else:
             effective = effective_permissions_for_user(user.role, grant_codes)
 

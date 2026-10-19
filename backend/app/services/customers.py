@@ -48,7 +48,8 @@ class CustomerService(ServiceBase):
         await self.commit()
         await self.invalidate_reporting_cache()
         await realtime_manager.broadcast(
-            {"event": "customer.created", "payload": {"id": str(customer.id), "company_name": customer.company_name}}
+            # No names in events: they reach everyone in the workspace, incl. users limited to some leads.
+            {"event": "customer.created", "payload": {"id": str(customer.id)}}
         )
         return customer
 
@@ -60,7 +61,7 @@ class CustomerService(ServiceBase):
         await self.commit()
         await self.invalidate_reporting_cache()
         await realtime_manager.broadcast(
-            {"event": "customer.updated", "payload": {"id": str(customer.id), "company_name": customer.company_name}}
+            {"event": "customer.updated", "payload": {"id": str(customer.id)}}
         )
         return customer
 

@@ -7,6 +7,15 @@ from app.database.enums import LeadIndustry, UserRole, UserStatus
 from app.schemas.common import NormalizedEmail, ORMModel, SearchSortParams
 
 
+class LeadAccessProfile(ORMModel):
+    """The signed-in user's lead limits from their custom role ("Data access"): the screens offer only these. None =
+    not limited on that dimension."""
+
+    own_leads_only: bool = False
+    campaigns: list[str] | None = None
+    sources: list[str] | None = None
+
+
 class UserSummary(ORMModel):
     id: UUID
     first_name: str
@@ -29,6 +38,8 @@ class UserSummary(ORMModel):
     # Populated when role == "custom" so the frontend can display the template name.
     custom_role_id: UUID | None = None
     custom_role_name: str | None = None
+    # Populated on `/me`, login and refresh when the user's custom role limits which leads they see.
+    lead_access: LeadAccessProfile | None = None
 
 
 class UserCreate(ORMModel):

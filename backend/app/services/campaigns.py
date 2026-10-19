@@ -24,8 +24,9 @@ from sqlalchemy.exc import DBAPIError, IntegrityError, OperationalError, Program
 from app.core.campaign_names import campaign_key, clean_display, closest_matches, suggest_merges
 from app.core.exceptions import ConflictError, NotFoundError, ValidationError
 from app.core.logging import get_logger
-from app.core.tenancy import current_org
+from app.core.tenancy import SKIP_LEAD_SCOPE, current_org
 from app.models.campaign import Campaign, CampaignAlias
+from app.models.custom_role import CustomRole
 from app.models.lead import Lead
 from app.services.base import ServiceBase
 from app.services.realtime import realtime_manager
@@ -101,10 +102,13 @@ class CampaignService(ServiceBase):
 
     async def _lead_spellings(self) -> list[tuple[str, int]]:
         """Every distinct stored campaign spelling on live leads, with its lead count."""
+        # Every lead, also during a request of a user limited to some leads: syncing the list and rewriting
+        # spellings must cover the whole tenant (lead_scope).
         rows = await self.session.execute(
             select(Lead.campaign, func.count())
             .where(Lead.is_deleted.is_(False), Lead.campaign.is_not(None))
             .group_by(Lead.campaign)
+            .execution_options(**SKIP_LEAD_SCOPE)
         )
         return [(value, count) for value, count in rows if value is not None]
 
@@ -416,6 +420,7 @@ class CampaignService(ServiceBase):
                 CampaignAlias(campaign_id=target.id, alias=source.name, alias_key=source.name_key, kind="merge", created_by_id=actor_id)
             )
         await self.session.execute(delete(Campaign).where(Campaign.id.in_(sources)))
+        await self._repoint_roles(sources, target.id)
         target.needs_review = False
         target.updated_by_id = actor_id
         await self.commit()
@@ -430,6 +435,7 @@ class CampaignService(ServiceBase):
         count = await self._rewrite_leads(await self._spellings_for(keys), None, actor_id=actor_id)
         await self.session.execute(delete(CampaignAlias).where(CampaignAlias.campaign_id == campaign.id))
         await self.session.execute(delete(Campaign).where(Campaign.id == campaign.id))
+        await self._repoint_roles([campaign.id], None)
         await self.commit()
         await self._after_lead_change(count, "campaign_clear")
         return count
@@ -524,9 +530,23 @@ class CampaignService(ServiceBase):
             update(Lead)
             .where(Lead.campaign.in_(spellings), Lead.is_deleted.is_(False))
             .values(**values)
-            .execution_options(synchronize_session=False)
+            .execution_options(synchronize_session=False, **SKIP_LEAD_SCOPE)
         )
         return result.rowcount or 0
+
+    async def _repoint_roles(self, old_ids: list[UUID], new_id: UUID | None) -> None:
+        """Custom roles limited to these campaigns ("Data access") follow a merge to its target; a cleared campaign
+        is dropped from them (a role left with none sees no leads — less, never more). A rename keeps the id."""
+        old = {str(i) for i in old_ids}
+        roles = (await self.session.execute(select(CustomRole).where(CustomRole.lead_campaign_ids.is_not(None)))).scalars()
+        for role in roles:
+            ids = [str(v) for v in role.lead_campaign_ids or []]
+            if not old.intersection(ids):
+                continue
+            kept = [v for v in ids if v not in old]
+            if new_id is not None and str(new_id) not in kept:
+                kept.append(str(new_id))
+            role.lead_campaign_ids = kept
 
     async def _after_lead_change(self, count: int, reason: str) -> None:
         if count:

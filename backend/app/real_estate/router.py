@@ -72,6 +72,7 @@ from app.real_estate.payment_plan import apply_payment_plan, reprice_plan_rows
 from app.real_estate.token_receipts import sync_token_receipt, token_receipt_for
 from app.services.customer_lifecycle import recompute_ltv
 from app.services.email import EmailService
+from app.services.lead_scope import check_new_link
 from app.services.notifications import NotificationService
 from app.real_estate.schemas import (
     BookingCancel,
@@ -1195,6 +1196,7 @@ async def create_site_visit(
     current_user=Depends(require_permissions(PermissionCode.LEAD_MANAGE)),
     session: AsyncSession = Depends(get_db_session),
 ):
+    await check_new_link(session, lead_id=payload.lead_id, customer_id=None, what="site visit", customer_ok=False)
     visit = SiteVisit(**payload.model_dump())
     # A front-line rep's own visit defaults to them (else, unassigned, it would be
     # invisible on their own scoped calendar).
@@ -1339,6 +1341,7 @@ async def create_booking(
     unit = await session.get(Unit, payload.unit_id)
     if not unit:
         raise HTTPException(status_code=404, detail="Unit not found")
+    await check_new_link(session, lead_id=payload.lead_id, customer_id=payload.customer_id, what="booking")
     booking = Booking(**payload.model_dump())
     session.add(booking)
     await session.flush()  # need booking.id to attach schedules
@@ -1419,6 +1422,8 @@ async def advance_booking_step(
         raise HTTPException(status_code=400, detail="Step must be 1-4")
     booking.step = step
     if payload.customer_id is not None:
+        # A user limited to some leads can only pick a customer they can see.
+        await check_new_link(session, lead_id=None, customer_id=payload.customer_id, what="booking")
         booking.customer_id = payload.customer_id
     if payload.pricing_snapshot is not None:
         booking.pricing_snapshot = payload.pricing_snapshot

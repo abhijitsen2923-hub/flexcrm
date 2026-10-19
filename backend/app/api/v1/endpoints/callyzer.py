@@ -10,7 +10,7 @@ from datetime import UTC, datetime
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query, status
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import and_, func, or_, select, union
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import pagination_params, require_permissions
@@ -33,6 +33,7 @@ from app.schemas.callyzer import (
 from app.schemas.common import PaginatedResponse, PaginationParams, build_page_meta
 from app.services.callyzer_connection import CallyzerConnectionService, normalize_phone_key
 from app.services.external_call_stats import ExternalCallStatsService
+from app.services.lead_scope import request_scope
 from app.services.lead_documents import get_lead_or_404
 
 router = APIRouter()
@@ -106,6 +107,20 @@ async def list_calls(
         conds.append(ExternalCall.call_at >= date_from)
     if date_to:
         conds.append(ExternalCall.call_at <= date_to)
+    scope = request_scope(session)
+    if scope is not None:
+        # A user limited to some leads sees only calls with those leads' numbers (main or alternate phone). Built on
+        # the leads TABLE, which the central lead filter doesn't touch — so the limit is spelled out here.
+        leads = Lead.__table__.c
+        visible = and_(leads.is_deleted.is_(False), scope.lead_terms(leads))
+        conds.append(
+            ExternalCall.client_number_key.in_(
+                union(
+                    select(_lead_key(leads.contact_phone)).where(visible, leads.contact_phone.is_not(None)),
+                    select(_lead_key(leads.contact_phone_alt)).where(visible, leads.contact_phone_alt.is_not(None)),
+                )
+            )
+        )
     if matched is not None:
         match_exists = (
             select(1)
@@ -172,7 +187,9 @@ async def call_stats(
     now = datetime.now(UTC)
     date_to = date_to or now
     date_from = date_from or datetime(now.year, now.month, 1, tzinfo=UTC)
-    owner_user_id = current_user.id if current_user.role in ASSIGNED_ONLY_LEAD_ROLES else None
+    scope = request_scope(session)
+    own_only = current_user.role in ASSIGNED_ONLY_LEAD_ROLES or (scope is not None and scope.owner_id is not None)
+    owner_user_id = current_user.id if own_only else None
     return await ExternalCallStatsService(session).employee_stats(
         date_from=date_from, date_to=date_to, owner_user_id=owner_user_id
     )
@@ -191,7 +208,8 @@ async def call_stats_trend(
     now = datetime.now(UTC)
     date_to = date_to or now
     date_from = date_from or datetime(now.year, now.month, 1, tzinfo=UTC)
-    if current_user.role in ASSIGNED_ONLY_LEAD_ROLES:
+    scope = request_scope(session)
+    if current_user.role in ASSIGNED_ONLY_LEAD_ROLES or (scope is not None and scope.owner_id is not None):
         user_id = current_user.id
     return await ExternalCallStatsService(session).daily_trend(
         user_id=user_id, date_from=date_from, date_to=date_to

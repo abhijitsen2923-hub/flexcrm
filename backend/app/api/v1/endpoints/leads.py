@@ -36,6 +36,7 @@ from app.services.lead_assignments import LeadAssignmentService
 from app.services.lead_documents import LeadDocumentService, get_lead_or_404
 from app.services.lead_import import LeadImportService
 from app.services.lead_intents import LeadIntentService
+from app.services.lead_scope import request_scope
 from app.services.leads import LeadService
 from app.services.stage_transitions import StageTransitionService
 
@@ -51,11 +52,16 @@ async def _can_manage_campaigns(session: AsyncSession, user) -> bool:
 async def _enforce_lead_access(session: AsyncSession, lead_id: UUID, user) -> None:
     """Assigned-only roles (front-line reps) may only touch leads assigned to
     them — reaching another rep's lead by id returns 404 (not 403, so the id's
-    existence isn't leaked). Higher roles pass through."""
+    existence isn't leaked). A user whose custom role limits which leads they
+    see gets the same 404 for a lead outside those limits (the lead filter makes
+    the lookup find nothing) — which also guards the lead's history, calls and
+    other rows read by lead id. Higher roles pass through."""
     if user.role in ASSIGNED_ONLY_LEAD_ROLES:
         lead = await get_lead_or_404(session, lead_id)
         if lead.assigned_to_id != user.id:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Lead not found")
+    elif request_scope(session) is not None:
+        await get_lead_or_404(session, lead_id)
 
 
 @router.get("/{lead_id}/brokerage", response_model=list[BrokeragePayoutRead])

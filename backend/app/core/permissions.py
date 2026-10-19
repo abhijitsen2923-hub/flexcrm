@@ -122,6 +122,15 @@ ASSIGNED_ONLY_LEAD_ROLES: frozenset[UserRole] = frozenset({
     UserRole.telecaller,
 })
 
+# A user whose custom role limits which leads they see (app/services/lead_scope.py) never holds these — not from the
+# role, not from an individual grant: managing users / roles could lift their own limits, the workspace settings and
+# the campaign list (rename / merge / clear) act on every lead.
+LEAD_LIMITED_EXCLUDED: frozenset[PermissionCode] = frozenset({
+    PermissionCode.USER_MANAGE,
+    PermissionCode.ORG_MANAGE,
+    PermissionCode.CAMPAIGN_MANAGE,
+})
+
 
 # --- Role-based access to lead stages (real-estate lifecycle v2) ------------
 # Managers who may close a lead (set `sold`) and move it BACKWARD in the pipeline

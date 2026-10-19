@@ -1,7 +1,7 @@
 from sqlalchemy import func, or_, select, text
 from sqlalchemy.orm import selectinload
 
-from app.core.tenancy import current_org
+from app.core.tenancy import SKIP_LEAD_SCOPE, current_org
 from app.models.lead import Lead
 from app.models.user import User
 from app.repositories.base import BaseRepository
@@ -178,7 +178,8 @@ class LeadRepository(BaseRepository[Lead]):
                 text("SELECT pg_advisory_xact_lock(:namespace, hashtext(:tenant))"),
                 {"namespace": _LEAD_NUMBER_LOCK_NAMESPACE, "tenant": self.session.info.get("schema_name") or "public"},
             )
+        # Over EVERY lead — a user limited to some leads must not hand out a number that exists elsewhere.
         current_max = (
-            await self.session.execute(select(func.max(Lead.lead_number)))
+            await self.session.execute(select(func.max(Lead.lead_number)).execution_options(**SKIP_LEAD_SCOPE))
         ).scalar_one()
         return (current_max or LEAD_NUMBER_START) + 1

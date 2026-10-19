@@ -1,12 +1,15 @@
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, status
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_current_user, pagination_params, require_permissions
+from app.api.deps import ensure_caller_holds, get_current_user, pagination_params, require_permissions
 from app.core.exceptions import AuthorizationError
 from app.core.permissions import PermissionCode
+from app.database.enums import UserRole
 from app.database.session import get_db_session
+from app.models.custom_role import CustomRole, UserCustomRoleAssignment
 from app.schemas.common import MessageResponse, PaginatedResponse, PaginationParams, build_page_meta
 from app.schemas.user import UserCreate, UserFilterParams, UserRead, UserUpdate
 from app.services.users import UserService
@@ -23,7 +26,25 @@ async def list_users(
     session: AsyncSession = Depends(get_db_session),
 ):
     items, total = await UserService(session).list_users(pagination, filters)
-    return PaginatedResponse[UserRead](items=items, pagination=build_page_meta(total, pagination))
+    # Custom-role users show their role's name (Users list → Role column, "Change role").
+    custom_ids = [u.id for u in items if u.role == UserRole.custom]
+    by_user: dict = {}
+    if custom_ids:
+        rows = await session.execute(
+            select(UserCustomRoleAssignment.user_id, CustomRole.id, CustomRole.name)
+            .join(CustomRole, CustomRole.id == UserCustomRoleAssignment.custom_role_id)
+            .where(UserCustomRoleAssignment.user_id.in_(custom_ids))
+        )
+        by_user = {user_id: (role_id, name) for user_id, role_id, name in rows}
+    reads = [
+        UserRead.model_validate(u).model_copy(
+            update={"custom_role_id": by_user[u.id][0], "custom_role_name": by_user[u.id][1]}
+        )
+        if u.id in by_user
+        else UserRead.model_validate(u)
+        for u in items
+    ]
+    return PaginatedResponse[UserRead](items=reads, pagination=build_page_meta(total, pagination))
 
 
 @router.get("/{user_id}", response_model=UserRead)
@@ -48,6 +69,13 @@ async def create_user(
     current_user=Depends(require_permissions(PermissionCode.USER_MANAGE)),
     session: AsyncSession = Depends(get_db_session),
 ):
+    if payload.role == UserRole.custom and payload.custom_role_id:
+        # Same rule as assigning a custom role later: only a role whose permissions the caller holds.
+        template = (
+            await session.execute(select(CustomRole).where(CustomRole.id == payload.custom_role_id))
+        ).scalar_one_or_none()
+        if template is not None:
+            await ensure_caller_holds(session, current_user, template.permissions or [])
     return await UserService(session).create_user(payload, actor_id=current_user.id)
 
 

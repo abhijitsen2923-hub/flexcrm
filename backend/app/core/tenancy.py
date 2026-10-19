@@ -119,6 +119,13 @@ def bypass(session: AsyncSession) -> Iterator[None]:
         session.info["bypass_tenancy"] = previous
 
 
+# Statement option for the few statements that must see every row even during a request of a user whose custom role
+# limits which leads they see (app/services/lead_scope.py) — e.g. the next lead / customer / order number:
+# `stmt.execution_options(**SKIP_LEAD_SCOPE)`.
+SKIP_LEAD_SCOPE_OPTION = "skip_lead_scope"
+SKIP_LEAD_SCOPE = {SKIP_LEAD_SCOPE_OPTION: True}
+
+
 _LISTENERS_REGISTERED = False
 
 

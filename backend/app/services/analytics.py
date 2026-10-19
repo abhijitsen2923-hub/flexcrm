@@ -1,6 +1,7 @@
 from app.core.cache import cache_client
 from app.core.config import get_settings
 from app.core.tenancy import get_schema
+from app.services.lead_scope import request_scope
 from app.repositories.analytics import AnalyticsRepository
 from app.repositories.dashboard import DashboardRepository
 from app.schemas.analytics import (
@@ -20,8 +21,10 @@ class AnalyticsService:
 
     def _cache_key(self, name: str) -> str:
         # Scope by tenant schema so cached analytics never cross tenants (shared Redis).
+        # And by a custom role's lead limits (lead_scope): a limited user's figures are their own.
         scope = get_schema(self.session) or "public"
-        return f"analytics:{name}:{scope}"
+        lead_scope = request_scope(self.session)
+        return f"analytics:{name}:{scope}" + (f":{lead_scope.fingerprint()}" if lead_scope is not None else "")
 
     async def _read_cache(self, cache_key: str, model_cls):
         """Validated model from cache, or None on miss / stale entry (recompute)."""

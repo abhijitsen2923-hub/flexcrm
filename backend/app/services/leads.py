@@ -26,6 +26,7 @@ from app.services.campaigns import CampaignService, CampaignWritePolicy
 from app.services.email import EmailService
 from app.services.lead_assignments import LeadAssignmentService
 from app.services.lead_intents import LeadIntentService
+from app.services.lead_scope import request_scope, unscoped
 from app.services.notifications import NotificationService
 from app.services.realtime import realtime_manager
 from app.services.stage_transitions import StageTransitionService
@@ -389,6 +390,16 @@ class LeadService(ServiceBase):
     ):
         """`notify_assignee=False` / `reload=False` are for the CSV importer: it sends ONE summary notification
         per assignee at the end, and doesn't need the eager-loaded copy of every lead it creates."""
+        # A user whose custom role limits which leads they see adds leads only inside those limits (a CSV row
+        # outside them becomes a row error); "only leads assigned to them" makes an unassigned new lead theirs.
+        scope = request_scope(self.session)
+        if scope is not None:
+            refusal = scope.refusal(campaign=payload.campaign, source=payload.source)
+            if refusal:
+                raise ValidationError(refusal)
+            if scope.owner_id is not None and payload.assigned_to_id is None:
+                payload.assigned_to_id = scope.owner_id
+
         # customer_id is optional now: a Lead can be created with just contact
         # details, and a Customer row is materialized later when the lead hits
         # the Sold stage.
@@ -495,7 +506,9 @@ class LeadService(ServiceBase):
         await self.commit()
         await self.invalidate_reporting_cache()
         if reload:
-            lead = await self.get_lead(lead.id)
+            # Answer with the lead just added, even when the user handed it to someone outside their own view.
+            with unscoped(self.session):
+                lead = await self.get_lead(lead.id)
         await realtime_manager.broadcast(
             {
                 "event": "lead.created",
@@ -503,7 +516,6 @@ class LeadService(ServiceBase):
                     "id": str(lead.id),
                     "industry": lead.industry.value,
                     "owner_id": str(lead.assigned_to_id) if lead.assigned_to_id else None,
-                    "title": lead.title,
                 },
             }
         )
@@ -524,6 +536,14 @@ class LeadService(ServiceBase):
         # PUT change it to a mismatched vertical. (stage_code is likewise blocked,
         # at the endpoint.)
         update_data.pop("industry", None)
+        scope = request_scope(self.session)
+        if scope is not None and ("campaign" in update_data or "source" in update_data):
+            # A limited user can't move a lead outside their campaigns / sources (it would vanish from their view).
+            refusal = scope.refusal(
+                campaign=update_data.get("campaign", lead.campaign), source=update_data.get("source", lead.source)
+            )
+            if refusal:
+                raise ValidationError(refusal)
         if "campaign" in update_data:
             if campaign_key(update_data["campaign"]) == campaign_key(lead.campaign):
                 # Same campaign (any spelling) — leave it; an unchanged legacy/inactive value never 422s.
@@ -558,8 +578,10 @@ class LeadService(ServiceBase):
             )
         await self.commit()
         await self.invalidate_reporting_cache()
-        lead = await self.get_lead(lead.id)
-        await realtime_manager.broadcast({"event": "lead.updated", "payload": {"id": str(lead.id), "title": lead.title}})
+        # Answer with the saved lead, even when the user just handed it to someone outside their own view.
+        with unscoped(self.session):
+            lead = await self.get_lead(lead.id)
+        await realtime_manager.broadcast({"event": "lead.updated", "payload": {"id": str(lead.id)}})
         return lead
 
     async def set_intent(self, lead_id: UUID, intent: str, *, actor_id: UUID):
@@ -586,7 +608,7 @@ class LeadService(ServiceBase):
         await self.commit()
         await self.invalidate_reporting_cache()
         lead = await self.get_lead(lead.id)
-        await realtime_manager.broadcast({"event": "lead.updated", "payload": {"id": str(lead.id), "title": lead.title}})
+        await realtime_manager.broadcast({"event": "lead.updated", "payload": {"id": str(lead.id)}})
         return lead
 
     async def delete_lead(self, lead_id: UUID, *, actor_id: UUID):

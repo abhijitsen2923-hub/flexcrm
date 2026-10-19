@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import pagination_params, require_permissions
+from app.core.exceptions import ValidationError
 from app.core.permissions import PermissionCode
 from app.database.enums import UserRole
 from app.database.session import get_db_session
@@ -12,6 +13,7 @@ from app.schemas.common import MessageResponse, PaginatedResponse, PaginationPar
 from app.schemas.customer import CustomerCreate, CustomerFilterParams, CustomerRead, CustomerUpdate
 from app.schemas.user import UserCreate
 from app.services.customers import CustomerService
+from app.services.lead_scope import request_scope
 from app.services.users import UserService
 
 
@@ -44,6 +46,10 @@ async def create_customer(
     current_user=Depends(require_permissions(PermissionCode.CUSTOMER_MANAGE)),
     session: AsyncSession = Depends(get_db_session),
 ):
+    if request_scope(session) is not None:
+        # A user limited to some leads sees the customers made from those leads; one added by hand belongs to no
+        # lead, so it would vanish from their view the moment it's saved.
+        raise ValidationError("Your customers come from your leads (at Booked / Sold) — your access covers only some leads.")
     return await CustomerService(session).create_customer(payload, actor_id=current_user.id)
 
 

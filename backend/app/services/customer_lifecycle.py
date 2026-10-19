@@ -12,6 +12,7 @@ from uuid import UUID
 
 from sqlalchemy import func, select
 
+from app.core.tenancy import SKIP_LEAD_SCOPE
 from app.database.enums import CustomerLifecycleStage
 from app.models.activity import Activity
 from app.models.customer import Customer
@@ -28,10 +29,14 @@ async def recompute_ltv(session, customer: Customer) -> Decimal:
     booking's total consideration for this customer."""
     deals = (
         await session.execute(
-            select(func.coalesce(func.sum(Deal.amount), 0)).where(
+            select(func.coalesce(func.sum(Deal.amount), 0))
+            .where(
                 Deal.customer_id == customer.id,
                 Deal.is_deleted.is_(False),
             )
+            # The stored LTV covers ALL of the customer's business, also when a user limited to some leads
+            # (lead_scope) triggers the recompute.
+            .execution_options(**SKIP_LEAD_SCOPE)
         )
     ).scalar_one() or Decimal("0")
     renewals = (
@@ -59,11 +64,13 @@ async def _confirmed_booking_total(session, customer_id: UUID) -> Decimal:
 
     snapshots = (
         await session.execute(
-            select(Booking.pricing_snapshot).where(
+            select(Booking.pricing_snapshot)
+            .where(
                 Booking.customer_id == customer_id,
                 Booking.status == BookingStatus.confirmed,
                 Booking.is_deleted.is_(False),
             )
+            .execution_options(**SKIP_LEAD_SCOPE)  # every booking, see recompute_ltv
         )
     ).scalars().all()
 
@@ -140,8 +147,9 @@ def next_customer_number(highest_existing: int | None) -> int:
 
 
 async def claim_customer_number(session) -> int:
+    # Over EVERY customer, also for a user limited to some leads (lead_scope).
     current = (
-        await session.execute(select(func.max(Customer.customer_number)))
+        await session.execute(select(func.max(Customer.customer_number)).execution_options(**SKIP_LEAD_SCOPE))
     ).scalar_one()
     return next_customer_number(current)
 

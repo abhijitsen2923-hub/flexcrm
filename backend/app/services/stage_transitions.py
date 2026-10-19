@@ -22,6 +22,7 @@ from app.services.customer_promotion import CustomerPromotionService
 from app.services.lead_assignments import LeadAssignmentService
 from app.services.lead_documents import LeadDocumentService
 from app.services.lead_intents import LeadIntentService
+from app.services.lead_scope import user_can_see_lead
 from app.services.notifications import NotificationService
 from app.services.realtime import realtime_manager
 # Phase 4 wiring — auto-create SalesOrder + Invoice + Commission accrual on
@@ -247,6 +248,9 @@ class StageTransitionService(ServiceBase):
         # date → task creation; that wiring lives in the Tasks service so it stays
         # decoupled here.
         for mentioned_id in payload.mentions or []:
+            # Someone whose custom role doesn't cover this lead isn't told about it (title + comment).
+            if not await user_can_see_lead(self.session, mentioned_id, lead):
+                continue
             await self.notification_service.create_notification(
                 user_id=mentioned_id,
                 message=(

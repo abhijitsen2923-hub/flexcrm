@@ -3,6 +3,7 @@ from decimal import Decimal
 from app.core.cache import cache_client
 from app.core.config import get_settings
 from app.core.tenancy import get_schema
+from app.services.lead_scope import request_scope
 from app.repositories.dashboard import DashboardRepository
 from app.schemas.dashboard import (
     ChartPoint,
@@ -24,8 +25,11 @@ class DashboardService:
         # to another (shared Redis). Falls back to "public" when no schema is set.
         # Also scope by owner_id: a rep's own-leads view must never share a key with
         # the org-wide (owner/manager) view, or one would be served to the other.
+        # And by a custom role's lead limits (lead_scope): a limited user's figures are their own.
         scope = get_schema(self.session) or "public"
-        return f"dashboard:{name}:{scope}:{owner_id or 'all'}"
+        key = f"dashboard:{name}:{scope}:{owner_id or 'all'}"
+        lead_scope = request_scope(self.session)
+        return f"{key}:{lead_scope.fingerprint()}" if lead_scope is not None else key
 
     async def _read_cache(self, cache_key: str, model_cls):
         """Return a validated model from cache, or None on miss / stale entry.

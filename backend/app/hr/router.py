@@ -21,6 +21,7 @@ from app.hr.schemas import (
     TeamScorecard,
 )
 from app.hr.services import ScorecardService
+from app.services.lead_scope import refuse_if_limited
 from app.models.user import User
 
 
@@ -90,6 +91,7 @@ async def recompute_user(
     _: object = Depends(require_permissions(PermissionCode.HR_MANAGE)),
     session: AsyncSession = Depends(get_db_session),
 ):
+    refuse_if_limited(session, "Recomputing a scorecard")
     service = ScorecardService(session)
     # Mirror the nightly job: fold in call activity only when this org uses Callyzer.
     org_id = current_org(session)

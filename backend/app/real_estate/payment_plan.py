@@ -34,6 +34,7 @@ from app.core.permissions import PermissionCode
 from app.database.enums import BookingStatus
 from app.database.session import get_db_session
 from app.real_estate.models import Booking, BookingInvoice, PaymentReceipt, PaymentSchedule, Project, Tower, Unit
+from app.services.lead_scope import refuse_if_limited
 from app.real_estate.schemas import (
     EVENT_DUE_ON,
     BookingRead,
@@ -370,6 +371,7 @@ async def mark_milestone_reached(
 ):
     """Mark a stage / possession / registration milestone reached (whole project, or some towers) and raise its
     demand, due on the reached date, on every live booking there that holds it and hasn't had it yet."""
+    refuse_if_limited(session, "Marking a milestone")
     # The project lock serialises marks, undos and new bookings (they read the marks under a share lock), so a
     # booking can't slip in between the mark and the raise and miss its demand.
     project = await _lock_project(session, project_id)
@@ -495,6 +497,7 @@ async def undo_milestone_reached(
 ):
     """Take back a "reached" mark (tower_id absent = the whole-project mark) and remove the demands it raised that
     have nothing against them yet. Paid / receipted / invoiced demands stay and are counted as kept."""
+    refuse_if_limited(session, "Undoing a milestone")
     project = await _lock_project(session, project_id)
     scope = str(tower_id) if tower_id else None
     marks = [e for e in (project.milestones_reached or []) if isinstance(e, dict)]

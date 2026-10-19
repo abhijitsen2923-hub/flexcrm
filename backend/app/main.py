@@ -13,6 +13,7 @@ from app.core.exceptions import register_exception_handlers
 from app.core.logging import configure_logging, get_logger
 from app.core.platform_admin import ensure_platform_admin
 from app.core.tenancy import register_listeners as register_tenancy_listeners
+from app.services.lead_scope import register_lead_scope_listener
 from app.database.session import db_manager
 from app.services.tenant_provisioner import upgrade_all_tenant_schemas
 from app.middleware import RateLimitMiddleware, RequestContextMiddleware
@@ -30,6 +31,8 @@ configure_logging()
 logger = get_logger(__name__)
 # Wire the do_orm_execute + before_flush listeners. Idempotent.
 register_tenancy_listeners()
+# A custom role's "Data access" limits (app/services/lead_scope.py). Idempotent.
+register_lead_scope_listener()
 
 
 async def _background_tenant_upgrade() -> None:
