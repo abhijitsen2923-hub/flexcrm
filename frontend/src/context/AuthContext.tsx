@@ -11,7 +11,7 @@ import {
 import { clearResourceCache } from "../hooks/resourceCache";
 import { resetLeadImport } from "../hooks/useLeadImport";
 import { authService } from "../services/auth";
-import { proactiveRefresh, SESSION_EXPIRED_EVENT } from "../services/http";
+import { isSessionKeptError, proactiveRefresh, SESSION_EXPIRED_EVENT } from "../services/http";
 import { authStorage } from "../services/storage";
 import type { LoginPayload, RegisterPayload, StoredSession, User } from "../types";
 
@@ -68,9 +68,14 @@ export function AuthProvider({ children }: PropsWithChildren) {
       // must NOT log the user out — keep the cached profile and let a later
       // refresh hydrate it.
       const status = axios.isAxiosError(error) ? error.response?.status : undefined;
-      const sessionInvalid = !authStorage.get() || status === 401 || status === 403;
+      // A 401 whose login renewal only failed transiently (server unreachable) is NOT a sign-out.
+      const sessionInvalid =
+        !authStorage.get() || ((status === 401 || status === 403) && !isSessionKeptError(error));
       if (sessionInvalid) {
-        authStorage.clear();
+        // Ended by the http layer (it already cleared the saved login if it was this one — a newer login another
+        // tab saved must survive) → forget it here; refused by the server despite a live login → clear it.
+        if (authStorage.get()) authStorage.clear();
+        else authStorage.forgetInThisTab();
         resetLeadImport();
         clearResourceCache();
         setUser(null);
@@ -127,7 +132,9 @@ export function AuthProvider({ children }: PropsWithChildren) {
   // clean re-login (carrying `from`) instead of a broken, logged-in-looking app.
   useEffect(() => {
     const onExpired = () => {
-      authStorage.clear();
+      // This tab's copy only: the http layer already cleared the saved login if it was the one that ended — a
+      // newer login another tab saved must survive.
+      authStorage.forgetInThisTab();
       resetLeadImport();
       clearResourceCache();
       setUser(null);

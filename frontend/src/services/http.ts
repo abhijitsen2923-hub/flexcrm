@@ -1,6 +1,7 @@
 import axios, { AxiosError, type InternalAxiosRequestConfig } from "axios";
 
 import type { AuthResponse, StoredSession } from "../types";
+import { afterRefusal, beforeRenewal } from "../utils/sessionRenewal";
 import { authStorage } from "./storage";
 
 
@@ -69,7 +70,11 @@ function backoffDelay(attempt: number): number {
   return Math.min(500 * 2 ** (attempt - 1), 4000) + Math.floor(Math.random() * 250);
 }
 
-let refreshPromise: Promise<StoredSession | null> | null = null;
+// How a login renewal ended: a fresh session; "transient" (server unreachable / cold — the saved login is kept and
+// the request just fails); or "ended" (the refresh token was refused — sign in again).
+export type RenewalOutcome = { session: StoredSession } | { status: "transient" } | { status: "ended" };
+
+let refreshPromise: Promise<RenewalOutcome> | null = null;
 
 function toStoredSession(payload: AuthResponse): StoredSession {
   return {
@@ -80,36 +85,76 @@ function toStoredSession(payload: AuthResponse): StoredSession {
   };
 }
 
-async function refreshSession(currentSession: StoredSession): Promise<StoredSession | null> {
+async function renewOnce(mine: StoredSession): Promise<RenewalOutcome> {
+  // Another tab may have renewed while this one waited for the lock: use its session (or its refresh token —
+  // ours has been replaced) rather than presenting a replaced token. See utils/sessionRenewal.
+  const before = beforeRenewal(mine, authStorage.getSaved(), Date.now());
+  if (before.kind === "adopt") {
+    authStorage.adopt(before.session);
+    return { session: before.session };
+  }
+  const refreshToken = before.refreshToken;
   for (let attempt = 1; ; attempt += 1) {
     try {
-      const { data } = await refreshClient.post<AuthResponse>("/auth/refresh", {
-        refresh_token: currentSession.refreshToken
-      });
+      const { data } = await refreshClient.post<AuthResponse>("/auth/refresh", { refresh_token: refreshToken });
       const refreshedSession = toStoredSession(data);
       authStorage.set(refreshedSession);
-      return refreshedSession;
+      return { session: refreshedSession };
     } catch (error) {
-      // Transient blip (no response / 5xx): retry, and if retries are exhausted
-      // keep the stored session so the user isn't logged out over a cold start.
+      // Transient blip (no response / 5xx): retry with the same token — the server accepts a just-replaced token
+      // for a few seconds, so a renewal whose reply was lost still succeeds. If retries run out, keep the saved
+      // login: the user isn't signed out over a cold start, the request just fails.
       if (axios.isAxiosError(error) && isTransientError(error)) {
         if (attempt <= MAX_TRANSIENT_RETRIES) {
           await new Promise((resolve) => setTimeout(resolve, backoffDelay(attempt)));
           continue;
         }
-        return null;
+        return { status: "transient" };
       }
-      // Genuine auth failure (expired/invalid refresh token) → clear and log out.
-      authStorage.clear();
-      return null;
+      // Refused. If another tab renewed meanwhile, its saved session is the live one; otherwise the login ended —
+      // and the saved copy is cleared only if it still holds the refused token.
+      const after = afterRefusal(refreshToken, authStorage.getSaved());
+      if (after.kind === "adopt") {
+        authStorage.adopt(after.session);
+        return { session: after.session };
+      }
+      authStorage.endIfCurrent(refreshToken, after.clearSaved);
+      return { status: "ended" };
     }
   }
+}
+
+const RENEWAL_LOCK = "flexcrm-auth-refresh";
+
+/**
+ * Renew the login — one tab at a time (Web Locks), so tabs never race each other with the same refresh token; the
+ * ones that waited pick up the winner's session in renewOnce. Without Web Locks (some in-app webviews) it renews
+ * directly; the server's grace period and the shared-storage checks still keep the user signed in.
+ */
+async function refreshSession(currentSession: StoredSession): Promise<RenewalOutcome> {
+  const locks = typeof navigator !== "undefined" ? navigator.locks : undefined;
+  if (locks?.request) {
+    try {
+      return await locks.request(RENEWAL_LOCK, () => renewOnce(authStorage.get() ?? currentSession));
+    } catch {
+      /* lock manager unavailable (e.g. an opaque origin) — renew directly */
+    }
+  }
+  return renewOnce(currentSession);
 }
 
 // Broadcast an unrecoverable auth failure so AuthContext can clear state and
 // route the user to a clean "session ended, sign in again" screen — instead of
 // leaving a logged-in-looking app whose writes fail with "Missing bearer token".
 export const SESSION_EXPIRED_EVENT = "flexcrm:session-expired";
+
+// Marks a request that failed because the login couldn't be renewed for a TRANSIENT reason (server unreachable /
+// cold): the login is still good, so callers must not treat the 401 as "signed out".
+const SESSION_KEPT = Symbol("flexcrm.session-kept");
+
+export function isSessionKeptError(error: unknown): boolean {
+  return Boolean(error && typeof error === "object" && (error as Record<symbol, unknown>)[SESSION_KEPT]);
+}
 export const SESSION_EXPIRED_FLAG = "flexcrm.session-expired";
 
 function notifySessionExpired(): void {
@@ -139,10 +184,32 @@ export async function proactiveRefresh(): Promise<void> {
   if (Number.isNaN(expiresAt) || expiresAt - Date.now() > 90_000) {
     return; // still comfortably valid
   }
+  await freshSession(90_000);
+}
+
+/**
+ * The session, renewed first when its access token expires within `marginMs` — through the ONE shared renewal
+ * (single-flight in this tab, one tab at a time across tabs). Everything that needs a fresh token uses this (the
+ * HTTP layer, the realtime socket), so two parts of the app never renew with the same token. A login that really
+ * ended fires the session-expired event; a transient failure keeps the login.
+ */
+export async function freshSession(marginMs: number): Promise<RenewalOutcome | { status: "signed-out" }> {
+  const session = authStorage.get();
+  if (!session?.refreshToken) {
+    return { status: "signed-out" };
+  }
+  const expiresAt = Date.parse(session.accessTokenExpiresAt ?? "");
+  if (session.accessToken && !Number.isNaN(expiresAt) && expiresAt - Date.now() > marginMs) {
+    return { session };
+  }
   refreshPromise ??= refreshSession(session).finally(() => {
     refreshPromise = null;
   });
-  await refreshPromise;
+  const outcome = await refreshPromise;
+  if ("status" in outcome && outcome.status === "ended") {
+    notifySessionExpired();
+  }
+  return outcome;
 }
 
 apiClient.interceptors.request.use((config) => {
@@ -184,7 +251,15 @@ apiClient.interceptors.response.use(
       return Promise.reject(error);
     }
 
-    const session = authStorage.get();
+    let session = authStorage.get();
+    if (!session?.refreshToken) {
+      // This tab has none, but another tab may have saved a login since — use it.
+      const saved = authStorage.getSaved();
+      if (saved?.refreshToken) {
+        authStorage.adopt(saved);
+        session = saved;
+      }
+    }
     if (!session?.refreshToken) {
       // No way to recover (session gone / no refresh token) — clear and send the
       // app to a clean re-login rather than surfacing a raw auth error.
@@ -198,15 +273,17 @@ apiClient.interceptors.response.use(
       refreshPromise = null;
     });
 
-    const refreshedSession = await refreshPromise;
-    if (!refreshedSession?.accessToken) {
-      // Refresh failed (refresh token expired/invalid) — treat as session ended.
-      notifySessionExpired();
+    const outcome = await refreshPromise;
+    if (!("session" in outcome)) {
+      // "ended": the refresh token was refused — session over, sign in again. "transient": the server couldn't be
+      // reached even after retries — keep the login and let this request fail like any network error.
+      if (outcome.status === "ended") notifySessionExpired();
+      else (error as unknown as Record<symbol, unknown>)[SESSION_KEPT] = true;
       return Promise.reject(error);
     }
 
     originalRequest.headers = originalRequest.headers ?? {};
-    originalRequest.headers.Authorization = `Bearer ${refreshedSession.accessToken}`;
+    originalRequest.headers.Authorization = `Bearer ${outcome.session.accessToken}`;
     return apiClient(originalRequest);
   }
 );

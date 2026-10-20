@@ -9,9 +9,7 @@ import {
   type PropsWithChildren
 } from "react";
 
-import { authService } from "../services/auth";
-import { authStorage } from "../services/storage";
-import type { StoredSession } from "../types";
+import { freshSession } from "../services/http";
 
 
 export type RealtimeStatus = "idle" | "connecting" | "online" | "offline";
@@ -41,27 +39,10 @@ const RECONNECT_DELAYS_MS = [1000, 2000, 4000, 8000, 15000];
 const REFRESH_BEFORE_EXPIRY_MS = 60_000;
 
 
-async function ensureFreshSession(): Promise<StoredSession | null> {
-  const session = authStorage.get();
-  if (!session) {
-    return null;
-  }
-
-  const expiresAt = new Date(session.accessTokenExpiresAt).getTime();
-  if (!Number.isNaN(expiresAt) && expiresAt - Date.now() > REFRESH_BEFORE_EXPIRY_MS) {
-    return session;
-  }
-
-  try {
-    await authService.refresh({ refresh_token: session.refreshToken });
-    return authStorage.get();
-  } catch {
-    // Refresh token itself is invalid/expired — the user is effectively logged
-    // out. Clear local state so the next protected HTTP call redirects to login.
-    authStorage.clear();
-    return null;
-  }
-}
+// The socket renews through the app's ONE shared renewal (services/http freshSession) — never its own: after a
+// deploy the socket reconnects at the same moment the page reloads, and two renewals with the same refresh token
+// used to sign the user out. A login that really ended is handled there; a server that can't be reached just
+// means "reconnect later".
 
 
 function toWsBase(input: string): string | null {
@@ -138,15 +119,28 @@ export function RealtimeProvider({ children }: PropsWithChildren) {
     }
     setStatus("connecting");
 
-    const session = await ensureFreshSession();
+    const fresh = await freshSession(REFRESH_BEFORE_EXPIRY_MS);
     if (closedByUsRef.current) {
       // Provider unmounted during the refresh round-trip.
       return;
     }
-    if (!session?.accessToken) {
+    if (!("session" in fresh)) {
+      if (fresh.status === "transient") {
+        // Server unreachable for now (cold start / deploy) — the login is kept; try again later.
+        setStatus("offline");
+        const attempt = reconnectAttemptsRef.current;
+        const delay = RECONNECT_DELAYS_MS[Math.min(attempt, RECONNECT_DELAYS_MS.length - 1)];
+        reconnectAttemptsRef.current = attempt + 1;
+        reconnectTimerRef.current = window.setTimeout(() => {
+          reconnectTimerRef.current = null;
+          void connect();
+        }, delay);
+        return;
+      }
       setStatus("idle");
       return;
     }
+    const session = fresh.session;
 
     const url = resolveWebsocketUrl(session.accessToken, lastEventIdRef.current);
     if (!url) {
