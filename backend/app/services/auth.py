@@ -213,8 +213,18 @@ class AuthService(ServiceBase):
 
         with bypass(self.session):
             stored_token = await self.refresh_token_repository.get_active(token_payload["jti"])
+            renewed_already = False
             if stored_token is None:
-                raise AuthenticationError("Refresh token is no longer valid.")
+                # The same renewal arriving again moments after it went through — its reply lost in a deploy or on a
+                # bad network, or two tabs renewing at once: honour it inside a short grace period instead of
+                # signing the user out. A token ended on purpose (sign-out, user removed) never gets here.
+                stored_token = await self.refresh_token_repository.get_recently_rotated(
+                    token_payload["jti"], grace_seconds=get_settings().refresh_token_reuse_grace_seconds
+                )
+                if stored_token is None:
+                    raise AuthenticationError("Refresh token is no longer valid.")
+                renewed_already = True
+                logger.info("refresh token renewed again within the grace period (user %s)", token_payload["sub"])
 
             user = await self.user_repository.get(UUID(token_payload["sub"]))
             if user is None or user.status != UserStatus.active:
@@ -222,7 +232,8 @@ class AuthService(ServiceBase):
             if not user.is_platform_admin:
                 await self._assert_org_usable(user.organization_id)
 
-            await self.refresh_token_repository.revoke(stored_token)
+            if not renewed_already:
+                await self.refresh_token_repository.revoke(stored_token)
             token_response = await self._issue_tokens(
                 user.id,
                 user.role.value,
@@ -247,10 +258,15 @@ class AuthService(ServiceBase):
             raise AuthenticationError("Invalid refresh token.")
 
         with bypass(self.session):
-            stored_token = await self.refresh_token_repository.get_active(token_payload["jti"])
+            # Ended for good — and the user's tokens still inside the renewal grace period with it, so the token
+            # renewed just before signing out can't bring the session back.
+            stored_token = await self.refresh_token_repository.get_by_token_id(token_payload["jti"])
             if stored_token is None:
                 return
-            await self.refresh_token_repository.revoke(stored_token)
+            await self.refresh_token_repository.end(stored_token)
+            await self.refresh_token_repository.end_recent_rotations(
+                stored_token.user_id, grace_seconds=get_settings().refresh_token_reuse_grace_seconds
+            )
         await self.commit()
 
     async def _assert_org_usable(self, org_id: UUID | None) -> None:

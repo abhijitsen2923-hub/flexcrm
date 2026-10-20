@@ -34,6 +34,10 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     access_token_expires_minutes: int = 15
     refresh_token_expires_days: int = 7
+    # A refresh token replaced by a renewal still renews for this long: the same renewal arriving twice (a reply lost
+    # in a deploy / on a bad network, two tabs renewing at once) must not sign the user out. Sign-out and removing a
+    # user end it at once. Same idea as Okta's rotation grace period / Supabase's reuse interval.
+    refresh_token_reuse_grace_seconds: int = Field(default=30, ge=0, le=60)
 
     redis_url: str = "redis://localhost:6379/0"
     cache_ttl_seconds: int = 300
