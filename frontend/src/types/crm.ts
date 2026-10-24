@@ -121,6 +121,12 @@ export interface UserPermissions {
   effective: string[];
 }
 
+export interface SubscriptionConfig {
+  reminder_enabled: boolean;
+  end_date?: string | null;
+  provider_contact?: string | null;
+}
+
 export interface Organization {
   id: string;
   name: string;
@@ -130,6 +136,7 @@ export interface Organization {
   features: Record<string, unknown> | null;
   allowed_currencies: string[];
   modules: Record<ModuleKey, boolean>;
+  subscription?: SubscriptionConfig | null;
   is_active: boolean;
   is_deleted: boolean;
   created_at: string;

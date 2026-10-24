@@ -56,3 +56,9 @@ flex-crm.zip
 .dev.vars*
 !.dev.vars.example
 !.env.example
+
+# Customer source data (spreadsheets, land import working files). Never commit.
+*.xlsx
+*.xls
+/data/
+backend/scripts/land_import/_work/

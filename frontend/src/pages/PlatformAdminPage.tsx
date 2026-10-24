@@ -5,7 +5,8 @@ import { Navigate } from "react-router-dom";
 import { Button, ConfirmDialog, EmptyState, LoadingBlock, Modal, useToast } from "../components";
 import { useAuth } from "../hooks/useAuth";
 import { adminService } from "../services/admin";
-import type { ModuleKey, Organization } from "../types";
+import type { ModuleKey, Organization, SubscriptionConfig } from "../types";
+import { calculateDaysRemaining } from "../utils/subscriptionReminder";
 import { extractErrorMessage } from "../utils/errors";
 
 type Industry = Organization["business_type"];
@@ -148,6 +149,108 @@ function ModuleGroup({
   );
 }
 
+function OrgSubscriptionCardSection({
+  org,
+  disabled,
+  onSave,
+}: {
+  org: Organization;
+  disabled: boolean;
+  onSave: (sub: SubscriptionConfig) => Promise<void>;
+}) {
+  const [enabled, setEnabled] = useState(org.subscription?.reminder_enabled ?? false);
+  const [endDate, setEndDate] = useState(org.subscription?.end_date ?? "");
+  const [contact, setContact] = useState(org.subscription?.provider_contact ?? "");
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    setEnabled(org.subscription?.reminder_enabled ?? false);
+    setEndDate(org.subscription?.end_date ?? "");
+    setContact(org.subscription?.provider_contact ?? "");
+  }, [org.subscription]);
+
+  const days = calculateDaysRemaining(endDate);
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      await onSave({
+        reminder_enabled: enabled,
+        end_date: endDate || null,
+        provider_contact: contact || null,
+      });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div style={{ marginTop: "0.875rem", paddingTop: "0.75rem", borderTop: "1px solid var(--border-color, #334155)" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.375rem" }}>
+        <span className="text-xs muted" style={{ textTransform: "uppercase", letterSpacing: "0.06em", fontWeight: 600 }}>
+          Payment Reminder
+        </span>
+        <label style={{ display: "flex", alignItems: "center", gap: "0.375rem", cursor: disabled ? "not-allowed" : "pointer" }}>
+          <input
+            type="checkbox"
+            checked={enabled}
+            disabled={disabled || saving}
+            onChange={(e) => setEnabled(e.target.checked)}
+            style={{ width: 14, height: 14 }}
+          />
+          <span style={{ fontSize: "0.75rem", fontWeight: 500, color: enabled ? "#f59e0b" : "#94a3b8" }}>
+            {enabled ? "Enabled" : "Off"}
+          </span>
+        </label>
+      </div>
+
+      {enabled && (
+        <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem", marginTop: "0.5rem" }}>
+          <div>
+            <label style={{ fontSize: "0.75rem", color: "#94a3b8", display: "block", marginBottom: "0.25rem" }}>
+              End Date {days !== null && <strong style={{ color: days <= 3 ? "#ef4444" : "#f59e0b" }}>({days <= 0 ? "Expired" : `${days}d left`})</strong>}
+            </label>
+            <input
+              type="date"
+              className="input"
+              value={endDate}
+              disabled={disabled || saving}
+              onChange={(e) => setEndDate(e.target.value)}
+              style={{ padding: "0.25rem 0.5rem", fontSize: "0.8125rem", width: "100%" }}
+            />
+          </div>
+
+          <div>
+            <label style={{ fontSize: "0.75rem", color: "#94a3b8", display: "block", marginBottom: "0.25rem" }}>
+              Provider Contact Info
+            </label>
+            <input
+              type="text"
+              className="input"
+              placeholder="billing@flexcrm.io | +91 98765 43210"
+              value={contact}
+              disabled={disabled || saving}
+              onChange={(e) => setContact(e.target.value)}
+              style={{ padding: "0.25rem 0.5rem", fontSize: "0.8125rem", width: "100%" }}
+            />
+          </div>
+
+          <Button
+            variant="secondary"
+            size="sm"
+            disabled={disabled || saving}
+            loading={saving}
+            onClick={() => void handleSave()}
+            style={{ alignSelf: "flex-start", marginTop: "0.25rem" }}
+          >
+            Save Reminder
+          </Button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function PlatformAdminPage() {
   const { user } = useAuth();
   // The guard lives in its own component: returning early inside the console, before its hooks, breaks
@@ -250,8 +353,9 @@ function PlatformAdminConsole() {
     setSaving((prev) => ({ ...prev, [org.id]: true }));
     try {
       await adminService.purgeOrganization(org.id);
+      // Once purged the schema is gone; remove it even when "Show archived" is ticked.
       setOrgs((prev) => prev.filter((o) => o.id !== org.id));
-      toast.success("Client permanently deleted", `${org.name} and all its data were removed.`);
+      toast.success("Client permanently deleted", `${org.name} and all of its data were removed.`);
       closePurge();
     } catch (err) {
       toast.error("Permanent delete failed", extractErrorMessage(err));
@@ -261,8 +365,10 @@ function PlatformAdminConsole() {
   };
 
   const handleToggle = async (org: Organization, key: ModuleKey, enabled: boolean) => {
-    const updated = { ...org.modules, [key]: enabled };
-    setOrgs((prev) => prev.map((o) => (o.id === org.id ? { ...o, modules: updated } : o)));
+    // Optimistic update
+    setOrgs((prev) =>
+      prev.map((o) => (o.id === org.id ? { ...o, modules: { ...o.modules, [key]: enabled } } : o)),
+    );
     setSaving((prev) => ({ ...prev, [org.id]: true }));
     try {
       const fresh = await adminService.updateOrgModules(org.id, { [key]: enabled });
@@ -270,6 +376,22 @@ function PlatformAdminConsole() {
     } catch (err) {
       setOrgs((prev) => prev.map((o) => (o.id === org.id ? { ...o, modules: org.modules } : o)));
       toast.error("Failed to update module access", extractErrorMessage(err));
+    } finally {
+      setSaving((prev) => ({ ...prev, [org.id]: false }));
+    }
+  };
+
+  const handleSaveSubscription = async (org: Organization, sub: SubscriptionConfig) => {
+    setSaving((prev) => ({ ...prev, [org.id]: true }));
+    try {
+      const fresh = await adminService.updateOrgSubscription(org.id, sub);
+      setOrgs((prev) => prev.map((o) => (o.id === org.id ? fresh : o)));
+      toast.success(
+        "Subscription saved",
+        `Payment reminder ${sub.reminder_enabled ? "enabled" : "disabled"} for ${org.name}.`
+      );
+    } catch (err) {
+      toast.error("Failed to save subscription reminder", extractErrorMessage(err));
     } finally {
       setSaving((prev) => ({ ...prev, [org.id]: false }));
     }
@@ -503,6 +625,12 @@ function PlatformAdminConsole() {
                     onToggle={(key, val) => void handleToggle(org, key, val)}
                   />
                 )}
+
+                <OrgSubscriptionCardSection
+                  org={org}
+                  disabled={busy || locked}
+                  onSave={(sub) => handleSaveSubscription(org, sub)}
+                />
               </div>
             );
           })}

@@ -8,7 +8,12 @@ from app.core.exceptions import NotFoundError
 from app.core.permissions import PermissionCode
 from app.database.session import get_db_session
 from app.models.organization import Organization
-from app.schemas.organization import OrganizationRead, OrganizationUpdate, get_modules
+from app.schemas.organization import (
+    OrganizationRead,
+    OrganizationUpdate,
+    get_modules,
+    get_subscription_config,
+)
 
 
 router = APIRouter()
@@ -25,6 +30,7 @@ def _to_read(org: Organization) -> OrganizationRead:
         features=org.features,
         allowed_currencies=allowed_currencies_for_org(org),
         modules=get_modules(org.features),
+        subscription=get_subscription_config(org.features),
         created_at=org.created_at,
         updated_at=org.updated_at,
     )

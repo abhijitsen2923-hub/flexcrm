@@ -31,6 +31,24 @@ def get_modules(features: dict | None) -> dict[str, bool]:
     return {key: bool(f.get(f"module.{key}", False)) for key in MODULE_KEYS}
 
 
+class SubscriptionConfig(ORMModel):
+    reminder_enabled: bool = False
+    end_date: str | None = None  # YYYY-MM-DD
+    provider_contact: str | None = None
+
+
+def get_subscription_config(features: dict | None) -> SubscriptionConfig:
+    f = features or {}
+    sub = f.get("subscription")
+    if isinstance(sub, dict):
+        return SubscriptionConfig(
+            reminder_enabled=bool(sub.get("reminder_enabled", False)),
+            end_date=sub.get("end_date"),
+            provider_contact=sub.get("provider_contact"),
+        )
+    return SubscriptionConfig()
+
+
 class OrganizationRead(ORMModel):
     id: UUID
     name: str
@@ -43,6 +61,8 @@ class OrganizationRead(ORMModel):
     allowed_currencies: list[str] = []
     # Computed at response time — which optional modules are enabled for this org.
     modules: dict[str, bool] = {}
+    # Subscription payment reminder config (computed from features["subscription"])
+    subscription: SubscriptionConfig | None = None
     # Lifecycle state (platform admin): active = not suspended; is_deleted = archived.
     is_active: bool = True
     is_deleted: bool = False
@@ -69,3 +89,10 @@ class SetOrgStatusRequest(ORMModel):
 class SetFinanceModeRequest(ORMModel):
     """Payload for PATCH /admin/organizations/{id}/finance-mode."""
     finance_business_mode: FinanceBusinessMode
+
+
+class UpdateSubscriptionRequest(ORMModel):
+    """Payload for PATCH /admin/organizations/{id}/subscription."""
+    reminder_enabled: bool = False
+    end_date: str | None = None
+    provider_contact: str | None = None

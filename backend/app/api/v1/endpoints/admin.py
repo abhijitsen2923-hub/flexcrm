@@ -23,7 +23,9 @@ from app.schemas.organization import (
     SetFinanceModeRequest,
     SetOrgStatusRequest,
     UpdateModulesRequest,
+    UpdateSubscriptionRequest,
     get_modules,
+    get_subscription_config,
 )
 from app.services.tenant_provisioner import _SAFE_SCHEMA, upgrade_all_tenant_schemas
 from app.services.tenant_repair import repair_tenant_enums
@@ -65,6 +67,7 @@ def _to_read(org: Organization) -> OrganizationRead:
         features=org.features,
         allowed_currencies=allowed_currencies_for_org(org),
         modules=get_modules(org.features),
+        subscription=get_subscription_config(org.features),
         is_active=org.is_active,
         is_deleted=org.is_deleted,
         created_at=org.created_at,
@@ -142,7 +145,7 @@ async def update_org_modules(
         org = await _load_org(session, org_id)
 
         # Merge module flags into the existing features dict, preserving any
-        # non-module keys (e.g. currency.options).
+        # non-module keys (e.g. currency.options, subscription).
         features = dict(org.features or {})
         for key, enabled in payload.modules.items():
             if key in MODULE_KEYS:
@@ -151,6 +154,29 @@ async def update_org_modules(
 
         await session.commit()
         await session.refresh(org)
+    return _to_read(org)
+
+
+@router.patch("/organizations/{org_id}/subscription", response_model=OrganizationRead)
+async def update_org_subscription(
+    org_id: UUID,
+    payload: UpdateSubscriptionRequest,
+    _=Depends(require_platform_admin()),
+    session: AsyncSession = Depends(get_db_session),
+):
+    """Enable or configure the subscription payment reminder for an organization."""
+    with bypass(session):
+        org = await _load_org(session, org_id)
+
+        features = dict(org.features or {})
+        features["subscription"] = payload.model_dump()
+        org.features = features
+
+        await session.commit()
+        await session.refresh(org)
+
+    # Invalidate cached context so tenant picks up changes immediately
+    await cache_client.delete(f"schema:{org_id}")
     return _to_read(org)
 
 

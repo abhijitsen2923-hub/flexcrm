@@ -33,6 +33,14 @@ Everything in §§1–7 still holds structurally; these are the deltas since the
   uncommitted); (2) a frontend deploy crashed already-open tabs via stale hashed chunks + SPA fallback (fixed
   with auto-reload, uncommitted).
 
+- **Tenant Subscription Payment Reminder (2026-10-24)**: Top-of-screen announcement bar for tenants alerting
+  them of upcoming or expired subscriptions (`{days}` left). Dismissable via `[X]` per session/view, reappearing
+  upon page refresh or re-login. Configured per-tenant by platform admins via `/admin`
+  (`PATCH /api/v1/admin/organizations/{id}/subscription`), stored in `Organization.features["subscription"]`
+  (no DB migration). Component `<SubscriptionReminderBanner />` mounted in `AppLayout.tsx`. Tested by
+  `backend/tests/test_subscription_reminder.py` and `frontend/tests/subscriptionReminder.test.ts`.
+  Full documentation in `docs/subscription-payment-reminder.md`.
+
 **⚠️ Deploy reality:** because the GitHub→Cloud Build CD trigger is broken, the **prod backend is well behind
 `origin/main`** — Finance, Callyzer, and the real-estate/finance batch are all pushed but **un-deployed**
 (current tenant migration head on origin is **t043**; prod is older). A manual `gcloud run deploy` from

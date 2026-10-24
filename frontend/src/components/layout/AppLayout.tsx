@@ -5,6 +5,7 @@ import { LeadImportStatus } from "../imports/LeadImportStatus";
 import { InAppBrowserBanner } from "./InAppBrowserBanner";
 import { MobileBottomNav } from "./MobileBottomNav";
 import { Sidebar } from "./Sidebar";
+import { SubscriptionReminderBanner } from "./SubscriptionReminderBanner";
 import { Topbar } from "./Topbar";
 
 
@@ -41,6 +42,7 @@ export function AppLayout() {
       />
       <Sidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
       <div className="app-main">
+        <SubscriptionReminderBanner />
         <Topbar onMenuClick={() => setSidebarOpen(true)} />
         <InAppBrowserBanner />
         <main className="app-content">

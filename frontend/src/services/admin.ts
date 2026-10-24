@@ -1,8 +1,12 @@
-import type { ModuleKey, Organization } from "../types";
+import type { ModuleKey, Organization, SubscriptionConfig } from "../types";
 import { apiClient } from "./http";
 
 
 export const adminService = {
+  async updateOrgSubscription(orgId: string, subscription: SubscriptionConfig): Promise<Organization> {
+    const { data } = await apiClient.patch<Organization>(`/admin/organizations/${orgId}/subscription`, subscription);
+    return data;
+  },
   async listOrganizations(includeArchived = false): Promise<Organization[]> {
     const { data } = await apiClient.get<Organization[]>("/admin/organizations", {
       params: { include_archived: includeArchived },
