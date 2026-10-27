@@ -27,6 +27,12 @@ FlexCRM allows platform administrators (SaaS owners) to display a prominent paym
 - Platform admins can configure custom contact details (e.g. `billing@flexcrm.io | +91 98765 43210`).
 - Staff can click **"Contact Provider"** to open a modal displaying the exact billing contact channel without disrupting their work.
 
+### 4. Responsive Mobile Design
+- On desktop view, the notification renders as a sleek top bar with inline action buttons.
+- On mobile viewports (`< 640px`), the banner automatically transitions into a stacked layout (`flex-direction: column`):
+  - Notice text wraps completely across lines without truncation (`overflow-wrap: anywhere; word-break: break-word`).
+  - Action buttons ("Contact Provider", dismiss `[X]`) span cleanly at the bottom for easy touch access.
+
 ---
 
 ## Platform Admin Controls (`/admin`)

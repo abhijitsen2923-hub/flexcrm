@@ -28,68 +28,29 @@ export function SubscriptionReminderBanner() {
     else daysLabel = `${days} days`;
   }
 
-  const bannerStyle: React.CSSProperties = {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: "0.75rem",
-    padding: "0.5rem 1rem",
-    fontSize: "0.875rem",
-    lineHeight: "1.25rem",
-    background: isExpired
-      ? "linear-gradient(90deg, #7f1d1d 0%, #991b1b 100%)"
-      : isUrgent
-      ? "linear-gradient(90deg, #78350f 0%, #92400e 100%)"
-      : "linear-gradient(90deg, #451a03 0%, #78350f 100%)",
-    color: "#fef3c7",
-    borderBottom: isExpired ? "1px solid #b91c1c" : "1px solid #d97706",
-    zIndex: 40,
-    boxShadow: "0 2px 4px rgba(0, 0, 0, 0.15)",
-  };
-
-  const badgeStyle: React.CSSProperties = {
-    display: "inline-block",
-    padding: "0.125rem 0.375rem",
-    borderRadius: "0.25rem",
-    fontWeight: 700,
-    fontSize: "0.8125rem",
-    background: isExpired ? "#ef4444" : isUrgent ? "#f59e0b" : "rgba(245, 158, 11, 0.25)",
-    color: isExpired || isUrgent ? "#18181b" : "#fef3c7",
-    margin: "0 0.25rem",
-  };
+  const urgencyClass = isExpired ? "expired" : isUrgent ? "urgent" : "warning";
+  const iconColor = isExpired ? "#fca5a5" : "#fcd34d";
 
   return (
     <>
-      <div style={bannerStyle} role="alert">
-        <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", flex: 1, minWidth: 0 }}>
-          <AlertTriangle size={18} style={{ flexShrink: 0, color: isExpired ? "#fca5a5" : "#fcd34d" }} />
-          <div style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+      <div className={`sub-reminder-banner sub-reminder-banner--${urgencyClass}`} role="alert">
+        <div className="sub-reminder-banner__content">
+          <AlertTriangle size={18} className="sub-reminder-banner__icon" style={{ color: iconColor }} />
+          <div className="sub-reminder-banner__text">
             <span>Your subscription is about to end in </span>
-            <span style={badgeStyle}>{daysLabel}</span>.
-            <span style={{ opacity: 0.95, marginLeft: "0.25rem" }}>
-              Kindly contact with your provider for make the paymant to use the application semmlessly.
+            <span className={`sub-reminder-banner__badge sub-reminder-banner__badge--${urgencyClass}`}>{daysLabel}</span>.
+            <span>
+              {" "}Kindly contact with your provider for make the paymant to use the application semmlessly.
             </span>
           </div>
         </div>
 
-        <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", flexShrink: 0 }}>
+        <div className="sub-reminder-banner__actions">
           {sub.provider_contact && (
             <button
               type="button"
+              className="sub-reminder-banner__contact-btn"
               onClick={() => setShowContactModal(true)}
-              style={{
-                display: "inline-flex",
-                alignItems: "center",
-                gap: "0.25rem",
-                padding: "0.25rem 0.625rem",
-                borderRadius: "0.375rem",
-                fontSize: "0.75rem",
-                fontWeight: 600,
-                background: "rgba(255, 255, 255, 0.15)",
-                color: "#ffffff",
-                border: "1px solid rgba(255, 255, 255, 0.3)",
-                cursor: "pointer",
-              }}
             >
               <PhoneCall size={12} />
               <span>Contact Provider</span>
@@ -98,20 +59,10 @@ export function SubscriptionReminderBanner() {
 
           <button
             type="button"
+            className="sub-reminder-banner__close-btn"
             onClick={() => setDismissed(true)}
             aria-label="Dismiss payment reminder"
             title="Dismiss for this session (reappears on refresh)"
-            style={{
-              background: "transparent",
-              border: "none",
-              color: "rgba(254, 243, 199, 0.8)",
-              cursor: "pointer",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              padding: "0.25rem",
-              borderRadius: "0.25rem",
-            }}
           >
             <X size={16} />
           </button>
